@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">raw_edit</string>
+    <string name="render_channel_name">Video rendering</string>
+    <string name="render_channel_desc">Shows live progress while rendering typography reels on device.</string>
+</resources>
