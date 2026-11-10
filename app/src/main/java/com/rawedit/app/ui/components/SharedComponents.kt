@@ -2,9 +2,6 @@ package com.rawedit.app.ui.components
 
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.animateColorAsState
-import androidx.compose.animation.core.animateDpAsState
-import androidx.compose.animation.core.animateFloatAsState
-import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.expandHorizontally
 import androidx.compose.animation.fadeIn
@@ -20,10 +17,9 @@ import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.IntrinsicSize
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.foundation.layout.defaultMinSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.navigationBarsPadding
@@ -35,23 +31,15 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateMapOf
-import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.layout.ContentScale
-import androidx.compose.ui.layout.onGloballyPositioned
-import androidx.compose.ui.layout.positionInParent
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
@@ -69,7 +57,6 @@ import com.rawedit.app.ui.motion.RawEasings
 import com.rawedit.app.ui.motion.RawPressButton
 import com.rawedit.app.ui.motion.rememberAnimationsEnabled
 import com.rawedit.app.ui.theme.InterFontFamily
-import com.rawedit.app.ui.theme.JetBrainsMonoFamily
 import com.rawedit.app.ui.theme.RawColors
 import com.rawedit.app.ui.theme.RawTypography
 import java.io.File
@@ -94,7 +81,7 @@ fun RawEditLogoBadge(
         modifier = modifier,
         verticalAlignment = Alignment.CenterVertically
     ) {
-        val h = (logoSize.value * (22f / 28f)).dp
+        val h = logoSize * (22f / 28f)
         PixelRawEditLogo(
             width = logoSize + 6.dp,
             height = h + 5.dp
@@ -117,7 +104,7 @@ fun UserAvatarView(
     size: Dp = 44.dp,
     onClick: (() -> Unit)? = null
 ) {
-    val hasFile = photoPath != null && File(photoPath).exists()
+    val hasFile = remember(photoPath) { photoPath != null && File(photoPath).exists() }
 
     Box(
         modifier = Modifier
@@ -128,13 +115,16 @@ fun UserAvatarView(
             .then(if (onClick != null) Modifier.clickable(onClick = onClick) else Modifier),
         contentAlignment = Alignment.Center
     ) {
-        if (hasFile) {
+        if (hasFile && photoPath != null) {
             val context = LocalContext.current
-            AsyncImage(
-                model = ImageRequest.Builder(context)
-                    .data(File(photoPath!!))
+            val req = remember(photoPath) {
+                ImageRequest.Builder(context)
+                    .data(File(photoPath))
                     .size(256, 256)
-                    .build(),
+                    .build()
+            }
+            AsyncImage(
+                model = req,
                 contentDescription = "Profile photo of $name",
                 contentScale = ContentScale.Crop,
                 modifier = Modifier.matchParentSize()
@@ -163,28 +153,6 @@ fun RawBottomNavBar(
     modifier: Modifier = Modifier
 ) {
     val animEnabled = rememberAnimationsEnabled()
-    val density = LocalDensity.current
-    val tabBounds = remember { mutableStateMapOf<MainTab, Pair<Float, Float>>() }
-    val activeBounds = if (currentTab != MainTab.CREATE) tabBounds[currentTab] else null
-    var hasInitialMeasurement by remember { mutableStateOf(false) }
-
-    LaunchedEffect(activeBounds) {
-        if (activeBounds != null && !hasInitialMeasurement) {
-            hasInitialMeasurement = true
-        }
-    }
-
-    val useSpring = animEnabled && hasInitialMeasurement
-    val indicatorX by animateFloatAsState(
-        targetValue = activeBounds?.first ?: 0f,
-        animationSpec = if (useSpring) spring(dampingRatio = 0.78f, stiffness = 360f) else tween(0),
-        label = "dock_cap_x"
-    )
-    val indicatorW by animateFloatAsState(
-        targetValue = activeBounds?.second ?: 0f,
-        animationSpec = if (useSpring) spring(dampingRatio = 0.78f, stiffness = 360f) else tween(0),
-        label = "dock_cap_w"
-    )
 
     Box(
         modifier = modifier
@@ -193,100 +161,87 @@ fun RawBottomNavBar(
             .padding(bottom = 14.dp),
         contentAlignment = Alignment.Center
     ) {
-        Box(
+        Row(
             modifier = Modifier
-                .width(IntrinsicSize.Min)
                 .height(58.dp)
                 .clip(RoundedCornerShape(30.dp))
                 .background(RawColors.DockBg)
                 .border(1.dp, RawColors.Divider, RoundedCornerShape(30.dp))
-                .padding(6.dp)
+                .padding(6.dp),
+            horizontalArrangement = Arrangement.spacedBy(2.dp),
+            verticalAlignment = Alignment.CenterVertically
         ) {
-            // Gliding Mint active capsule moved on GPU graphicsLayer
-            if (indicatorW > 1f) {
-                Box(
-                    modifier = Modifier
-                        .align(Alignment.CenterStart)
-                        .graphicsLayer { translationX = indicatorX }
-                        .width(with(density) { indicatorW.toDp() })
-                        .fillMaxHeight()
-                        .clip(RoundedCornerShape(23.dp))
-                        .background(RawColors.Mint)
-                )
-            }
-
-            Row(
-                modifier = Modifier.fillMaxHeight(),
-                horizontalArrangement = Arrangement.spacedBy(2.dp),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                MainTab.entries.forEach { tab ->
-                    if (tab == MainTab.CREATE) {
-                        RawPressButton(
-                            onClick = { onSelectTab(MainTab.CREATE) },
-                            modifier = Modifier.padding(horizontal = 3.dp)
-                        ) {
-                            Box(
-                                modifier = Modifier
-                                    .size(46.dp)
-                                    .clip(RoundedCornerShape(16.dp))
-                                    .background(RawColors.Mint),
-                                contentAlignment = Alignment.Center
-                            ) {
-                                RawIcon(
-                                    type = RawIconType.PLUS,
-                                    size = 22.dp,
-                                    tint = RawColors.PrimaryBtnText,
-                                    strokeWidth = 2.4.dp
-                                )
-                            }
-                        }
-                    } else {
-                        val selected = tab == currentTab
-                        val iconTint by animateColorAsState(
-                            targetValue = if (selected) RawColors.PrimaryBtnText else RawColors.TextMuted,
-                            animationSpec = tween(if (animEnabled) 220 else 0, easing = RawEasings.Morph),
-                            label = "dock_tint_${tab.name}"
-                        )
-                        Row(
+            MainTab.entries.forEach { tab ->
+                if (tab == MainTab.CREATE) {
+                    RawPressButton(
+                        onClick = { onSelectTab(MainTab.CREATE) },
+                        modifier = Modifier.padding(horizontal = 3.dp)
+                    ) {
+                        Box(
                             modifier = Modifier
-                                .height(46.dp)
-                                .clip(RoundedCornerShape(23.dp))
-                                .onGloballyPositioned { coords ->
-                                    tabBounds[tab] = coords.positionInParent().x to coords.size.width.toFloat()
-                                }
-                                .clickable(
-                                    interactionSource = remember { MutableInteractionSource() },
-                                    indication = null
-                                ) { onSelectTab(tab) }
-                                .padding(horizontal = 13.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.Center
+                                .size(46.dp)
+                                .clip(RoundedCornerShape(16.dp))
+                                .background(RawColors.Mint),
+                            contentAlignment = Alignment.Center
                         ) {
                             RawIcon(
-                                type = tab.icon,
+                                type = RawIconType.PLUS,
                                 size = 20.dp,
-                                tint = iconTint
+                                tint = RawColors.PrimaryBtnText,
+                                strokeWidth = 2.4.dp
                             )
-                            AnimatedVisibility(
-                                visible = selected,
-                                enter = fadeIn(tween(200, easing = RawEasings.Morph)) +
-                                    expandHorizontally(tween(220, easing = RawEasings.Morph)),
-                                exit = fadeOut(tween(120)) +
-                                    shrinkHorizontally(tween(160, easing = RawEasings.Morph))
-                            ) {
-                                Row(verticalAlignment = Alignment.CenterVertically) {
-                                    Spacer(modifier = Modifier.width(7.dp))
-                                    Text(
-                                        text = tab.label,
-                                        fontFamily = InterFontFamily,
-                                        fontWeight = FontWeight.Bold,
-                                        fontSize = 12.5.sp,
-                                        color = RawColors.PrimaryBtnText,
-                                        maxLines = 1,
-                                        softWrap = false
-                                    )
-                                }
+                        }
+                    }
+                } else {
+                    val selected = tab == currentTab
+                    val pillBg by animateColorAsState(
+                        targetValue = if (selected) RawColors.Mint else Color.Transparent,
+                        animationSpec = tween(if (animEnabled) 190 else 0, easing = RawEasings.Morph),
+                        label = "dock_bg_${tab.name}"
+                    )
+                    val iconTint by animateColorAsState(
+                        targetValue = if (selected) RawColors.PrimaryBtnText else RawColors.TextMuted,
+                        animationSpec = tween(if (animEnabled) 190 else 0, easing = RawEasings.Morph),
+                        label = "dock_tint_${tab.name}"
+                    )
+                    Row(
+                        modifier = Modifier
+                            .defaultMinSize(minWidth = 46.dp)
+                            .height(46.dp)
+                            .clip(RoundedCornerShape(23.dp))
+                            .background(pillBg)
+                            .clickable(
+                                interactionSource = remember { MutableInteractionSource() },
+                                indication = null
+                            ) { onSelectTab(tab) }
+                            .padding(horizontal = 13.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.Center
+                    ) {
+                        RawIcon(
+                            type = tab.icon,
+                            size = 19.dp,
+                            tint = iconTint,
+                            strokeWidth = 1.9.dp
+                        )
+                        AnimatedVisibility(
+                            visible = selected,
+                            enter = fadeIn(tween(180, easing = RawEasings.Morph)) +
+                                expandHorizontally(tween(200, easing = RawEasings.Morph)),
+                            exit = fadeOut(tween(100)) +
+                                shrinkHorizontally(tween(140, easing = RawEasings.Morph))
+                        ) {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Spacer(modifier = Modifier.width(7.dp))
+                                Text(
+                                    text = tab.label,
+                                    fontFamily = InterFontFamily,
+                                    fontWeight = FontWeight.Bold,
+                                    fontSize = 12.5.sp,
+                                    color = RawColors.PrimaryBtnText,
+                                    maxLines = 1,
+                                    softWrap = false
+                                )
                             }
                         }
                     }
@@ -329,7 +284,12 @@ fun CircleActionButton(
                 .border(1.dp, borderColor, RoundedCornerShape(corner)),
             contentAlignment = Alignment.Center
         ) {
-            RawIcon(type = icon, size = size * 0.48f, tint = iconTint)
+            RawIcon(
+                type = icon,
+                size = size * 0.48f,
+                tint = iconTint,
+                strokeWidth = if (size <= 36.dp) 1.7.dp else 2.dp
+            )
         }
     }
 }
@@ -367,11 +327,6 @@ fun MorphingFilterChips(
                 animationSpec = tween(if (animEnabled) 220 else 0, easing = RawEasings.Morph),
                 label = "chip_fg_$idx"
             )
-            val padH by animateDpAsState(
-                targetValue = if (selected) 16.dp else 14.dp,
-                animationSpec = if (animEnabled) spring(dampingRatio = 0.78f, stiffness = 400f) else tween(0),
-                label = "chip_pad_$idx"
-            )
 
             RawPressButton(onClick = { onSelect(idx) }) {
                 Row(
@@ -380,7 +335,7 @@ fun MorphingFilterChips(
                         .clip(RoundedCornerShape(99.dp))
                         .background(bg)
                         .border(1.dp, border, RoundedCornerShape(99.dp))
-                        .padding(horizontal = padH),
+                        .padding(horizontal = 15.dp),
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(6.dp)
                 ) {
@@ -414,7 +369,7 @@ fun BigPrimaryButton(
             modifier = Modifier
                 .fillMaxWidth()
                 .height(52.dp)
-                .alpha(if (enabled) 1f else 0.30f)
+                .graphicsLayer { alpha = if (enabled) 1f else 0.30f }
                 .clip(RoundedCornerShape(99.dp))
                 .background(RawColors.Mint)
                 .padding(horizontal = 22.dp),
@@ -464,7 +419,7 @@ fun RawSecondaryButton(
             modifier = Modifier
                 .then(if (fillWidth) Modifier.fillMaxWidth() else Modifier)
                 .height(height)
-                .alpha(if (enabled) 1f else 0.4f)
+                .graphicsLayer { alpha = if (enabled) 1f else 0.4f }
                 .clip(RoundedCornerShape(99.dp))
                 .background(bg)
                 .border(1.dp, border, RoundedCornerShape(99.dp))

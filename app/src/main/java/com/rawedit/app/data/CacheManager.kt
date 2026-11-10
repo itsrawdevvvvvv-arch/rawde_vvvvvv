@@ -519,9 +519,9 @@ class CacheManager(private val context: Context) {
         private const val MAX_AUDIO_SEC = 20.0 * 60.0
         private const val MAX_IMAGE_BYTES = 10L * 1024L * 1024L
         private const val MAX_IMAGE_DIM = 2560
-        private const val CODE_FILE_PREFIX = "@rawfile:"
-        private const val TOPIC_FILE_PREFIX = "@rawtxt:"
-        private const val SRT_FILE_PREFIX = "@rawsrt:"
+        const val CODE_FILE_PREFIX = "@rawfile:"
+        const val TOPIC_FILE_PREFIX = "@rawtxt:"
+        const val SRT_FILE_PREFIX = "@rawsrt:"
         const val STYLE_PACK_ASSET_NAME = "kinetic-explainer-style.zip"
     }
 }

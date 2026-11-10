@@ -51,6 +51,7 @@ import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.State
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -94,7 +95,6 @@ import com.rawedit.app.ui.motion.RawEasings
 import com.rawedit.app.ui.motion.RawPressButton
 import com.rawedit.app.ui.motion.SplitFlapText
 import com.rawedit.app.ui.motion.rememberAnimationsEnabled
-import com.rawedit.app.ui.theme.InterFontFamily
 import com.rawedit.app.ui.theme.JetBrainsMonoFamily
 import com.rawedit.app.ui.theme.RawColors
 import com.rawedit.app.ui.theme.RawTypography
@@ -149,14 +149,31 @@ fun AddVoiceScreen(
     var audioError by remember { mutableStateOf<String?>(null) }
     var loadingAudio by remember { mutableStateOf(false) }
 
-    var srtText by remember(project.id) { mutableStateOf(cacheManager.resolveSrtText(project.srtText)) }
+    var srtText by remember(project.id) {
+        mutableStateOf(if (project.srtText.startsWith(CacheManager.SRT_FILE_PREFIX)) "" else project.srtText)
+    }
     var srtCueCount by remember(project.id) { mutableStateOf(project.srtCueCount) }
     var srtError by remember { mutableStateOf<String?>(null) }
 
-    var topic by remember(project.id) { mutableStateOf(cacheManager.resolveTopicText(project.topic)) }
+    var topic by remember(project.id) {
+        mutableStateOf(if (project.topic.startsWith(CacheManager.TOPIC_FILE_PREFIX)) "" else project.topic)
+    }
     var forceRawEditTopic by remember { mutableStateOf(false) }
     var savingVoice by remember { mutableStateOf(false) }
     var toastMsg by remember { mutableStateOf<String?>(null) }
+
+    LaunchedEffect(project.id, project.srtText, project.topic) {
+        val needsSrt = project.srtText.startsWith(CacheManager.SRT_FILE_PREFIX)
+        val needsTopic = project.topic.startsWith(CacheManager.TOPIC_FILE_PREFIX)
+        if (needsSrt || needsTopic) {
+            val (loadedSrt, loadedTopic) = withContext(Dispatchers.IO) {
+                (if (needsSrt) cacheManager.resolveSrtText(project.srtText) else srtText) to
+                    (if (needsTopic) cacheManager.resolveTopicText(project.topic) else topic)
+            }
+            if (needsSrt) srtText = loadedSrt
+            if (needsTopic) topic = loadedTopic
+        }
+    }
 
     val dzShake = remember { Animatable(0f) }
 
@@ -213,18 +230,18 @@ fun AddVoiceScreen(
     }
 
     val isSelected = audioPath.isNotBlank() && !loadingAudio
-    val dashPhase = if (animEnabled && !isSelected) {
+    val dashPhaseState: State<Float>? = if (animEnabled && !isSelected) {
         val inf = rememberInfiniteTransition(label = "dz_dash")
-        val p by inf.animateFloat(
+        inf.animateFloat(
             initialValue = 0f,
             targetValue = 28f,
             animationSpec = infiniteRepeatable(tween(1400, easing = LinearEasing), RepeatMode.Restart),
             label = "dash"
         )
-        p
     } else {
-        0f
+        null
     }
+    val dashIntervals = remember { floatArrayOf(16f, 12f) }
 
     Box(
         modifier = Modifier
@@ -280,7 +297,7 @@ fun AddVoiceScreen(
                                 color = if (audioError != null) RawColors.ErrorCoral else RawColors.Mint.copy(alpha = 0.42f),
                                 style = Stroke(
                                     width = 1.6.dp.toPx(),
-                                    pathEffect = PathEffect.dashPathEffect(floatArrayOf(16f, 12f), dashPhase)
+                                    pathEffect = PathEffect.dashPathEffect(dashIntervals, dashPhaseState?.value ?: 0f)
                                 ),
                                 cornerRadius = CornerRadius(22.dp.toPx())
                             )
@@ -628,8 +645,24 @@ fun CopyPromptScreen(
     val scope = rememberCoroutineScope()
     val animEnabled = rememberAnimationsEnabled()
 
-    val resolvedTopic = remember(project.topic) { cacheManager.resolveTopicText(project.topic) }
-    val resolvedSrt = remember(project.srtText) { cacheManager.resolveSrtText(project.srtText) }
+    var resolvedTopic by remember(project.id, project.topic) {
+        mutableStateOf(if (project.topic.startsWith(CacheManager.TOPIC_FILE_PREFIX)) "" else project.topic)
+    }
+    var resolvedSrt by remember(project.id, project.srtText) {
+        mutableStateOf(if (project.srtText.startsWith(CacheManager.SRT_FILE_PREFIX)) "" else project.srtText)
+    }
+    LaunchedEffect(project.topic, project.srtText) {
+        val needsTopic = project.topic.startsWith(CacheManager.TOPIC_FILE_PREFIX)
+        val needsSrt = project.srtText.startsWith(CacheManager.SRT_FILE_PREFIX)
+        if (needsTopic || needsSrt) {
+            val (loadedTopic, loadedSrt) = withContext(Dispatchers.IO) {
+                (if (needsTopic) cacheManager.resolveTopicText(project.topic) else resolvedTopic) to
+                    (if (needsSrt) cacheManager.resolveSrtText(project.srtText) else resolvedSrt)
+            }
+            if (needsTopic) resolvedTopic = loadedTopic
+            if (needsSrt) resolvedSrt = loadedSrt
+        }
+    }
     val promptText = remember(project.audioName, project.audioDurationSec, resolvedTopic, resolvedSrt) {
         PromptGenerator.buildPrompt(
             fileName = project.audioName,
@@ -994,7 +1027,9 @@ fun CodePasteScreen(
     val scope = rememberCoroutineScope()
     val animEnabled = rememberAnimationsEnabled()
 
-    var codeText by remember(project.id) { mutableStateOf(cacheManager.resolveHtmlCode(project.code)) }
+    var codeText by remember(project.id) {
+        mutableStateOf(if (project.code.startsWith(CacheManager.CODE_FILE_PREFIX)) "" else project.code)
+    }
     var validating by remember { mutableStateOf(false) }
     var validationResult by remember { mutableStateOf<CodeValidationResult?>(null) }
     var forceRawEditLarge by remember { mutableStateOf(false) }
@@ -1041,8 +1076,14 @@ fun CodePasteScreen(
         }
     }
 
-    LaunchedEffect(Unit) {
-        if (codeText.isNotBlank()) {
+    LaunchedEffect(project.id, project.code) {
+        if (project.code.startsWith(CacheManager.CODE_FILE_PREFIX)) {
+            val loaded = withContext(Dispatchers.IO) { cacheManager.resolveHtmlCode(project.code) }
+            codeText = loaded
+            if (loaded.isNotBlank()) {
+                runValidation(loaded)
+            }
+        } else if (codeText.isNotBlank() && validationResult == null) {
             runValidation(codeText)
         }
     }

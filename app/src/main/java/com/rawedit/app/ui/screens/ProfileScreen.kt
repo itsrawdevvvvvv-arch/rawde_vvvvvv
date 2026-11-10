@@ -32,6 +32,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.wrapContentSize
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -70,7 +71,6 @@ import com.rawedit.app.data.local.UserProfile
 import com.rawedit.app.data.local.VideoEntity
 import com.rawedit.app.ui.components.BigPrimaryButton
 import com.rawedit.app.ui.components.CircleActionButton
-import com.rawedit.app.ui.components.CircleAvatarCropperDialog
 import com.rawedit.app.ui.components.FormatHelpers
 import com.rawedit.app.ui.components.RawSecondaryButton
 import com.rawedit.app.ui.components.RawToastBanner
@@ -409,7 +409,9 @@ fun ProfileScreen(
                                     color = RawColors.TextMuted,
                                     maxLines = 1,
                                     softWrap = false,
-                                    modifier = Modifier.rotate(-90f)
+                                    modifier = Modifier
+                                        .wrapContentSize(unbounded = true)
+                                        .rotate(-90f)
                                 )
                             }
                         }

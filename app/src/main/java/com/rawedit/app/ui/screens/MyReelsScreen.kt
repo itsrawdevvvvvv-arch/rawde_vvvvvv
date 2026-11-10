@@ -572,6 +572,9 @@ private fun VideoLibraryRow(
     onDelete: () -> Unit
 ) {
     val context = LocalContext.current
+    val hasThumb = remember(video.thumbnailPath) {
+        video.thumbnailPath.isNotBlank() && File(video.thumbnailPath).exists()
+    }
     Row(
         modifier = Modifier
             .fillMaxWidth()
@@ -595,12 +598,15 @@ private fun VideoLibraryRow(
                 .background(Color.Black),
             contentAlignment = Alignment.Center
         ) {
-            if (video.thumbnailPath.isNotBlank() && File(video.thumbnailPath).exists()) {
-                AsyncImage(
-                    model = ImageRequest.Builder(context)
+            if (hasThumb) {
+                val thumbReq = remember(video.thumbnailPath) {
+                    ImageRequest.Builder(context)
                         .data(File(video.thumbnailPath))
                         .size(320, 180)
-                        .build(),
+                        .build()
+                }
+                AsyncImage(
+                    model = thumbReq,
                     contentDescription = video.title,
                     contentScale = ContentScale.Crop,
                     modifier = Modifier.fillMaxSize()

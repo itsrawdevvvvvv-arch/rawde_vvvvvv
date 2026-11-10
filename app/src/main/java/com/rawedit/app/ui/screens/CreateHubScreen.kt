@@ -21,7 +21,6 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.navigationBarsPadding
-import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
@@ -188,18 +187,20 @@ fun CreateHubScreen(
 
             // Title + peeking phantom mascot
             item {
-                Box(modifier = Modifier.fillMaxWidth()) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
                     KineticHeading(
                         words = listOf("Typography", "Reel"),
                         style = RawTypography.headlineLarge,
-                        modifier = Modifier.padding(end = 76.dp)
+                        modifier = Modifier.weight(1f)
                     )
+                    Spacer(modifier = Modifier.width(12.dp))
                     RawPixelMascot(
                         kind = PixelMascotKind.PHANTOM_BUDDY,
-                        size = 52.dp,
-                        modifier = Modifier
-                            .align(Alignment.TopEnd)
-                            .offset(x = (-4).dp, y = (-6).dp)
+                        size = 50.dp
                     )
                 }
             }

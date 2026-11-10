@@ -231,7 +231,7 @@ fun RenderingScreen(
 
                 // Giant stacked "REN / DER / ING" filling bottom-to-top from #262B26 to Mint #8CE3A8 (.gi)
                 val targetFraction = (state.progressPercent / 100f).coerceIn(0f, 1f)
-                val smoothFraction by animateFloatAsState(
+                val smoothFractionState = animateFloatAsState(
                     targetValue = targetFraction,
                     animationSpec = tween(durationMillis = 200),
                     label = "gi_fill"
@@ -260,7 +260,7 @@ fun RenderingScreen(
                         style = stackedStyle,
                         color = RawColors.Mint,
                         modifier = Modifier.drawWithContent {
-                            val topY = size.height * (1f - smoothFraction)
+                            val topY = size.height * (1f - smoothFractionState.value)
                             clipRect(left = 0f, top = topY, right = size.width, bottom = size.height) {
                                 this@drawWithContent.drawContent()
                             }
@@ -283,7 +283,12 @@ fun RenderingScreen(
                         modifier = Modifier.align(Alignment.TopEnd)
                     )
 
-                    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(end = 42.dp),
+                        verticalArrangement = Arrangement.spacedBy(4.dp)
+                    ) {
                         Text(
                             text = state.statusText,
                             fontFamily = JetBrainsMonoFamily,

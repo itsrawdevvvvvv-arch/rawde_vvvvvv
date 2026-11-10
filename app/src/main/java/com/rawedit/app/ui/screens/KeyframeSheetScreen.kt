@@ -47,6 +47,8 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.State
+import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
@@ -56,6 +58,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Brush
@@ -97,9 +100,11 @@ import com.rawedit.app.ui.theme.JetBrainsMonoFamily
 import com.rawedit.app.ui.theme.RawColors
 import com.rawedit.app.ui.theme.RawTypography
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import java.io.File
 import java.util.Locale
 
@@ -116,8 +121,19 @@ fun KeyframeSheetScreen(
     val scope = rememberCoroutineScope()
     val animEnabled = rememberAnimationsEnabled()
 
-    val resolvedHtml = remember(project.id, project.code) {
-        cacheManager.resolveHtmlCode(project.code)
+    var resolvedHtml by remember(project.id, project.code) {
+        mutableStateOf(if (project.code.startsWith(CacheManager.CODE_FILE_PREFIX)) "" else project.code)
+    }
+    var htmlReady by remember(project.id, project.code) {
+        mutableStateOf(!project.code.startsWith(CacheManager.CODE_FILE_PREFIX))
+    }
+    LaunchedEffect(project.id, project.code) {
+        if (project.code.startsWith(CacheManager.CODE_FILE_PREFIX)) {
+            resolvedHtml = withContext(Dispatchers.IO) { cacheManager.resolveHtmlCode(project.code) }
+            htmlReady = true
+        } else {
+            htmlReady = true
+        }
     }
     val durationSec = remember(project.codeDurationSec, project.audioDurationSec) {
         when {
@@ -206,7 +222,8 @@ fun KeyframeSheetScreen(
         onDispose { isScreenDisposed = true }
     }
 
-    LaunchedEffect(project.id, resolvedHtml, selectedMode, captureGen) {
+    LaunchedEffect(project.id, htmlReady, resolvedHtml, selectedMode, captureGen) {
+        if (!htmlReady) return@LaunchedEffect
         if (resolvedHtml.isBlank()) {
             capturing = false
             captureError = "No validated HTML code found for this draft."
@@ -403,23 +420,27 @@ fun KeyframeSheetScreen(
                         val frac = if (progressTotal > 0) {
                             (progressDone.toFloat() / progressTotal.toFloat()).coerceIn(0f, 1f)
                         } else 0f
-                        val smoothFrac by animateFloatAsState(
+                        val smoothFracState: State<Float> = animateFloatAsState(
                             targetValue = frac,
                             animationSpec = tween(180),
                             label = "sheet_frac"
                         )
-                        val scanY = if (animEnabled) {
+                        val percentInt by remember(smoothFracState) {
+                            derivedStateOf { (smoothFracState.value * 100f).toInt().coerceIn(0, 100) }
+                        }
+                        val scanYState: State<Float>? = if (animEnabled) {
                             val inf = rememberInfiniteTransition(label = "sheet_scan")
-                            val sy by inf.animateFloat(
+                            inf.animateFloat(
                                 initialValue = -0.15f,
                                 targetValue = 1.15f,
                                 animationSpec = infiniteRepeatable(tween(1500, easing = LinearEasing), RepeatMode.Restart),
                                 label = "scan_pos"
                             )
-                            sy
                         } else {
-                            0.5f
+                            null
                         }
+                        val thumb = livePreviewPath
+                        val thumbExists = remember(thumb) { thumb != null && File(thumb).exists() }
 
                         Column(
                             modifier = Modifier
@@ -436,8 +457,7 @@ fun KeyframeSheetScreen(
                                     .border(1.dp, RawColors.Divider, RoundedCornerShape(12.dp)),
                                 contentAlignment = Alignment.Center
                             ) {
-                                val thumb = livePreviewPath
-                                if (thumb != null && File(thumb).exists()) {
+                                if (thumbExists && thumb != null) {
                                     AsyncImage(
                                         model = ImageRequest.Builder(context)
                                             .data(File(thumb))
@@ -457,10 +477,10 @@ fun KeyframeSheetScreen(
                                     )
                                 }
 
-                                // Sweeping Mint scanline (.scn) drawn inside Canvas (zero relayout)
-                                if (animEnabled) {
+                                // Sweeping Mint scanline (.scn) drawn inside Canvas (zero relayout & zero recomposition)
+                                if (scanYState != null) {
                                     Canvas(modifier = Modifier.fillMaxSize()) {
-                                        val cy = size.height * scanY
+                                        val cy = size.height * scanYState.value
                                         val bandH = size.height * 0.14f
                                         drawRect(
                                             brush = Brush.verticalGradient(
@@ -518,7 +538,7 @@ fun KeyframeSheetScreen(
                                         color = RawColors.TextMuted
                                     )
                                     Text(
-                                        text = "${(smoothFrac * 100).toInt()}%",
+                                        text = "$percentInt%",
                                         fontFamily = JetBrainsMonoFamily,
                                         fontWeight = FontWeight.Bold,
                                         fontSize = 11.sp,
@@ -526,20 +546,22 @@ fun KeyframeSheetScreen(
                                     )
                                 }
                                 Spacer(modifier = Modifier.height(10.dp))
-                                Box(
+                                Canvas(
                                     modifier = Modifier
                                         .fillMaxWidth()
                                         .height(6.dp)
                                         .clip(RoundedCornerShape(9.dp))
                                         .background(RawColors.PillGrey)
                                 ) {
-                                    Box(
-                                        modifier = Modifier
-                                            .fillMaxWidth(smoothFrac)
-                                            .height(6.dp)
-                                            .clip(RoundedCornerShape(9.dp))
-                                            .background(RawColors.Mint)
-                                    )
+                                    val w = size.width * smoothFracState.value.coerceIn(0f, 1f)
+                                    if (w > 0f) {
+                                        drawRoundRect(
+                                            color = RawColors.Mint,
+                                            topLeft = Offset.Zero,
+                                            size = Size(w, size.height),
+                                            cornerRadius = CornerRadius(size.height * 0.5f, size.height * 0.5f)
+                                        )
+                                    }
                                 }
                             }
                         }
@@ -1106,13 +1128,16 @@ private fun ContactSheetFrameTile(
                         } else Modifier
                     )
             ) {
-                AsyncImage(
-                    model = ImageRequest.Builder(context)
+                val tileReq = remember(sample.thumbPath, cacheKeyTag) {
+                    ImageRequest.Builder(context)
                         .data(File(sample.thumbPath))
                         .size(480, 270)
                         .memoryCacheKey("${sample.thumbPath}_$cacheKeyTag")
                         .diskCachePolicy(CachePolicy.DISABLED)
-                        .build(),
+                        .build()
+                }
+                AsyncImage(
+                    model = tileReq,
                     contentDescription = "Frame ${sample.index + 1}",
                     contentScale = ContentScale.Crop,
                     modifier = Modifier.fillMaxSize()

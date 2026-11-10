@@ -16,8 +16,10 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.size
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.State
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
@@ -423,24 +425,23 @@ fun PixelRawEditLogo(
     height: Dp = 33.dp
 ) {
     val animEnabled = rememberAnimationsEnabled()
-    val rot = if (animEnabled) {
+    val rotState: State<Float>? = if (animEnabled) {
         val inf = rememberInfiniteTransition(label = "logo_wobble")
-        val r by inf.animateFloat(
+        inf.animateFloat(
             initialValue = -2.8f,
             targetValue = 2.8f,
             animationSpec = infiniteRepeatable(tween(2000, easing = LinearEasing), RepeatMode.Reverse),
             label = "wob"
         )
-        r
     } else {
-        0f
+        null
     }
 
     val bmp = remember { SpriteBitmapCache.logoBitmap }
     Canvas(
         modifier = modifier
             .size(width, height)
-            .graphicsLayer { rotationZ = rot }
+            .graphicsLayer { rotationZ = rotState?.value ?: 0f }
     ) {
         drawImage(
             image = bmp,
@@ -466,35 +467,39 @@ fun RawPixelMascot(
     val animEnabled = rememberAnimationsEnabled()
     val haptic = LocalHapticFeedback.current
     val scope = rememberCoroutineScope()
-    val tintArgb = tint.toArgb()
+    val tintArgb = remember(tint) { tint.toArgb() }
 
-    var frameTick by remember(kind) { mutableIntStateOf(0) }
+    var isBlinking by remember(kind) { mutableStateOf(false) }
     var tappedMood by remember(kind) { mutableIntStateOf(0) }
     val hopAnim = remember(kind) { Animatable(0f) }
 
     val staticSprite = kind == PixelMascotKind.AVATAR_FACE || kind == PixelMascotKind.PIXEL_CURSOR
 
-    // Lightweight periodic blink/step toggle (only when blink/idle is enabled)
+    // Lightweight periodic eye blink (sleeps 3.8s, blinks 150ms -> 0 unnecessary idle recompositions)
     LaunchedEffect(kind, animEnabled, noBlink) {
-        if (!animEnabled || staticSprite || noBlink) return@LaunchedEffect
+        if (!animEnabled || staticSprite || noBlink) {
+            isBlinking = false
+            return@LaunchedEffect
+        }
         while (true) {
-            delay(if (kind == PixelMascotKind.PEEKING_CAT) 720L else 480L)
-            frameTick = (frameTick + 1) % 12
+            delay(if (kind == PixelMascotKind.PEEKING_CAT) 4400L else 3600L)
+            isBlinking = true
+            delay(150L)
+            isBlinking = false
         }
     }
 
-    // GPU-only float bobbing via graphicsLayer (zero Canvas redraw or layout work!)
-    val bobPx = if (animEnabled && !noBob && !staticSprite && kind != PixelMascotKind.PEEKING_CAT) {
+    // GPU-only float bobbing via graphicsLayer (ZERO composition recompositions per frame!)
+    val bobPhaseState: State<Float>? = if (animEnabled && !noBob && !staticSprite && kind != PixelMascotKind.PEEKING_CAT) {
         val inf = rememberInfiniteTransition(label = "pixel_bob_${kind.name}")
-        val bobPhase by inf.animateFloat(
+        inf.animateFloat(
             initialValue = 0f,
             targetValue = (2f * PI).toFloat(),
-            animationSpec = infiniteRepeatable(tween(2200, easing = LinearEasing), RepeatMode.Restart),
+            animationSpec = infiniteRepeatable(tween(2600, easing = LinearEasing), RepeatMode.Restart),
             label = "bob"
         )
-        sin(bobPhase) * 6f
     } else {
-        0f
+        null
     }
 
     val activeRows: List<String> = when (kind) {
@@ -504,14 +509,14 @@ fun RawPixelMascot(
         }
         PixelMascotKind.TV_BOT -> when {
             tappedMood > 0 -> TV_HAPPY
-            frameTick == 11 -> TV_BLINK
+            isBlinking -> TV_BLINK
             else -> TV_OPEN
         }
-        PixelMascotKind.MIC_BOT -> if (frameTick == 11) MIC_BLINK else MIC_OPEN
-        PixelMascotKind.ZIP_BOT -> if (frameTick == 11) ZIP_BLINK else ZIP_OPEN
-        PixelMascotKind.CODE_BOT -> if (frameTick == 11) CODE_BLINK else CODE_OPEN
-        PixelMascotKind.LENS_BOT -> if (frameTick == 11) LENS_BLINK else LENS_OPEN
-        PixelMascotKind.PHANTOM_BUDDY -> if (frameTick == 11) GHO_BLINK else GHO_OPEN
+        PixelMascotKind.MIC_BOT -> if (isBlinking) MIC_BLINK else MIC_OPEN
+        PixelMascotKind.ZIP_BOT -> if (isBlinking) ZIP_BLINK else ZIP_OPEN
+        PixelMascotKind.CODE_BOT -> if (isBlinking) CODE_BLINK else CODE_OPEN
+        PixelMascotKind.LENS_BOT -> if (isBlinking) LENS_BLINK else LENS_OPEN
+        PixelMascotKind.PHANTOM_BUDDY -> if (isBlinking) GHO_BLINK else GHO_OPEN
         PixelMascotKind.FOLDER_PLAY -> FOLD_0
         PixelMascotKind.SPEECH_PLAY -> SPEECH_0
         PixelMascotKind.AVATAR_FACE -> FACE_STATIC
@@ -520,7 +525,7 @@ fun RawPixelMascot(
 
     val stateTag = when {
         tappedMood > 0 || awakeOverride -> "alt"
-        frameTick == 11 -> "blk"
+        isBlinking -> "blk"
         else -> "std"
     }
     val bmp = remember(kind, stateTag, tintArgb) {
@@ -533,6 +538,7 @@ fun RawPixelMascot(
         modifier = modifier
             .size(size)
             .graphicsLayer {
+                val bobPx = if (bobPhaseState != null) sin(bobPhaseState.value) * 6f else 0f
                 translationY = bobPx - hopAnim.value * 18f
                 scaleX = 1f + hopAnim.value * 0.09f
                 scaleY = 1f - hopAnim.value * 0.05f
@@ -586,30 +592,16 @@ fun PixelTypeMarqueeBadge(
     size: Dp = 44.dp
 ) {
     val animEnabled = rememberAnimationsEnabled()
-    val phase = if (animEnabled) {
+    val phaseState: State<Float>? = if (animEnabled) {
         val inf = rememberInfiniteTransition(label = "cur_click")
-        val p by inf.animateFloat(
+        inf.animateFloat(
             initialValue = 0f,
             targetValue = 1f,
             animationSpec = infiniteRepeatable(tween(2200, easing = LinearEasing), RepeatMode.Restart),
             label = "clk"
         )
-        p
     } else {
-        0f
-    }
-
-    val (tx, ty, sc) = when {
-        phase < 0.35f -> {
-            val k = phase / 0.35f
-            Triple(-22f * k, 8f * k, 1f)
-        }
-        phase < 0.45f -> Triple(-22f, 12f, 0.85f)
-        phase < 0.55f -> Triple(-22f, 8f, 1f)
-        else -> {
-            val k = (phase - 0.55f) / 0.45f
-            Triple(-22f * (1f - k), 8f * (1f - k), 1f)
-        }
+        null
     }
 
     val bmp = remember { SpriteBitmapCache.get("cur_marq", CURSOR_0, COL_WHITE) }
@@ -618,10 +610,35 @@ fun PixelTypeMarqueeBadge(
         modifier = modifier
             .size(size)
             .graphicsLayer {
-                translationX = tx
-                translationY = ty
-                scaleX = sc
-                scaleY = sc
+                val phase = phaseState?.value ?: 0f
+                when {
+                    phase < 0.35f -> {
+                        val k = phase / 0.35f
+                        translationX = -22f * k
+                        translationY = 8f * k
+                        scaleX = 1f
+                        scaleY = 1f
+                    }
+                    phase < 0.45f -> {
+                        translationX = -22f
+                        translationY = 12f
+                        scaleX = 0.85f
+                        scaleY = 0.85f
+                    }
+                    phase < 0.55f -> {
+                        translationX = -22f
+                        translationY = 8f
+                        scaleX = 1f
+                        scaleY = 1f
+                    }
+                    else -> {
+                        val k = (phase - 0.55f) / 0.45f
+                        translationX = -22f * (1f - k)
+                        translationY = 8f * (1f - k)
+                        scaleX = 1f
+                        scaleY = 1f
+                    }
+                }
             }
     ) {
         val s = minOf(this.size.width / bmp.width.toFloat(), this.size.height / bmp.height.toFloat())
@@ -647,9 +664,9 @@ fun PixelSparkle(
     phaseOffsetMs: Int = 0
 ) {
     val animEnabled = rememberAnimationsEnabled()
-    val phase = if (animEnabled) {
+    val phaseState: State<Float>? = if (animEnabled) {
         val inf = rememberInfiniteTransition(label = "spark_$phaseOffsetMs")
-        val p by inf.animateFloat(
+        inf.animateFloat(
             initialValue = 0f,
             targetValue = 1f,
             animationSpec = infiniteRepeatable(
@@ -658,9 +675,8 @@ fun PixelSparkle(
             ),
             label = "sp"
         )
-        p
     } else {
-        1f
+        null
     }
     val bmp = remember { SpriteBitmapCache.get("spk_white", SPARKLE_5, COL_WHITE) }
 
@@ -668,10 +684,11 @@ fun PixelSparkle(
         modifier = modifier
             .size(size)
             .graphicsLayer {
-                val sc = 0.65f + 0.40f * phase
+                val p = phaseState?.value ?: 1f
+                val sc = 0.65f + 0.40f * p
                 scaleX = sc
                 scaleY = sc
-                alpha = 0.40f + 0.60f * phase
+                alpha = 0.40f + 0.60f * p
             }
     ) {
         drawImage(

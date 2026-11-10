@@ -37,7 +37,7 @@ import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.getValue
+import androidx.compose.runtime.State
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Alignment
@@ -109,18 +109,17 @@ fun OnboardingScreen(
     val scope = rememberCoroutineScope()
     val animEnabled = rememberAnimationsEnabled()
 
-    // Single lightweight phase driving slide artwork cleanly in draw phase (zero child Box allocs)
-    val artPhase = if (animEnabled) {
+    // Single lightweight phase driving slide artwork cleanly in draw/layer phase (zero recompositions)
+    val artPhaseState: State<Float>? = if (animEnabled) {
         val inf = rememberInfiniteTransition(label = "ob_art_phase")
-        val p by inf.animateFloat(
+        inf.animateFloat(
             initialValue = 0f,
             targetValue = 1f,
             animationSpec = infiniteRepeatable(tween(2400, easing = LinearEasing), RepeatMode.Restart),
             label = "phase"
         )
-        p
     } else {
-        0.5f
+        null
     }
 
     Column(
@@ -162,7 +161,6 @@ fun OnboardingScreen(
                 1 -> PixelMascotKind.ZIP_BOT
                 else -> PixelMascotKind.TV_BOT
             }
-            val floatY = if (animEnabled) sin(artPhase * Math.PI.toFloat() * 2f) * 5f else 0f
 
             Box(
                 modifier = Modifier
@@ -180,7 +178,7 @@ fun OnboardingScreen(
                 // Vector backdrop outlines + slide-specific bottom motion cue in ONE Canvas
                 OnboardingSlideCanvas(
                     page = page,
-                    phase = artPhase,
+                    phaseState = artPhaseState,
                     modifier = Modifier.fillMaxSize()
                 )
 
@@ -191,7 +189,9 @@ fun OnboardingScreen(
                             .align(Alignment.BottomCenter)
                             .padding(bottom = 34.dp)
                             .size(width = 124.dp, height = 70.dp)
-                            .graphicsLayer { translationY = floatY }
+                            .graphicsLayer {
+                                translationY = if (artPhaseState != null) sin(artPhaseState.value * Math.PI.toFloat() * 2f) * 5f else 0f
+                            }
                             .clip(RoundedCornerShape(10.dp))
                             .background(Color.Black)
                             .border(1.dp, RawColors.DividerStrong, RoundedCornerShape(10.dp)),
@@ -222,7 +222,9 @@ fun OnboardingScreen(
                     modifier = Modifier
                         .align(Alignment.TopStart)
                         .padding(start = 10.dp, top = 42.dp)
-                        .graphicsLayer { translationY = floatY * 0.7f }
+                        .graphicsLayer {
+                            translationY = if (artPhaseState != null) sin(artPhaseState.value * Math.PI.toFloat() * 2f) * 3.5f else 0f
+                        }
                 )
 
                 OnboardingFloatingChip(
@@ -231,7 +233,9 @@ fun OnboardingScreen(
                     modifier = Modifier
                         .align(Alignment.BottomEnd)
                         .padding(end = 10.dp, bottom = 74.dp)
-                        .graphicsLayer { translationY = -floatY * 0.7f }
+                        .graphicsLayer {
+                            translationY = if (artPhaseState != null) -sin(artPhaseState.value * Math.PI.toFloat() * 2f) * 3.5f else 0f
+                        }
                 )
             }
         }
@@ -366,13 +370,14 @@ private fun OnboardingFloatingChip(
 @Composable
 private fun OnboardingSlideCanvas(
     page: Int,
-    phase: Float,
+    phaseState: State<Float>?,
     modifier: Modifier = Modifier
 ) {
     val dashEffect = remember { PathEffect.dashPathEffect(floatArrayOf(14f, 14f), 0f) }
     val cloudPath = remember { Path() }
 
     Canvas(modifier = modifier) {
+        val phase = phaseState?.value ?: 0.5f
         val w = size.width
         val h = size.height
         val lineCol = RawColors.TextPrimary.copy(alpha = 0.20f)

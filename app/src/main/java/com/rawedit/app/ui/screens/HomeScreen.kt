@@ -1,8 +1,8 @@
 package com.rawedit.app.ui.screens
 
 import androidx.compose.animation.AnimatedContent
-import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.infiniteRepeatable
@@ -18,57 +18,64 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.defaultMinSize
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.offset
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.State
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
-import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.geometry.Offset
-import androidx.compose.ui.geometry.Size
-import androidx.compose.ui.graphics.StrokeCap
-import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.platform.LocalConfiguration
+import androidx.compose.ui.text.SpanStyle
+import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.rawedit.app.data.local.UserProfile
-import com.rawedit.app.ui.components.UserAvatarView
+import com.rawedit.app.data.local.VideoEntity
+import com.rawedit.app.ui.components.FormatHelpers
 import com.rawedit.app.ui.icons.PixelMascotKind
-import com.rawedit.app.ui.icons.PixelTypeMarqueeBadge
 import com.rawedit.app.ui.icons.RawIcon
 import com.rawedit.app.ui.icons.RawIconType
 import com.rawedit.app.ui.icons.RawPixelMascot
-import com.rawedit.app.ui.motion.KineticHeading
 import com.rawedit.app.ui.motion.RawEasings
 import com.rawedit.app.ui.motion.RawPressButton
 import com.rawedit.app.ui.motion.rememberAnimationsEnabled
 import com.rawedit.app.ui.theme.InterFontFamily
 import com.rawedit.app.ui.theme.JetBrainsMonoFamily
 import com.rawedit.app.ui.theme.RawColors
-import com.rawedit.app.ui.theme.RawTypography
-import kotlinx.coroutines.delay
-import kotlinx.coroutines.launch
+import kotlin.math.PI
+import kotlin.math.cos
 
 private val TV_LINES = listOf(
     "Beep! Ready when you are.",
@@ -77,425 +84,467 @@ private val TV_LINES = listOf(
     "Typography is my love language."
 )
 
+private val ART_SKIP_WORDS = setOf(
+    "a", "an", "the", "and", "or", "of", "in", "on", "to", "for",
+    "with", "by", "my", "your", "why", "how", "what", "when", "into", "is"
+)
+
+private fun buildReelArtLabel(title: String): String {
+    val words = title.trim()
+        .split(Regex("[^A-Za-z0-9]+"))
+        .filter { it.isNotBlank() }
+    if (words.isEmpty()) return "REEL"
+    val chosen = words.firstOrNull {
+        it.length >= 3 && it.lowercase() !in ART_SKIP_WORDS && !it.all(Char::isDigit)
+    } ?: words.firstOrNull { !it.all(Char::isDigit) } ?: words.first()
+    return chosen.uppercase().take(8)
+}
+
+private fun Modifier.hcRise(
+    clockMs: State<Float>?,
+    delayMs: Int
+): Modifier = if (clockMs == null) {
+    this
+} else {
+    graphicsLayer {
+        val raw = ((clockMs.value - delayMs) / 600f).coerceIn(0f, 1f)
+        val eased = RawEasings.Morph.transform(raw)
+        alpha = eased
+        translationY = (1f - eased) * 16.dp.toPx()
+    }
+}
+
 @Composable
 fun HomeScreen(
     userProfile: UserProfile,
-    onOpenProfile: () -> Unit,
-    onStartNewReel: (Offset) -> Unit
+    recentVideos: List<VideoEntity>,
+    onStartNewReel: (Offset) -> Unit,
+    onOpenVoiceStep: () -> Unit,
+    onOpenPromptStep: () -> Unit,
+    onOpenCodeStep: () -> Unit,
+    onOpenReel: (Long) -> Unit
 ) {
     val animEnabled = rememberAnimationsEnabled()
-    val scope = rememberCoroutineScope()
-
-    val ringDraw = remember { Animatable(if (animEnabled) 0f else 1f) }
+    val isCompact = LocalConfiguration.current.screenHeightDp <= 700
     var tvIndex by remember { mutableIntStateOf(0) }
-    var catAwake by remember { mutableStateOf(false) }
 
+    val entranceClock = remember { Animatable(if (animEnabled) 0f else 980f) }
+    val entranceState: State<Float>? = if (animEnabled) entranceClock.asState() else null
     LaunchedEffect(animEnabled) {
         if (animEnabled) {
-            ringDraw.snapTo(0f)
-            ringDraw.animateTo(1f, tween(620, easing = RawEasings.Morph))
+            entranceClock.snapTo(0f)
+            entranceClock.animateTo(980f, tween(durationMillis = 980, easing = LinearEasing))
+        } else {
+            entranceClock.snapTo(980f)
         }
     }
 
-    val rayAlpha = if (animEnabled) {
-        val inf = rememberInfiniteTransition(label = "home_rays")
-        val a by inf.animateFloat(
-            initialValue = 0.35f,
-            targetValue = 1f,
-            animationSpec = infiniteRepeatable(tween(900), RepeatMode.Reverse),
-            label = "ray"
+    val inf = if (animEnabled) rememberInfiniteTransition(label = "hc_loops") else null
+    val bubBobState: State<Float>? = if (inf != null) {
+        inf.animateFloat(
+            initialValue = 0f,
+            targetValue = (2.0 * PI).toFloat(),
+            animationSpec = infiniteRepeatable(tween(3400, easing = LinearEasing), RepeatMode.Restart),
+            label = "hc_bub"
         )
-        a
     } else {
-        1f
+        null
     }
-
-    val zzPhase = if (animEnabled && !catAwake) {
-        val inf = rememberInfiniteTransition(label = "cat_zz")
-        val z by inf.animateFloat(
+    val artShineState: State<Float>? = if (inf != null && recentVideos.isNotEmpty()) {
+        inf.animateFloat(
             initialValue = 0f,
             targetValue = 1f,
-            animationSpec = infiniteRepeatable(tween(2400), RepeatMode.Restart),
-            label = "z"
+            animationSpec = infiniteRepeatable(tween(5500, easing = LinearEasing), RepeatMode.Restart),
+            label = "hc_shine"
         )
-        z
     } else {
-        0f
+        null
     }
 
-    Box(
+    val bubbleShape = remember {
+        RoundedCornerShape(topStart = 14.dp, topEnd = 14.dp, bottomEnd = 14.dp, bottomStart = 4.dp)
+    }
+    val headlineText = remember {
+        buildAnnotatedString {
+            append("Let's make\na ")
+            withStyle(SpanStyle(color = RawColors.Mint)) {
+                append("reel!")
+            }
+        }
+    }
+    val latestTwo = remember(recentVideos) { recentVideos.take(2) }
+    val displayName = userProfile.userName.ifBlank { "there" }
+
+    BoxWithConstraints(
         modifier = Modifier
             .fillMaxSize()
             .background(RawColors.BgPrimary)
             .statusBarsPadding()
+            .navigationBarsPadding(),
+        contentAlignment = Alignment.TopCenter
     ) {
+        val availableHeight = maxHeight
+
         Column(
             modifier = Modifier
-                .fillMaxSize()
-                .verticalScroll(rememberScrollState())
-                .padding(start = 20.dp, end = 20.dp, top = 8.dp, bottom = 104.dp),
-            verticalArrangement = Arrangement.SpaceBetween
+                .widthIn(max = 430.dp)
+                .fillMaxWidth()
+                .verticalScroll(rememberScrollState()),
+            horizontalAlignment = Alignment.CenterHorizontally
         ) {
-            Column {
-                // Top minimal header (.bar)
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(58.dp),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .defaultMinSize(minHeight = availableHeight)
+                    .padding(start = 20.dp, end = 20.dp, bottom = 104.dp),
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.SpaceBetween
+            ) {
+                // Top section: centered greeting (.hc-hi) + mascot stage (.hc-stage)
+                Column(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalAlignment = Alignment.CenterHorizontally
                 ) {
-                    Column {
+                    Column(
+                        modifier = Modifier
+                            .padding(top = 20.dp)
+                            .hcRise(entranceState, 20),
+                        horizontalAlignment = Alignment.CenterHorizontally
+                    ) {
                         Text(
-                            text = "Hello, ${userProfile.userName.ifBlank { "there" }}",
+                            text = "Hello, $displayName",
                             fontFamily = InterFontFamily,
                             fontWeight = FontWeight.ExtraBold,
-                            fontSize = 22.sp,
-                            letterSpacing = (-0.8).sp,
-                            color = RawColors.TextPrimary
+                            fontSize = 19.sp,
+                            letterSpacing = (-0.6).sp,
+                            color = RawColors.TextPrimary,
+                            textAlign = TextAlign.Center
                         )
+                        Spacer(modifier = Modifier.height(6.dp))
                         Text(
                             text = "OFFLINE REEL STUDIO",
                             fontFamily = JetBrainsMonoFamily,
                             fontWeight = FontWeight.SemiBold,
-                            fontSize = 10.sp,
-                            letterSpacing = 1.1.sp,
-                            color = RawColors.TextMuted
+                            fontSize = 9.sp,
+                            letterSpacing = 1.6.sp,
+                            color = RawColors.TextMuted,
+                            textAlign = TextAlign.Center
                         )
                     }
-                    UserAvatarView(
-                        name = userProfile.userName.ifBlank { "R" },
-                        photoPath = userProfile.profilePhotoPath,
-                        size = 44.dp,
-                        onClick = onOpenProfile
-                    )
-                }
 
-                Spacer(modifier = Modifier.height(14.dp))
-
-                // Giant display headline ("Let's make / a reel!") with Mint oval + Mint rays
-                Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                    KineticHeading(
-                        words = listOf("Let's", "make"),
-                        style = RawTypography.displayLarge.copy(
-                            fontSize = 48.sp,
-                            lineHeight = 48.sp,
-                            letterSpacing = (-2.4).sp
-                        )
-                    )
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically
+                    // Mascot stage: tap bubble or TV mascot to cycle quip (.hc-stage)
+                    Column(
+                        modifier = Modifier
+                            .padding(top = if (isCompact) 12.dp else 22.dp)
+                            .width(214.dp),
+                        horizontalAlignment = Alignment.CenterHorizontally
                     ) {
-                        Text(
-                            text = "a ",
-                            fontFamily = InterFontFamily,
-                            fontWeight = FontWeight.ExtraBold,
-                            fontSize = 48.sp,
-                            lineHeight = 48.sp,
-                            letterSpacing = (-2.4).sp,
-                            color = RawColors.TextPrimary
-                        )
                         Box(
-                            modifier = Modifier.padding(horizontal = 4.dp),
+                            modifier = Modifier
+                                .padding(bottom = 10.dp)
+                                .widthIn(max = 190.dp)
+                                .graphicsLayer {
+                                    val phase = bubBobState?.value ?: 0f
+                                    val lift = ((1f - cos(phase)) * 0.5f) * 4.dp.toPx()
+                                    translationY = -lift
+                                }
+                                .clip(bubbleShape)
+                                .background(RawColors.RaisedCard)
+                                .border(1.dp, RawColors.Divider, bubbleShape)
+                                .clickable(
+                                    interactionSource = remember { MutableInteractionSource() },
+                                    indication = null
+                                ) { tvIndex = (tvIndex + 1) % TV_LINES.size }
+                                .padding(horizontal = 13.dp, vertical = 10.dp),
                             contentAlignment = Alignment.Center
                         ) {
-                            Text(
-                                text = "reel!",
-                                fontFamily = InterFontFamily,
-                                fontWeight = FontWeight.ExtraBold,
-                                fontSize = 48.sp,
-                                lineHeight = 48.sp,
-                                letterSpacing = (-2.4).sp,
-                                color = RawColors.TextPrimary,
-                                modifier = Modifier.padding(horizontal = 14.dp, vertical = 4.dp)
-                            )
-                            Canvas(modifier = Modifier.matchParentSize()) {
-                                val sweep = 360f * ringDraw.value
-                                drawArc(
-                                    color = RawColors.Mint,
-                                    startAngle = -140f,
-                                    sweepAngle = sweep,
-                                    useCenter = false,
-                                    topLeft = Offset(-2.dp.toPx(), 2.dp.toPx()),
-                                    size = Size(size.width + 4.dp.toPx(), size.height - 4.dp.toPx()),
-                                    style = Stroke(width = 2.4.dp.toPx(), cap = StrokeCap.Round)
+                            AnimatedContent(
+                                targetState = TV_LINES[tvIndex],
+                                transitionSpec = {
+                                    if (!animEnabled) fadeIn(tween(0)) togetherWith fadeOut(tween(0))
+                                    else fadeIn(tween(180)) togetherWith fadeOut(tween(120))
+                                },
+                                label = "hc_bub_text"
+                            ) { line ->
+                                Text(
+                                    text = line,
+                                    fontFamily = InterFontFamily,
+                                    fontWeight = FontWeight.SemiBold,
+                                    fontSize = 12.sp,
+                                    lineHeight = 16.sp,
+                                    color = RawColors.TextPrimary,
+                                    textAlign = TextAlign.Center
                                 )
                             }
                         }
 
-                        // 3 comic Mint rays beside "reel!"
-                        Canvas(
-                            modifier = Modifier
-                                .offset(x = 2.dp, y = (-18).dp)
-                                .size(30.dp)
-                        ) {
-                            val col = RawColors.Mint.copy(alpha = rayAlpha * ringDraw.value)
-                            val sw = 3.2.dp.toPx()
-                            drawLine(col, Offset(size.width * 0.45f, size.height * 0.12f), Offset(size.width * 0.45f, size.height * 0.36f), sw, StrokeCap.Square)
-                            drawLine(col, Offset(size.width * 0.84f, size.height * 0.24f), Offset(size.width * 0.68f, size.height * 0.42f), sw, StrokeCap.Square)
-                            drawLine(col, Offset(size.width * 0.94f, size.height * 0.60f), Offset(size.width * 0.72f, size.height * 0.60f), sw, StrokeCap.Square)
-                        }
+                        RawPixelMascot(
+                            kind = PixelMascotKind.TV_BOT,
+                            size = 120.dp,
+                            onTap = { tvIndex = (tvIndex + 1) % TV_LINES.size }
+                        )
                     }
                 }
 
-                Spacer(modifier = Modifier.height(12.dp))
-                Text(
-                    text = "Turn your voice & ideas into\ncrisp 1080p edits.",
-                    style = RawTypography.bodyLarge.copy(fontSize = 14.sp, lineHeight = 21.sp),
-                    color = RawColors.TextMuted
-                )
-
-                Spacer(modifier = Modifier.height(10.dp))
-
-                // Interactive TV Bot + speech bubble cycling witty offline quips (.botrow + .bub)
-                Row(
+                // Centered main block (.hc-main): headline + sub + Start creating + 3 quick steps
+                Column(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .height(122.dp),
-                    verticalAlignment = Alignment.Bottom,
-                    horizontalArrangement = Arrangement.spacedBy(12.dp)
+                        .padding(bottom = 8.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally
                 ) {
-                    RawPixelMascot(
-                        kind = PixelMascotKind.TV_BOT,
-                        size = 104.dp,
-                        onTap = { tvIndex = (tvIndex + 1) % TV_LINES.size }
+                    val h1Size = if (isCompact) 32.sp else 38.sp
+                    Text(
+                        text = headlineText,
+                        fontFamily = InterFontFamily,
+                        fontWeight = FontWeight.ExtraBold,
+                        fontSize = h1Size,
+                        lineHeight = h1Size * 1.02f,
+                        letterSpacing = (-1.9).sp,
+                        color = RawColors.TextPrimary,
+                        textAlign = TextAlign.Center,
+                        modifier = Modifier
+                            .padding(top = if (isCompact) 12.dp else 18.dp)
+                            .hcRise(entranceState, 100)
                     )
 
-                    Box(
+                    Text(
+                        text = "Voice in, reel out. Everything stays on your phone.",
+                        fontFamily = InterFontFamily,
+                        fontWeight = FontWeight.Normal,
+                        fontSize = 13.sp,
+                        lineHeight = 19.5.sp,
+                        color = RawColors.TextMuted,
+                        textAlign = TextAlign.Center,
                         modifier = Modifier
-                            .padding(bottom = 52.dp)
-                            .clip(
-                                RoundedCornerShape(
-                                    topStart = 14.dp,
-                                    topEnd = 14.dp,
-                                    bottomEnd = 14.dp,
-                                    bottomStart = 4.dp
-                                )
-                            )
-                            .background(RawColors.RaisedCard)
-                            .border(
-                                1.dp,
-                                RawColors.Divider,
-                                RoundedCornerShape(
-                                    topStart = 14.dp,
-                                    topEnd = 14.dp,
-                                    bottomEnd = 14.dp,
-                                    bottomStart = 4.dp
-                                )
-                            )
-                            .clickable(
-                                interactionSource = remember { MutableInteractionSource() },
-                                indication = null
-                            ) { tvIndex = (tvIndex + 1) % TV_LINES.size }
-                            .padding(horizontal = 14.dp, vertical = 10.dp)
+                            .padding(top = if (isCompact) 8.dp else 10.dp)
+                            .widthIn(max = 230.dp)
+                            .hcRise(entranceState, 160)
+                    )
+
+                    // Primary Mint pill CTA (.hc-cta)
+                    RawPressButton(
+                        onClick = { onStartNewReel(Offset(540f, 820f)) },
+                        modifier = Modifier
+                            .padding(top = if (isCompact) 14.dp else 20.dp)
+                            .widthIn(max = 250.dp)
+                            .fillMaxWidth()
+                            .hcRise(entranceState, 220)
                     ) {
-                        AnimatedContent(
-                            targetState = TV_LINES[tvIndex],
-                            transitionSpec = {
-                                if (!animEnabled) fadeIn(tween(0)) togetherWith fadeOut(tween(0))
-                                else fadeIn(tween(180)) togetherWith fadeOut(tween(120))
-                            },
-                            label = "tv_bubble"
-                        ) { line ->
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(52.dp)
+                                .clip(RoundedCornerShape(99.dp))
+                                .background(RawColors.Mint),
+                            horizontalArrangement = Arrangement.Center,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
                             Text(
-                                text = line,
+                                text = "Start creating",
                                 fontFamily = InterFontFamily,
-                                fontWeight = FontWeight.SemiBold,
-                                fontSize = 12.5.sp,
-                                color = RawColors.TextPrimary
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 15.sp,
+                                color = RawColors.PrimaryBtnText
+                            )
+                            Spacer(modifier = Modifier.width(8.dp))
+                            RawIcon(
+                                type = RawIconType.PLAY,
+                                size = 12.dp,
+                                tint = RawColors.PrimaryBtnText
                             )
                         }
                     }
+
+                    // 3 Quick Step buttons (.hc-quick)
+                    Row(
+                        modifier = Modifier
+                            .padding(top = if (isCompact) 12.dp else 16.dp),
+                        horizontalArrangement = Arrangement.spacedBy(10.dp, Alignment.CenterHorizontally),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        HomeQuickStepButton(
+                            kind = PixelMascotKind.MIC_BOT,
+                            label = "VOICE",
+                            onClick = onOpenVoiceStep,
+                            modifier = Modifier.hcRise(entranceState, 260)
+                        )
+                        HomeQuickStepButton(
+                            kind = PixelMascotKind.ZIP_BOT,
+                            label = "PROMPT",
+                            onClick = onOpenPromptStep,
+                            modifier = Modifier.hcRise(entranceState, 300)
+                        )
+                        HomeQuickStepButton(
+                            kind = PixelMascotKind.CODE_BOT,
+                            label = "CODE",
+                            onClick = onOpenCodeStep,
+                            modifier = Modifier.hcRise(entranceState, 340)
+                        )
+                    }
                 }
 
-                Spacer(modifier = Modifier.height(14.dp))
-
-                // Single Hero Typography Creation Card (.ctac — zero workspace/list clutter)
-                RawPressButton(
-                    onClick = { onStartNewReel(Offset(540f, 820f)) },
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    Box(
+                // Bottom recent 2 reels strip (.hc-strip)
+                if (latestTwo.isNotEmpty()) {
+                    Row(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .clip(RoundedCornerShape(24.dp))
-                            .background(RawColors.CardSurface)
-                            .border(1.dp, RawColors.Divider, RoundedCornerShape(24.dp))
-                            .padding(18.dp)
+                            .padding(top = if (isCompact) 14.dp else 18.dp)
+                            .hcRise(entranceState, 380),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
-                        PixelTypeMarqueeBadge(
-                            size = 38.dp,
-                            modifier = Modifier
-                                .align(Alignment.TopEnd)
-                                .padding(end = 6.dp)
-                        )
-
-                        Column(modifier = Modifier.fillMaxWidth()) {
-                            Text(
-                                text = "Typography Reel",
-                                fontFamily = InterFontFamily,
-                                fontWeight = FontWeight.ExtraBold,
-                                fontSize = 24.sp,
-                                letterSpacing = (-1.0).sp,
-                                color = RawColors.TextPrimary
+                        latestTwo.forEach { video ->
+                            HomeRecentReelCard(
+                                video = video,
+                                shineState = artShineState,
+                                onClick = { onOpenReel(video.id) },
+                                modifier = Modifier.weight(1f)
                             )
-                            Spacer(modifier = Modifier.height(5.dp))
-                            Text(
-                                text = "16:9 1080p MP4 offline",
-                                fontFamily = JetBrainsMonoFamily,
-                                fontSize = 11.sp,
-                                color = RawColors.TextMuted
-                            )
-                            Spacer(modifier = Modifier.height(16.dp))
-
-                            // Mint primary capsule button with Play badge (.btn + .pc)
-                            Row(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .height(52.dp)
-                                    .clip(RoundedCornerShape(99.dp))
-                                    .background(RawColors.Mint)
-                                    .padding(horizontal = 22.dp),
-                                horizontalArrangement = Arrangement.Center,
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                Text(
-                                    text = "Start creating",
-                                    style = RawTypography.labelLarge,
-                                    color = RawColors.PrimaryBtnText
-                                )
-                                Spacer(modifier = Modifier.size(10.dp))
-                                Box(
-                                    modifier = Modifier
-                                        .size(28.dp)
-                                        .clip(CircleShape)
-                                        .background(RawColors.PrimaryBtnText),
-                                    contentAlignment = Alignment.Center
-                                ) {
-                                    RawIcon(
-                                        type = RawIconType.PLAY,
-                                        size = 13.dp,
-                                        tint = RawColors.Mint
-                                    )
-                                }
-                            }
+                        }
+                        if (latestTwo.size == 1) {
+                            Spacer(modifier = Modifier.weight(1f))
                         }
                     }
+                } else {
+                    Spacer(modifier = Modifier.height(0.dp))
                 }
             }
+        }
+    }
+}
 
-            Spacer(modifier = Modifier.height(24.dp))
+@Composable
+private fun HomeQuickStepButton(
+    kind: PixelMascotKind,
+    label: String,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    RawPressButton(
+        onClick = onClick,
+        modifier = modifier
+    ) {
+        Column(
+            modifier = Modifier
+                .width(64.dp)
+                .clip(RoundedCornerShape(16.dp))
+                .background(RawColors.CardSurface)
+                .border(1.dp, RawColors.Divider, RoundedCornerShape(16.dp))
+                .padding(vertical = 10.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.spacedBy(6.dp)
+        ) {
+            RawPixelMascot(
+                kind = kind,
+                size = 24.dp,
+                interactive = false,
+                noBob = true,
+                noBlink = true
+            )
+            Text(
+                text = label,
+                fontFamily = JetBrainsMonoFamily,
+                fontWeight = FontWeight.SemiBold,
+                fontSize = 8.5.sp,
+                letterSpacing = 0.8.sp,
+                color = RawColors.TextMuted,
+                maxLines = 1,
+                softWrap = false
+            )
+        }
+    }
+}
 
-            // Floor companion: Interactive sleeping/waking retro pixel cat (.floor + .zz)
+@Composable
+private fun HomeRecentReelCard(
+    video: VideoEntity,
+    shineState: State<Float>?,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    val artLabel = remember(video.id, video.title) { buildReelArtLabel(video.title) }
+    val artBg = remember {
+        Brush.linearGradient(
+            colors = listOf(Color(0xFF22392C), Color(0xFF131A16)),
+            start = Offset.Zero,
+            end = Offset(420f, 160f)
+        )
+    }
+    val shineColor = remember { Color(0x17FFFFFF) }
+    val shinePath = remember { Path() }
+
+    RawPressButton(
+        onClick = onClick,
+        modifier = modifier
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clip(RoundedCornerShape(14.dp))
+                .background(RawColors.CardSurface)
+                .border(1.dp, RawColors.Divider, RoundedCornerShape(14.dp))
+                .padding(9.dp),
+            horizontalAlignment = Alignment.Start
+        ) {
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .height(84.dp),
-                contentAlignment = Alignment.BottomStart
+                    .height(38.dp)
+                    .clip(RoundedCornerShape(9.dp))
+                    .clipToBounds()
+                    .background(artBg),
+                contentAlignment = Alignment.Center
             ) {
-                Box(
-                    modifier = Modifier.clickable(
-                        interactionSource = remember { MutableInteractionSource() },
-                        indication = null
-                    ) {
-                        if (!catAwake) {
-                            scope.launch {
-                                catAwake = true
-                                delay(2800)
-                                catAwake = false
-                            }
-                        }
-                    }
-                ) {
-                    RawPixelMascot(
-                        kind = PixelMascotKind.PEEKING_CAT,
-                        size = 82.dp,
-                        noBlink = !catAwake,
-                        awakeOverride = catAwake
-                    )
-                }
-
-                if (!catAwake && animEnabled) {
-                    val a1 = if (zzPhase < 0.2f) zzPhase / 0.2f else 1f - zzPhase
-                    Text(
-                        text = "Z",
-                        fontFamily = JetBrainsMonoFamily,
-                        fontWeight = FontWeight.Bold,
-                        fontSize = 13.sp,
-                        color = RawColors.TextMuted,
-                        modifier = Modifier
-                            .align(Alignment.BottomStart)
-                            .offset(x = 64.dp, y = (-26).dp)
-                            .graphicsLayer {
-                                translationX = zzPhase * 16f
-                                translationY = -zzPhase * 30f
-                                scaleX = 1f + zzPhase * 0.45f
-                                scaleY = 1f + zzPhase * 0.45f
-                                alpha = a1.coerceIn(0f, 1f)
-                            }
-                    )
-                    val p2 = (zzPhase + 0.45f) % 1f
-                    val a2 = if (p2 < 0.2f) p2 / 0.2f else 1f - p2
-                    Text(
-                        text = "z",
-                        fontFamily = JetBrainsMonoFamily,
-                        fontWeight = FontWeight.Bold,
-                        fontSize = 11.sp,
-                        color = RawColors.TextMuted,
-                        modifier = Modifier
-                            .align(Alignment.BottomStart)
-                            .offset(x = 76.dp, y = (-34).dp)
-                            .graphicsLayer {
-                                translationX = p2 * 14f
-                                translationY = -p2 * 26f
-                                scaleX = 1f + p2 * 0.4f
-                                scaleY = 1f + p2 * 0.4f
-                                alpha = a2.coerceIn(0f, 1f)
-                            }
-                    )
-                }
-
-                androidx.compose.animation.AnimatedVisibility(
-                    visible = catAwake,
-                    enter = fadeIn(tween(180)),
-                    exit = fadeOut(tween(180)),
-                    modifier = Modifier
-                        .align(Alignment.BottomStart)
-                        .offset(x = 34.dp, y = (-42).dp)
-                ) {
-                    Box(
-                        modifier = Modifier
-                            .clip(
-                                RoundedCornerShape(
-                                    topStart = 12.dp,
-                                    topEnd = 12.dp,
-                                    bottomEnd = 12.dp,
-                                    bottomStart = 4.dp
-                                )
-                            )
-                            .background(RawColors.RaisedCard)
-                            .border(
-                                1.dp,
-                                RawColors.Divider,
-                                RoundedCornerShape(
-                                    topStart = 12.dp,
-                                    topEnd = 12.dp,
-                                    bottomEnd = 12.dp,
-                                    bottomStart = 4.dp
-                                )
-                            )
-                            .padding(horizontal = 10.dp, vertical = 6.dp)
-                    ) {
-                        Text(
-                            text = "Mrrp... five more minutes?",
-                            fontFamily = InterFontFamily,
-                            fontWeight = FontWeight.SemiBold,
-                            fontSize = 11.sp,
-                            color = RawColors.TextPrimary
-                        )
+                if (shineState != null) {
+                    Canvas(modifier = Modifier.fillMaxSize()) {
+                        val p = shineState.value
+                        val w = size.width
+                        val h = size.height
+                        val travel = (-0.55f + 2.1f * p) * w
+                        val bandW = w * 0.24f
+                        val skew = h * 0.36f
+                        shinePath.reset()
+                        shinePath.moveTo(travel, 0f)
+                        shinePath.lineTo(travel + bandW, 0f)
+                        shinePath.lineTo(travel + bandW - skew, h)
+                        shinePath.lineTo(travel - skew, h)
+                        shinePath.close()
+                        drawPath(shinePath, shineColor)
                     }
                 }
+                Text(
+                    text = artLabel,
+                    fontFamily = InterFontFamily,
+                    fontWeight = FontWeight.ExtraBold,
+                    fontSize = 11.sp,
+                    letterSpacing = (-0.2).sp,
+                    color = Color(0xFFE8F3EB),
+                    maxLines = 1,
+                    softWrap = false,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.padding(horizontal = 6.dp)
+                )
             }
+
+            Spacer(modifier = Modifier.height(7.dp))
+            Text(
+                text = video.title.ifBlank { "Untitled Reel" },
+                fontFamily = InterFontFamily,
+                fontWeight = FontWeight.SemiBold,
+                fontSize = 10.5.sp,
+                color = RawColors.TextPrimary,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
+            Spacer(modifier = Modifier.height(2.dp))
+            Text(
+                text = FormatHelpers.formatDuration(video.durationSec),
+                fontFamily = JetBrainsMonoFamily,
+                fontWeight = FontWeight.Normal,
+                fontSize = 9.sp,
+                letterSpacing = 0.5.sp,
+                color = RawColors.TextMuted
+            )
         }
     }
 }

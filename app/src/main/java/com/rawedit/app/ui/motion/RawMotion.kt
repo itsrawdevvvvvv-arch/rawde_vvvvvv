@@ -41,6 +41,8 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.State
+import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
@@ -60,6 +62,7 @@ import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.lerp
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.layout.Layout
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
@@ -85,15 +88,27 @@ object RawEasings {
     val OvershootSettle = CubicBezierEasing(0.22f, 1.25f, 0.36f, 1.0f)
 }
 
+private object AnimSettingCache {
+    @Volatile
+    private var cachedEnabled: Boolean? = null
+
+    fun isEnabled(context: android.content.Context): Boolean {
+        cachedEnabled?.let { return it }
+        val scale = runCatching {
+            Settings.Global.getFloat(
+                context.applicationContext.contentResolver,
+                Settings.Global.ANIMATOR_DURATION_SCALE,
+                1f
+            )
+        }.getOrDefault(1f)
+        return (scale > 0f).also { cachedEnabled = it }
+    }
+}
+
 @Composable
 fun rememberAnimationsEnabled(): Boolean {
     val context = LocalContext.current
-    return remember(context) {
-        val scale = runCatching {
-            Settings.Global.getFloat(context.contentResolver, Settings.Global.ANIMATOR_DURATION_SCALE, 1f)
-        }.getOrDefault(1f)
-        scale > 0f
-    }
+    return remember(context) { AnimSettingCache.isEnabled(context) }
 }
 
 /**
@@ -109,7 +124,7 @@ fun RawPressButton(
     val animEnabled = rememberAnimationsEnabled()
     val interactionSource = remember { MutableInteractionSource() }
     val pressed by interactionSource.collectIsPressedAsState()
-    val scale by animateFloatAsState(
+    val scaleState: State<Float> = animateFloatAsState(
         targetValue = if (pressed && enabled && animEnabled) 0.968f else 1f,
         animationSpec = if (animEnabled) {
             spring(dampingRatio = 0.72f, stiffness = 480f)
@@ -122,8 +137,9 @@ fun RawPressButton(
     Box(
         modifier = modifier
             .graphicsLayer {
-                scaleX = scale
-                scaleY = scale
+                val s = scaleState.value
+                scaleX = s
+                scaleY = s
             }
             .clickable(
                 interactionSource = interactionSource,
@@ -189,29 +205,78 @@ fun KineticHeading(
         }
     }
 
-    val total = master.value
     val count = words.size.coerceAtLeast(1)
 
-    Row(
+    Layout(
         modifier = modifier,
-        horizontalArrangement = Arrangement.spacedBy(8.dp),
-        verticalAlignment = Alignment.CenterVertically
-    ) {
-        words.forEachIndexed { idx, word ->
-            val startAt = (idx.toFloat() / (count + 1.5f)).coerceAtMost(0.45f)
-            val span = (1f - startAt).coerceAtLeast(0.35f)
-            Box(modifier = Modifier.clipToBounds()) {
-                Text(
-                    text = word,
-                    style = style,
-                    maxLines = 1,
-                    softWrap = false,
-                    modifier = Modifier.graphicsLayer {
-                        val p = ((total - startAt) / span).coerceIn(0f, 1f)
-                        translationY = (1f - p) * 24f
-                        alpha = p
-                    }
-                )
+        content = {
+            words.forEachIndexed { idx, word ->
+                val startAt = (idx.toFloat() / (count + 1.5f)).coerceAtMost(0.45f)
+                val span = (1f - startAt).coerceAtLeast(0.35f)
+                Box(modifier = Modifier.clipToBounds()) {
+                    Text(
+                        text = word,
+                        style = style,
+                        maxLines = 1,
+                        softWrap = false,
+                        modifier = Modifier.graphicsLayer {
+                            val p = ((master.value - startAt) / span).coerceIn(0f, 1f)
+                            translationY = (1f - p) * 24f
+                            alpha = p
+                        }
+                    )
+                }
+            }
+        }
+    ) { measurables, constraints ->
+        val hGap = 8.dp.roundToPx()
+        val vGap = 2.dp.roundToPx()
+        val maxW = if (constraints.hasBoundedWidth) constraints.maxWidth else Int.MAX_VALUE
+        val childConstraints = constraints.copy(minWidth = 0, minHeight = 0)
+        val placeables = measurables.map { it.measure(childConstraints) }
+
+        val rows = ArrayList<MutableList<androidx.compose.ui.layout.Placeable>>()
+        val rowWidths = ArrayList<Int>()
+        val rowHeights = ArrayList<Int>()
+        var curRow = mutableListOf<androidx.compose.ui.layout.Placeable>()
+        var curW = 0
+        var curH = 0
+
+        for (p in placeables) {
+            val nextW = if (curRow.isEmpty()) p.width else curW + hGap + p.width
+            if (curRow.isNotEmpty() && nextW > maxW) {
+                rows += curRow
+                rowWidths += curW
+                rowHeights += curH
+                curRow = mutableListOf(p)
+                curW = p.width
+                curH = p.height
+            } else {
+                curRow += p
+                curW = nextW
+                if (p.height > curH) curH = p.height
+            }
+        }
+        if (curRow.isNotEmpty()) {
+            rows += curRow
+            rowWidths += curW
+            rowHeights += curH
+        }
+
+        val totalW = (rowWidths.maxOrNull() ?: 0).coerceIn(constraints.minWidth, constraints.maxWidth)
+        val totalH = (rowHeights.sum() + (rows.size - 1).coerceAtLeast(0) * vGap)
+            .coerceIn(constraints.minHeight, constraints.maxHeight)
+
+        layout(totalW, totalH) {
+            var y = 0
+            rows.forEachIndexed { rIdx, row ->
+                val rh = rowHeights[rIdx]
+                var x = 0
+                for (p in row) {
+                    p.placeRelative(x, y + (rh - p.height) / 2)
+                    x += p.width + hGap
+                }
+                y += rh + vGap
             }
         }
     }
@@ -312,28 +377,30 @@ fun SwipeToCreateSlider(
     val knobPx = with(density) { knobSizeDp.toPx() }
     val maxTravelPx = (widthPx - knobPx - padPx * 2f).coerceAtLeast(1f)
 
-    var dragRatio by remember { mutableFloatStateOf(0f) }
+    val ratioAnim = remember { Animatable(0f) }
     var triggered by remember { mutableStateOf(false) }
     val shakeOffset = remember { Animatable(0f) }
 
-    val animatedRatio by animateFloatAsState(
-        targetValue = dragRatio,
-        animationSpec = if (animEnabled) spring(dampingRatio = 0.78f, stiffness = 360f) else tween(0),
-        label = "swipe_ratio"
-    )
-    val effectiveRatio = if (dragRatio > 0f) dragRatio else animatedRatio
-
-    val chevronPhase = if (unlocked && animEnabled) {
+    val chevronPhaseState: State<Float>? = if (unlocked && animEnabled) {
         val infTransition = rememberInfiniteTransition(label = "chevrons")
-        val p by infTransition.animateFloat(
+        infTransition.animateFloat(
             initialValue = 0f,
             targetValue = 1f,
             animationSpec = infiniteRepeatable(tween(1200, easing = LinearEasing), RepeatMode.Restart),
             label = "chevron_wave"
         )
-        p
     } else {
-        0f
+        null
+    }
+
+    val pastMidpoint by remember(unlocked) {
+        derivedStateOf { unlocked && ratioAnim.value > 0.35f }
+    }
+    val showReleaseLabel by remember(unlocked) {
+        derivedStateOf { unlocked && ratioAnim.value > 0.78f }
+    }
+    val showRightTag by remember(unlocked) {
+        derivedStateOf { unlocked && ratioAnim.value < 0.55f }
     }
 
     fun triggerLockedBump() {
@@ -367,10 +434,11 @@ fun SwipeToCreateSlider(
             .padding(horizontal = 4.dp),
         contentAlignment = Alignment.CenterStart
     ) {
-        // GPU Draw-phase trail & chevrons
+        // GPU Draw-phase trail & chevrons (ZERO recompositions while dragging or idling!)
         Canvas(modifier = Modifier.fillMaxSize()) {
-            val fillWidth = (knobPx + padPx + maxTravelPx * effectiveRatio).coerceIn(knobPx, size.width)
-            if (unlocked && effectiveRatio > 0.01f) {
+            val ratio = ratioAnim.value
+            val fillWidth = (knobPx + padPx + maxTravelPx * ratio).coerceIn(knobPx, size.width)
+            if (unlocked && ratio > 0.01f) {
                 drawRoundRect(
                     color = RawColors.Mint,
                     topLeft = Offset(0f, 2.dp.toPx()),
@@ -396,13 +464,15 @@ fun SwipeToCreateSlider(
                     val cy = size.height * 0.5f
                     val arm = 3.6.dp.toPx()
                     val step = 7.dp.toPx()
+                    val phase = chevronPhaseState?.value ?: 0f
+                    val ratio = ratioAnim.value
                     val baseCol = if (unlocked) {
-                        if (effectiveRatio > 0.35f) RawColors.PrimaryBtnText else RawColors.Mint
+                        if (ratio > 0.35f) RawColors.PrimaryBtnText else RawColors.Mint
                     } else {
                         Color(0xFF6E746E)
                     }
                     for (c in 0..2) {
-                        val wave = ((chevronPhase * 3f - c + 3f) % 3f)
+                        val wave = ((phase * 3f - c + 3f) % 3f)
                         val a = if (unlocked) (1f - wave / 2f).coerceIn(0.28f, 1f) else 0.5f
                         val cx = 4.dp.toPx() + c * step
                         drawLine(baseCol.copy(alpha = a), Offset(cx - arm, cy - arm), Offset(cx, cy), 1.8.dp.toPx(), StrokeCap.Square)
@@ -410,23 +480,19 @@ fun SwipeToCreateSlider(
                     }
                 }
 
-                val labelText = when {
-                    !unlocked -> "Swipe to create"
-                    effectiveRatio > 0.78f -> "Release to create"
-                    else -> "Swipe to create"
-                }
+                val labelText = if (showReleaseLabel) "Release to create" else "Swipe to create"
                 Text(
                     text = labelText,
                     style = RawTypography.labelLarge.copy(fontSize = 13.5.sp, fontWeight = FontWeight.SemiBold),
                     color = when {
                         !unlocked -> Color(0xFF6E746E)
-                        effectiveRatio > 0.35f -> RawColors.PrimaryBtnText
+                        pastMidpoint -> RawColors.PrimaryBtnText
                         else -> RawColors.TextMuted
                     }
                 )
             }
 
-            if (unlocked && effectiveRatio < 0.55f) {
+            if (showRightTag) {
                 Box(
                     modifier = Modifier
                         .clip(RoundedCornerShape(99.dp))
@@ -444,10 +510,10 @@ fun SwipeToCreateSlider(
             }
         }
 
-        // Circular Draggable Knob moved via GPU graphicsLayer (0 relayout!)
+        // Circular Draggable Knob moved via GPU graphicsLayer (0 relayout, 0 recompose!)
         Box(
             modifier = Modifier
-                .graphicsLayer { translationX = effectiveRatio * maxTravelPx }
+                .graphicsLayer { translationX = ratioAnim.value * maxTravelPx }
                 .size(knobSizeDp)
                 .clip(CircleShape)
                 .background(if (unlocked) RawColors.Mint else RawColors.PillGrey)
@@ -457,8 +523,8 @@ fun SwipeToCreateSlider(
                         onDragStart = { triggered = false },
                         onHorizontalDrag = { _, dragAmount ->
                             if (!triggered) {
-                                val next = (dragRatio + dragAmount / maxTravelPx).coerceIn(0f, 1f)
-                                dragRatio = next
+                                val next = (ratioAnim.value + dragAmount / maxTravelPx).coerceIn(0f, 1f)
+                                scope.launch { ratioAnim.snapTo(next) }
                                 if (next >= 0.85f && !triggered) {
                                     triggered = true
                                     haptic.performHapticFeedback(HapticFeedbackType.LongPress)
@@ -467,10 +533,20 @@ fun SwipeToCreateSlider(
                             }
                         },
                         onDragEnd = {
-                            if (!triggered) dragRatio = 0f
+                            if (!triggered) {
+                                scope.launch {
+                                    if (animEnabled) {
+                                        ratioAnim.animateTo(0f, spring(dampingRatio = 0.78f, stiffness = 360f))
+                                    } else {
+                                        ratioAnim.snapTo(0f)
+                                    }
+                                }
+                            }
                         },
                         onDragCancel = {
-                            if (!triggered) dragRatio = 0f
+                            if (!triggered) {
+                                scope.launch { ratioAnim.snapTo(0f) }
+                            }
                         }
                     )
                 },
@@ -506,27 +582,25 @@ fun <T> RawScreenTransition(
             } else if (isForward) {
                 ContentTransform(
                     targetContentEnter = slideInHorizontally(
-                        tween(380, easing = RawEasings.Morph)
-                    ) { (it * 0.28f).roundToInt() } +
-                        fadeIn(tween(260, easing = RawEasings.Morph)),
+                        tween(280, easing = RawEasings.Morph)
+                    ) { (it * 0.22f).roundToInt() } +
+                        fadeIn(tween(210, easing = RawEasings.Morph)),
                     initialContentExit = slideOutHorizontally(
-                        tween(340, easing = RawEasings.Morph)
-                    ) { -(it * 0.14f).roundToInt() } +
-                        scaleOut(targetScale = 0.97f, animationSpec = tween(340, easing = RawEasings.Morph)) +
-                        fadeOut(tween(210)),
+                        tween(250, easing = RawEasings.Morph)
+                    ) { -(it * 0.12f).roundToInt() } +
+                        fadeOut(tween(180)),
                     targetContentZIndex = 1f
                 )
             } else {
                 ContentTransform(
                     targetContentEnter = slideInHorizontally(
-                        tween(360, easing = RawEasings.Morph)
-                    ) { -(it * 0.14f).roundToInt() } +
-                        scaleIn(initialScale = 0.97f, animationSpec = tween(360, easing = RawEasings.Morph)) +
-                        fadeIn(tween(240, easing = RawEasings.Morph)),
+                        tween(260, easing = RawEasings.Morph)
+                    ) { -(it * 0.12f).roundToInt() } +
+                        fadeIn(tween(200, easing = RawEasings.Morph)),
                     initialContentExit = slideOutHorizontally(
-                        tween(320, easing = RawEasings.Morph)
-                    ) { (it * 0.28f).roundToInt() } +
-                        fadeOut(tween(200)),
+                        tween(240, easing = RawEasings.Morph)
+                    ) { (it * 0.22f).roundToInt() } +
+                        fadeOut(tween(180)),
                     targetContentZIndex = 0f
                 )
             }
@@ -557,13 +631,11 @@ fun <T : Enum<T>> RawTabMorphTransition(
                 val movingRight = targetState.ordinal >= initialState.ordinal
                 val enterSlideDir = if (movingRight) 1 else -1
                 val exitSlideDir = -enterSlideDir
-                (slideInHorizontally(tween(300, easing = RawEasings.Morph)) { (it * 0.08f * enterSlideDir).roundToInt() } +
-                    scaleIn(initialScale = 0.98f, animationSpec = tween(300, easing = RawEasings.Morph)) +
-                    fadeIn(tween(240, easing = RawEasings.Morph)))
+                (slideInHorizontally(tween(220, easing = RawEasings.Morph)) { (it * 0.06f * enterSlideDir).roundToInt() } +
+                    fadeIn(tween(190, easing = RawEasings.Morph)))
                     .togetherWith(
-                        slideOutHorizontally(tween(250, easing = RawEasings.Morph)) { (it * 0.06f * exitSlideDir).roundToInt() } +
-                            scaleOut(targetScale = 0.98f, animationSpec = tween(250, easing = RawEasings.Morph)) +
-                            fadeOut(tween(180))
+                        slideOutHorizontally(tween(180, easing = RawEasings.Morph)) { (it * 0.04f * exitSlideDir).roundToInt() } +
+                            fadeOut(tween(150))
                     )
             }
         },
@@ -611,15 +683,18 @@ fun ResultCelebrationOverlay(
     }
 
     val progress = remember { Animatable(0f) }
+    var finished by remember(play) { mutableStateOf(false) }
     LaunchedEffect(play) {
+        finished = false
         progress.snapTo(0f)
         progress.animateTo(1f, tween(durationMillis = 1900, easing = LinearEasing))
+        finished = true
     }
 
-    val p = progress.value
-    if (p >= 0.995f) return
+    if (finished) return
 
     Canvas(modifier = modifier) {
+        val p = progress.value
         val w = size.width
         val h = size.height
         val fadeOut = (1f - ((p - 0.65f) / 0.35f).coerceIn(0f, 1f))

@@ -184,6 +184,27 @@ private fun MainAuthenticatedHost(
         }
     }
 
+    fun openQuickStep(buildStep: (Long) -> AppRoute) {
+        if (navigatingNewDraft) return
+        navigatingNewDraft = true
+        scope.launch {
+            try {
+                val activeDraft = projects.firstOrNull { it.state == ProjectEntity.STATE_IN_PROGRESS }
+                val projectId = activeDraft?.id ?: container.repository.createEmptyProject()
+                val hub = AppRoute.CreateHub(projectId)
+                val step = buildStep(projectId)
+                isForward = true
+                backStack = if (backStack.lastOrNull() == hub) {
+                    backStack + step
+                } else {
+                    backStack + hub + step
+                }
+            } finally {
+                navigatingNewDraft = false
+            }
+        }
+    }
+
     BackHandler(enabled = backStack.size > 1 || (currentRoute == AppRoute.Tabs && currentTab != MainTab.HOME)) {
         if (backStack.size > 1) {
             popRoute()
@@ -209,23 +230,30 @@ private fun MainAuthenticatedHost(
                             modifier = Modifier.fillMaxSize()
                         ) { tab ->
                             when (tab) {
-                                MainTab.HOME -> HomeScreen(
-                                    userProfile = userProfile,
-                                    onOpenProfile = { switchTab(MainTab.PROFILE) },
-                                    onStartNewReel = { _ ->
-                                        if (!navigatingNewDraft) {
-                                            navigatingNewDraft = true
-                                            scope.launch {
-                                                try {
-                                                    val id = container.repository.createEmptyProject()
-                                                    pushRoute(AppRoute.CreateHub(id))
-                                                } finally {
-                                                    navigatingNewDraft = false
+                                MainTab.HOME -> {
+                                    val recentVideos = remember(videos) { videos.take(2) }
+                                    HomeScreen(
+                                        userProfile = userProfile,
+                                        recentVideos = recentVideos,
+                                        onStartNewReel = { _ ->
+                                            if (!navigatingNewDraft) {
+                                                navigatingNewDraft = true
+                                                scope.launch {
+                                                    try {
+                                                        val id = container.repository.createEmptyProject()
+                                                        pushRoute(AppRoute.CreateHub(id))
+                                                    } finally {
+                                                        navigatingNewDraft = false
+                                                    }
                                                 }
                                             }
-                                        }
-                                    }
-                                )
+                                        },
+                                        onOpenVoiceStep = { openQuickStep { AppRoute.AddVoice(it) } },
+                                        onOpenPromptStep = { openQuickStep { AppRoute.CopyPrompt(it) } },
+                                        onOpenCodeStep = { openQuickStep { AppRoute.CodePaste(it) } },
+                                        onOpenReel = { vid -> pushRoute(AppRoute.Result(vid, celebrate = false)) }
+                                    )
+                                }
 
                                 MainTab.CREATE -> Unit
 
