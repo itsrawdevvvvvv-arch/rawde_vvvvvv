@@ -9,6 +9,12 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.LinearEasing
+import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
@@ -31,12 +37,12 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.navigationBarsPadding
-import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.CircularProgressIndicator
@@ -54,12 +60,16 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.CornerRadius
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.PathEffect
 import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -73,8 +83,9 @@ import com.rawedit.app.domain.SrtParser
 import com.rawedit.app.ui.components.BigPrimaryButton
 import com.rawedit.app.ui.components.CircleActionButton
 import com.rawedit.app.ui.components.FormatHelpers
+import com.rawedit.app.ui.components.RawSecondaryButton
+import com.rawedit.app.ui.components.RawToastBanner
 import com.rawedit.app.ui.icons.PixelMascotKind
-import com.rawedit.app.ui.icons.PixelSparkle
 import com.rawedit.app.ui.icons.RawIcon
 import com.rawedit.app.ui.icons.RawIconType
 import com.rawedit.app.ui.icons.RawPixelMascot
@@ -83,6 +94,7 @@ import com.rawedit.app.ui.motion.RawEasings
 import com.rawedit.app.ui.motion.RawPressButton
 import com.rawedit.app.ui.motion.SplitFlapText
 import com.rawedit.app.ui.motion.rememberAnimationsEnabled
+import com.rawedit.app.ui.theme.InterFontFamily
 import com.rawedit.app.ui.theme.JetBrainsMonoFamily
 import com.rawedit.app.ui.theme.RawColors
 import com.rawedit.app.ui.theme.RawTypography
@@ -128,6 +140,7 @@ fun AddVoiceScreen(
 ) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
+    val animEnabled = rememberAnimationsEnabled()
 
     var audioPath by remember(project.id) { mutableStateOf(project.audioUri) }
     var audioName by remember(project.id) { mutableStateOf(project.audioName) }
@@ -143,6 +156,16 @@ fun AddVoiceScreen(
     var topic by remember(project.id) { mutableStateOf(cacheManager.resolveTopicText(project.topic)) }
     var forceRawEditTopic by remember { mutableStateOf(false) }
     var savingVoice by remember { mutableStateOf(false) }
+    var toastMsg by remember { mutableStateOf<String?>(null) }
+
+    val dzShake = remember { Animatable(0f) }
+
+    LaunchedEffect(toastMsg) {
+        if (toastMsg != null) {
+            delay(1900)
+            toastMsg = null
+        }
+    }
 
     val audioPicker = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.OpenDocument()
@@ -189,39 +212,44 @@ fun AddVoiceScreen(
         }
     }
 
-    Column(
+    val isSelected = audioPath.isNotBlank() && !loadingAudio
+    val dashPhase = if (animEnabled && !isSelected) {
+        val inf = rememberInfiniteTransition(label = "dz_dash")
+        val p by inf.animateFloat(
+            initialValue = 0f,
+            targetValue = 28f,
+            animationSpec = infiniteRepeatable(tween(1400, easing = LinearEasing), RepeatMode.Restart),
+            label = "dash"
+        )
+        p
+    } else {
+        0f
+    }
+
+    Box(
         modifier = Modifier
             .fillMaxSize()
             .background(RawColors.BgPrimary)
             .statusBarsPadding()
-            .navigationBarsPadding()
             .imePadding()
-            .padding(20.dp),
-        verticalArrangement = Arrangement.SpaceBetween
     ) {
         Column(
             modifier = Modifier
-                .weight(1f)
-                .verticalScroll(rememberScrollState()),
-            verticalArrangement = Arrangement.spacedBy(16.dp)
+                .fillMaxSize()
+                .verticalScroll(rememberScrollState())
+                .padding(start = 18.dp, end = 18.dp, bottom = 120.dp),
+            verticalArrangement = Arrangement.spacedBy(14.dp)
         ) {
+            // Top bar with centered/right MIC_BOT
             Row(
-                modifier = Modifier.fillMaxWidth(),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(58.dp),
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                CircleActionButton(icon = RawIconType.BACK, onClick = onBack)
-                Box(contentAlignment = Alignment.TopEnd) {
-                    RawPixelMascot(
-                        kind = PixelMascotKind.MIC_BOT,
-                        size = 44.dp
-                    )
-                    PixelSparkle(
-                        size = 11.dp,
-                        phaseOffsetMs = 120,
-                        modifier = Modifier.offset(x = 4.dp, y = (-4).dp)
-                    )
-                }
+                CircleActionButton(icon = RawIconType.BACK, onClick = onBack, size = 42.dp)
+                RawPixelMascot(kind = PixelMascotKind.MIC_BOT, size = 40.dp)
             }
 
             KineticHeading(
@@ -229,45 +257,49 @@ fun AddVoiceScreen(
                 style = RawTypography.headlineLarge
             )
 
-            // Dashed drop area for MP3/M4A/WAV/AAC
+            // Dashed Mint Dropzone (.dz)
             RawPressButton(
-                onClick = {
-                    audioPicker.launch(arrayOf("audio/*", "application/ogg"))
-                }
+                onClick = { audioPicker.launch(arrayOf("audio/*", "application/ogg")) },
+                modifier = Modifier.graphicsLayer { translationX = dzShake.value }
             ) {
                 Box(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .height(156.dp)
-                        .clip(RoundedCornerShape(24.dp))
-                        .background(RawColors.HeroSurface)
-                ) {
-                    Canvas(modifier = Modifier.fillMaxSize()) {
-                        drawRoundRect(
-                            color = if (audioError != null) RawColors.ErrorCoral else RawColors.PillGrey,
-                            style = Stroke(
-                                width = 2.dp.toPx(),
-                                pathEffect = PathEffect.dashPathEffect(floatArrayOf(16f, 12f), 0f)
-                            ),
-                            cornerRadius = CornerRadius(24.dp.toPx())
+                        .height(190.dp)
+                        .clip(RoundedCornerShape(22.dp))
+                        .background(if (isSelected) RawColors.MintSoft else RawColors.CardSurface)
+                        .then(
+                            if (isSelected) {
+                                Modifier.border(1.dp, RawColors.MintBorder, RoundedCornerShape(22.dp))
+                            } else Modifier
                         )
+                ) {
+                    if (!isSelected) {
+                        Canvas(modifier = Modifier.fillMaxSize()) {
+                            drawRoundRect(
+                                color = if (audioError != null) RawColors.ErrorCoral else RawColors.Mint.copy(alpha = 0.42f),
+                                style = Stroke(
+                                    width = 1.6.dp.toPx(),
+                                    pathEffect = PathEffect.dashPathEffect(floatArrayOf(16f, 12f), dashPhase)
+                                ),
+                                cornerRadius = CornerRadius(22.dp.toPx())
+                            )
+                        }
                     }
+
                     val dropState = when {
                         loadingAudio -> 1
-                        audioPath.isNotBlank() -> 2
+                        isSelected -> 2
                         else -> 0
                     }
                     AnimatedContent(
                         targetState = dropState,
                         transitionSpec = {
-                            (fadeIn(tween(220, easing = RawEasings.Morph)) +
-                                scaleIn(initialScale = 0.96f, animationSpec = tween(220, easing = RawEasings.Morph)))
-                                .togetherWith(
-                                    fadeOut(tween(150)) +
-                                        scaleOut(targetScale = 0.96f, animationSpec = tween(150))
-                                )
+                            if (!animEnabled) fadeIn(tween(0)) togetherWith fadeOut(tween(0))
+                            else (fadeIn(tween(200)) + scaleIn(initialScale = 0.96f, animationSpec = tween(200)))
+                                .togetherWith(fadeOut(tween(140)) + scaleOut(targetScale = 0.96f, animationSpec = tween(140)))
                         },
-                        label = "voice_drop_morph"
+                        label = "voice_dz_state"
                     ) { s ->
                         Column(
                             modifier = Modifier
@@ -279,29 +311,63 @@ fun AddVoiceScreen(
                             when (s) {
                                 1 -> {
                                     CircularProgressIndicator(
-                                        color = RawColors.TextPrimary,
-                                        modifier = Modifier.size(30.dp),
+                                        color = RawColors.Mint,
+                                        modifier = Modifier.size(32.dp),
                                         strokeWidth = 2.5.dp
                                     )
-                                    Spacer(modifier = Modifier.height(10.dp))
-                                    Text("Reading voiceover...", style = RawTypography.bodyMedium)
+                                    Spacer(modifier = Modifier.height(12.dp))
+                                    Text("Reading voiceover...", style = RawTypography.titleMedium)
                                 }
                                 2 -> {
-                                    RawIcon(RawIconType.CHECK, size = 28.dp, tint = RawColors.SuccessMint)
-                                    Spacer(modifier = Modifier.height(8.dp))
-                                    Text(audioName, style = RawTypography.titleMedium, maxLines = 1)
+                                    Box(
+                                        modifier = Modifier
+                                            .size(54.dp)
+                                            .clip(CircleShape)
+                                            .background(RawColors.Mint),
+                                        contentAlignment = Alignment.Center
+                                    ) {
+                                        RawIcon(RawIconType.CHECK, size = 26.dp, tint = RawColors.PrimaryBtnText)
+                                    }
+                                    Spacer(modifier = Modifier.height(10.dp))
+                                    Text(
+                                        text = audioName,
+                                        style = RawTypography.titleMedium.copy(fontWeight = FontWeight.Bold),
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis
+                                    )
+                                    Spacer(modifier = Modifier.height(3.dp))
+                                    Text(
+                                        text = "${FormatHelpers.formatDuration(audioDuration)}  •  ${FormatHelpers.formatFileSize(audioSize)}",
+                                        style = RawTypography.labelMedium
+                                    )
                                     Spacer(modifier = Modifier.height(4.dp))
                                     Text(
-                                        "${FormatHelpers.formatDuration(audioDuration)}  •  ${FormatHelpers.formatFileSize(audioSize)}  •  Tap to change",
-                                        style = RawTypography.labelMedium
+                                        text = "Tap to change",
+                                        fontSize = 12.5.sp,
+                                        color = RawColors.TextMuted,
+                                        textDecoration = TextDecoration.Underline
                                     )
                                 }
                                 else -> {
-                                    RawIcon(RawIconType.MIC, size = 28.dp, tint = RawColors.TextPrimary)
+                                    Box(
+                                        modifier = Modifier
+                                            .size(58.dp)
+                                            .clip(RoundedCornerShape(18.dp))
+                                            .background(RawColors.MintSoft),
+                                        contentAlignment = Alignment.Center
+                                    ) {
+                                        RawIcon(RawIconType.SHARE, size = 28.dp, tint = RawColors.Mint)
+                                    }
                                     Spacer(modifier = Modifier.height(10.dp))
-                                    Text("Tap to pick voiceover", style = RawTypography.titleMedium)
-                                    Spacer(modifier = Modifier.height(4.dp))
-                                    Text("MP3, M4A, WAV, AAC  •  1s to 20m", style = RawTypography.bodyMedium)
+                                    Text(
+                                        text = "Tap to pick voiceover",
+                                        style = RawTypography.titleMedium.copy(fontWeight = FontWeight.Bold)
+                                    )
+                                    Spacer(modifier = Modifier.height(3.dp))
+                                    Text(
+                                        text = "MP3, M4A, WAV, AAC  •  1s to 20m",
+                                        style = RawTypography.labelMedium
+                                    )
                                 }
                             }
                         }
@@ -314,50 +380,65 @@ fun AddVoiceScreen(
                     modifier = Modifier
                         .fillMaxWidth()
                         .clip(RoundedCornerShape(14.dp))
-                        .background(RawColors.ErrorCoral.copy(alpha = 0.14f))
-                        .border(1.dp, RawColors.ErrorCoral.copy(alpha = 0.5f), RoundedCornerShape(14.dp))
+                        .background(RawColors.ErrorSoft)
+                        .border(1.dp, RawColors.ErrorBorder, RoundedCornerShape(14.dp))
                         .padding(14.dp)
                 ) {
                     Text(text = msg, style = RawTypography.bodyMedium, color = RawColors.ErrorCoral)
                 }
             }
 
-            // Optional SRT button
+            // Optional SRT file card (.card.step)
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .clip(RoundedCornerShape(20.dp))
+                    .clip(RoundedCornerShape(22.dp))
                     .background(RawColors.CardSurface)
-                    .border(1.dp, RawColors.Divider, RoundedCornerShape(20.dp))
+                    .border(1.dp, RawColors.Divider, RoundedCornerShape(22.dp))
                     .clickable { srtPicker.launch(arrayOf("*/*")) }
-                    .padding(16.dp),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
+                    .padding(14.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(12.dp)
             ) {
+                Box(
+                    modifier = Modifier
+                        .size(44.dp)
+                        .clip(RoundedCornerShape(14.dp))
+                        .background(RawColors.RaisedCard)
+                        .border(1.dp, RawColors.Divider, RoundedCornerShape(14.dp)),
+                    contentAlignment = Alignment.Center
+                ) {
+                    RawIcon(RawIconType.SRT, size = 20.dp, tint = RawColors.TextPrimary)
+                }
                 Column(modifier = Modifier.weight(1f)) {
-                    Text("Add SRT file (optional)", style = RawTypography.titleMedium)
-                    Spacer(modifier = Modifier.height(3.dp))
+                    Text(
+                        text = "Add SRT file (optional)",
+                        style = RawTypography.titleMedium.copy(fontSize = 15.5.sp, fontWeight = FontWeight.Bold)
+                    )
+                    Spacer(modifier = Modifier.height(2.dp))
                     Text(
                         text = if (srtCueCount > 0) "$srtCueCount subtitle cues attached" else "Gives Cloud AI exact timing per word",
-                        style = RawTypography.bodyMedium,
-                        color = if (srtCueCount > 0) RawColors.SuccessMint else RawColors.TextMuted
+                        fontSize = 12.sp,
+                        color = if (srtCueCount > 0) RawColors.Mint else RawColors.TextMuted
                     )
                 }
                 if (srtCueCount > 0) {
-                    Text(
+                    RawSecondaryButton(
                         text = "Remove",
-                        style = RawTypography.labelMedium,
-                        color = RawColors.ErrorCoral,
-                        modifier = Modifier
-                            .clip(RoundedCornerShape(10.dp))
-                            .clickable {
-                                srtText = ""
-                                srtCueCount = 0
-                            }
-                            .padding(horizontal = 10.dp, vertical = 6.dp)
+                        height = 38.dp,
+                        isDanger = true,
+                        fillWidth = false,
+                        onClick = {
+                            srtText = ""
+                            srtCueCount = 0
+                        }
                     )
                 } else {
-                    RawIcon(RawIconType.PLUS, size = 20.dp)
+                    CircleActionButton(
+                        icon = RawIconType.PLUS,
+                        size = 36.dp,
+                        onClick = { srtPicker.launch(arrayOf("*/*")) }
+                    )
                 }
             }
 
@@ -365,100 +446,63 @@ fun AddVoiceScreen(
                 Text(text = msg, style = RawTypography.bodyMedium, color = RawColors.ErrorCoral)
             }
 
-            // Unlimited voiceover script / topic / notes input
-            Column {
+            // Script / topic notes (.lbl + #nl + #nt)
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text(
+                    text = "Script / topic notes (optional)",
+                    style = RawTypography.bodyMedium.copy(fontWeight = FontWeight.SemiBold, fontSize = 13.sp),
+                    color = RawColors.TextMuted,
+                    modifier = Modifier.padding(start = 2.dp)
+                )
                 Row(
-                    modifier = Modifier.fillMaxWidth(),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 2.dp),
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     Text(
-                        text = "Script / topic notes (optional)",
-                        style = RawTypography.titleMedium,
-                        modifier = Modifier.weight(1f)
+                        text = "${topic.length} chars • unlimited",
+                        fontFamily = JetBrainsMonoFamily,
+                        fontWeight = FontWeight.SemiBold,
+                        fontSize = 11.sp,
+                        color = RawColors.TextMuted
                     )
-                    Row(
-                        horizontalArrangement = Arrangement.spacedBy(8.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Text(
-                            text = "${topic.length} chars • unlimited",
-                            style = RawTypography.labelSmall,
-                            color = RawColors.TextMuted
-                        )
-                        Text(
-                            text = "Paste",
-                            style = RawTypography.labelSmall,
-                            color = RawColors.PrimaryBtnText,
-                            modifier = Modifier
-                                .clip(RoundedCornerShape(8.dp))
-                                .background(RawColors.PrimaryBtnBg)
-                                .clickable {
-                                    scope.launch {
-                                        val txt = readClipboardText(context)
-                                        if (txt.isNotBlank()) {
-                                            topic = txt
-                                            forceRawEditTopic = false
-                                        }
-                                    }
+                    RawSecondaryButton(
+                        text = "Paste",
+                        height = 34.dp,
+                        leadingIcon = RawIconType.PASTE,
+                        fillWidth = false,
+                        onClick = {
+                            scope.launch {
+                                val txt = readClipboardText(context)
+                                if (txt.isNotBlank()) {
+                                    topic = txt
+                                    forceRawEditTopic = false
+                                    toastMsg = "Pasted ${txt.length} chars"
+                                } else {
+                                    toastMsg = "Clipboard is empty"
                                 }
-                                .padding(horizontal = 8.dp, vertical = 4.dp)
-                        )
-                    }
+                            }
+                        }
+                    )
                 }
-                Spacer(modifier = Modifier.height(8.dp))
+
                 if (topic.length > LARGE_EDITOR_THRESHOLD && !forceRawEditTopic) {
                     Column(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .height(170.dp)
-                            .clip(RoundedCornerShape(18.dp))
+                            .clip(RoundedCornerShape(22.dp))
                             .background(RawColors.CardSurface)
-                            .border(1.dp, RawColors.Divider, RoundedCornerShape(18.dp))
+                            .border(1.dp, RawColors.Divider, RoundedCornerShape(22.dp))
                             .padding(14.dp),
-                        verticalArrangement = Arrangement.spacedBy(8.dp)
+                        verticalArrangement = Arrangement.spacedBy(10.dp)
                     ) {
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.SpaceBetween,
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Text(
-                                text = "${topic.length} chars stored (unlimited)",
-                                style = RawTypography.labelMedium,
-                                color = RawColors.SuccessMint
-                            )
-                            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                                Text(
-                                    text = "Edit raw",
-                                    style = RawTypography.labelSmall,
-                                    color = RawColors.TextMuted,
-                                    modifier = Modifier
-                                        .clip(RoundedCornerShape(8.dp))
-                                        .background(RawColors.RaisedCard)
-                                        .clickable { forceRawEditTopic = true }
-                                        .padding(horizontal = 8.dp, vertical = 4.dp)
-                                )
-                                Text(
-                                    text = "Clear",
-                                    style = RawTypography.labelSmall,
-                                    color = RawColors.ErrorCoral,
-                                    modifier = Modifier
-                                        .clip(RoundedCornerShape(8.dp))
-                                        .background(RawColors.RaisedCard)
-                                        .clickable {
-                                            topic = ""
-                                            forceRawEditTopic = false
-                                        }
-                                        .padding(horizontal = 8.dp, vertical = 4.dp)
-                                )
-                            }
-                        }
                         val preview = topic.take(900) + "\n\n... (${topic.length - 1300} middle chars kept) ...\n\n" + topic.takeLast(400)
                         Box(
                             modifier = Modifier
-                                .weight(1f)
                                 .fillMaxWidth()
+                                .heightIn(max = 110.dp)
                                 .verticalScroll(rememberScrollState())
                         ) {
                             Text(
@@ -467,28 +511,43 @@ fun AddVoiceScreen(
                                 color = RawColors.TextMuted
                             )
                         }
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(10.dp)
+                        ) {
+                            RawSecondaryButton(
+                                text = "Edit raw",
+                                height = 40.dp,
+                                onClick = { forceRawEditTopic = true },
+                                modifier = Modifier.weight(1f)
+                            )
+                            RawSecondaryButton(
+                                text = "Clear",
+                                height = 40.dp,
+                                isDanger = true,
+                                onClick = {
+                                    topic = ""
+                                    forceRawEditTopic = false
+                                },
+                                modifier = Modifier.weight(1f)
+                            )
+                        }
                     }
                 } else {
                     OutlinedTextField(
                         value = topic,
                         onValueChange = { topic = it },
-                        placeholder = {
-                            Text(
-                                "Paste full voiceover script, topic, hook idea, or words to emphasise (unlimited)",
-                                color = RawColors.TextMuted
-                            )
-                        },
-                        minLines = 3,
+                        placeholder = { Text("Paste your script or topic here...", color = RawColors.TextMuted) },
+                        textStyle = RawTypography.labelMedium.copy(color = RawColors.TextPrimary, fontSize = 12.sp),
+                        minLines = 4,
                         maxLines = 7,
-                        shape = RoundedCornerShape(18.dp),
+                        shape = RoundedCornerShape(16.dp),
                         colors = OutlinedTextFieldDefaults.colors(
-                            focusedBorderColor = RawColors.TextPrimary,
+                            focusedBorderColor = RawColors.MintFocus,
                             unfocusedBorderColor = RawColors.Divider,
-                            focusedContainerColor = RawColors.CardSurface,
-                            unfocusedContainerColor = RawColors.CardSurface,
-                            focusedTextColor = RawColors.TextPrimary,
-                            unfocusedTextColor = RawColors.TextPrimary,
-                            cursorColor = RawColors.TextPrimary
+                            focusedContainerColor = RawColors.RaisedCard,
+                            unfocusedContainerColor = RawColors.RaisedCard,
+                            cursorColor = RawColors.Mint
                         ),
                         modifier = Modifier.fillMaxWidth()
                     )
@@ -496,33 +555,64 @@ fun AddVoiceScreen(
             }
         }
 
-        Spacer(modifier = Modifier.height(12.dp))
-        BigPrimaryButton(
-            text = if (savingVoice) "Saving..." else "Save voiceover",
-            enabled = audioPath.isNotBlank() && audioDuration >= 1.0 && !savingVoice,
-            leadingIcon = RawIconType.CHECK,
-            onClick = {
-                savingVoice = true
-                scope.launch {
-                    val (storedTopic, storedSrt) = withContext(Dispatchers.IO) {
-                        cacheManager.persistTopicText(project.id, topic) to
-                            cacheManager.persistSrtText(project.id, srtText)
-                    }
-                    val baseTitle = audioName.substringBeforeLast('.').ifBlank { project.title }
-                    onSave(
-                        project.copy(
-                            title = baseTitle,
-                            audioUri = audioPath,
-                            audioName = audioName,
-                            audioSizeBytes = audioSize,
-                            audioDurationSec = audioDuration,
-                            srtText = storedSrt,
-                            srtCueCount = srtCueCount,
-                            topic = storedTopic
-                        )
+        // Sticky gradient bottom footer (.stk)
+        Box(
+            modifier = Modifier
+                .align(Alignment.BottomCenter)
+                .fillMaxWidth()
+                .background(
+                    Brush.verticalGradient(
+                        listOf(Color.Transparent, RawColors.BgPrimary.copy(alpha = 0.94f), RawColors.BgPrimary)
                     )
+                )
+                .navigationBarsPadding()
+                .padding(start = 18.dp, end = 18.dp, top = 20.dp, bottom = 18.dp)
+        ) {
+            BigPrimaryButton(
+                text = if (savingVoice) "Saving..." else "Save voiceover",
+                enabled = !savingVoice,
+                onClick = {
+                    if (audioPath.isBlank() || audioDuration < 1.0) {
+                        toastMsg = "Pick a voiceover first"
+                        if (animEnabled) {
+                            scope.launch {
+                                for (x in listOf(-10f, 10f, -6f, 0f)) {
+                                    dzShake.animateTo(x, tween(55))
+                                }
+                            }
+                        }
+                        return@BigPrimaryButton
+                    }
+                    savingVoice = true
+                    scope.launch {
+                        val (storedTopic, storedSrt) = withContext(Dispatchers.IO) {
+                            cacheManager.persistTopicText(project.id, topic) to
+                                cacheManager.persistSrtText(project.id, srtText)
+                        }
+                        val baseTitle = audioName.substringBeforeLast('.').ifBlank { project.title }
+                        onSave(
+                            project.copy(
+                                title = baseTitle,
+                                audioUri = audioPath,
+                                audioName = audioName,
+                                audioSizeBytes = audioSize,
+                                audioDurationSec = audioDuration,
+                                srtText = storedSrt,
+                                srtCueCount = srtCueCount,
+                                topic = storedTopic
+                            )
+                        )
+                    }
                 }
-            }
+            )
+        }
+
+        RawToastBanner(
+            message = toastMsg,
+            modifier = Modifier
+                .align(Alignment.BottomCenter)
+                .navigationBarsPadding()
+                .padding(bottom = 86.dp)
         )
     }
 }
@@ -559,12 +649,19 @@ fun CopyPromptScreen(
     }
 
     var copied by remember { mutableStateOf(false) }
-    var promptNotice by remember { mutableStateOf<String?>(null) }
+    var toastMsg by remember { mutableStateOf<String?>(null) }
 
     var zipBusy by remember { mutableStateOf(false) }
     var zipSaved by remember { mutableStateOf(false) }
     var zipStatus by remember { mutableStateOf<String?>(null) }
     var zipError by remember { mutableStateOf<String?>(null) }
+
+    LaunchedEffect(toastMsg) {
+        if (toastMsg != null) {
+            delay(1900)
+            toastMsg = null
+        }
+    }
 
     val zipCreateLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.CreateDocument("application/zip")
@@ -585,183 +682,230 @@ fun CopyPromptScreen(
         }
     }
 
-    Column(
+    Box(
         modifier = Modifier
             .fillMaxSize()
             .background(RawColors.BgPrimary)
             .statusBarsPadding()
-            .navigationBarsPadding()
-            .padding(20.dp),
-        verticalArrangement = Arrangement.spacedBy(12.dp)
     ) {
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            CircleActionButton(icon = RawIconType.BACK, onClick = onBack)
-            Box(contentAlignment = Alignment.TopEnd) {
-                RawPixelMascot(
-                    kind = PixelMascotKind.ZIP_BOT,
-                    size = 44.dp
-                )
-                PixelSparkle(
-                    size = 11.dp,
-                    phaseOffsetMs = 300,
-                    modifier = Modifier.offset(x = 4.dp, y = (-4).dp)
-                )
-            }
-        }
-
-        KineticHeading(
-            words = listOf("Copy", "prompt"),
-            style = RawTypography.headlineLarge
-        )
-
-        Text(
-            text = "1) Attach the Style Pack ZIP in Cloud AI  •  2) Paste this prompt  •  3) Answer 3 questions & copy the HTML code.",
-            style = RawTypography.bodyMedium
-        )
-
-        // Style Pack ZIP Card (kinetic-explainer-style.zip)
-        val zipBorder by animateColorAsState(
-            targetValue = if (zipSaved) RawColors.SuccessMint.copy(alpha = 0.55f) else RawColors.Divider,
-            animationSpec = tween(if (animEnabled) 240 else 0, easing = RawEasings.Morph),
-            label = "zip_card_border"
-        )
         Column(
             modifier = Modifier
-                .fillMaxWidth()
-                .clip(RoundedCornerShape(20.dp))
-                .background(RawColors.HeroSurface)
-                .border(1.dp, zipBorder, RoundedCornerShape(20.dp))
-                .padding(14.dp),
-            verticalArrangement = Arrangement.spacedBy(10.dp)
+                .fillMaxSize()
+                .verticalScroll(rememberScrollState())
+                .padding(start = 18.dp, end = 18.dp, bottom = 120.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
             Row(
-                modifier = Modifier.fillMaxWidth(),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(58.dp),
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                Column(modifier = Modifier.weight(1f)) {
-                    Text(
-                        text = CacheManager.STYLE_PACK_ASSET_NAME,
-                        style = RawTypography.titleMedium.copy(fontWeight = FontWeight.SemiBold),
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis
-                    )
-                    Text(
-                        text = "Upload this ZIP with the prompt for better Cloud AI video design",
-                        style = RawTypography.labelSmall,
-                        color = RawColors.TextMuted
-                    )
-                }
-                Spacer(modifier = Modifier.width(8.dp))
-                Box(
-                    modifier = Modifier
-                        .clip(RoundedCornerShape(10.dp))
-                        .background(if (zipSaved) RawColors.SuccessMint.copy(alpha = 0.16f) else RawColors.RaisedCard)
-                        .padding(horizontal = 9.dp, vertical = 4.dp)
-                ) {
-                    Text(
-                        text = if (zipSaved) "Saved" else "552 KB",
-                        style = RawTypography.labelSmall,
-                        color = if (zipSaved) RawColors.SuccessMint else RawColors.TextPrimary
-                    )
-                }
+                CircleActionButton(icon = RawIconType.BACK, onClick = onBack, size = 42.dp)
+                RawPixelMascot(kind = PixelMascotKind.ZIP_BOT, size = 40.dp)
             }
 
-            zipStatus?.let { msg ->
-                Text(text = msg, style = RawTypography.labelSmall, color = RawColors.SuccessMint)
-            }
-            zipError?.let { err ->
-                Text(text = err, style = RawTypography.labelSmall, color = RawColors.ErrorCoral)
-            }
+            KineticHeading(
+                words = listOf("Copy", "prompt"),
+                style = RawTypography.headlineLarge
+            )
 
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(10.dp)
+            Text(
+                text = "1) Attach Style Pack ZIP in Cloud AI • 2) Paste this prompt • 3) Answer 3 questions & copy HTML code.",
+                style = RawTypography.bodyMedium
+            )
+
+            // Style Pack ZIP Card (.card.pad)
+            val zipBorder by animateColorAsState(
+                targetValue = if (zipSaved) RawColors.MintBorder else RawColors.Divider,
+                animationSpec = tween(if (animEnabled) 220 else 0, easing = RawEasings.Morph),
+                label = "zip_card_bd"
+            )
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(22.dp))
+                    .background(RawColors.CardSurface)
+                    .border(1.dp, zipBorder, RoundedCornerShape(22.dp))
+                    .padding(16.dp),
+                verticalArrangement = Arrangement.spacedBy(12.dp)
             ) {
-                val dlBg by animateColorAsState(
-                    targetValue = if (zipSaved) RawColors.SuccessMint else RawColors.PrimaryBtnBg,
-                    animationSpec = tween(if (animEnabled) 220 else 0, easing = RawEasings.Morph),
-                    label = "zip_dl_bg"
-                )
-                RawPressButton(
-                    enabled = !zipBusy,
-                    onClick = {
-                        zipError = null
-                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                            zipBusy = true
-                            scope.launch {
-                                val res = cacheManager.saveStylePackToDownloads()
-                                zipBusy = false
-                                res.onSuccess { msg ->
-                                    haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-                                    zipSaved = true
-                                    zipStatus = msg
-                                }.onFailure {
-                                    // Fallback to SAF picker if MediaStore Downloads is restricted on OEM ROM
-                                    zipCreateLauncher.launch(CacheManager.STYLE_PACK_ASSET_NAME)
-                                }
-                            }
-                        } else {
-                            // Android 9 (API 28): standard SAF Save As picker needs zero storage permissions
-                            zipCreateLauncher.launch(CacheManager.STYLE_PACK_ASSET_NAME)
-                        }
-                    },
-                    modifier = Modifier.weight(1.25f)
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(12.dp)
                 ) {
-                    Row(
+                    Box(
                         modifier = Modifier
-                            .fillMaxWidth()
-                            .height(46.dp)
-                            .clip(RoundedCornerShape(23.dp))
-                            .background(dlBg),
-                        horizontalArrangement = Arrangement.Center,
-                        verticalAlignment = Alignment.CenterVertically
+                            .size(44.dp)
+                            .clip(RoundedCornerShape(14.dp))
+                            .background(RawColors.RaisedCard)
+                            .border(1.dp, RawColors.Divider, RoundedCornerShape(14.dp)),
+                        contentAlignment = Alignment.Center
                     ) {
-                        RawIcon(
-                            type = if (zipSaved) RawIconType.CHECK else RawIconType.DOWNLOAD,
-                            size = 18.dp,
-                            tint = RawColors.PrimaryBtnText
-                        )
-                        Spacer(modifier = Modifier.width(7.dp))
+                        RawIcon(RawIconType.ZIP, size = 20.dp, tint = RawColors.TextPrimary)
+                    }
+                    Column(modifier = Modifier.weight(1f)) {
                         Text(
-                            text = when {
-                                zipBusy -> "Saving..."
-                                zipSaved -> "Downloaded"
-                                else -> "Download ZIP"
-                            },
-                            style = RawTypography.labelLarge,
-                            color = RawColors.PrimaryBtnText
+                            text = CacheManager.STYLE_PACK_ASSET_NAME,
+                            style = RawTypography.titleMedium.copy(fontSize = 14.sp, fontWeight = FontWeight.Bold),
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                        Text(
+                            text = "Style pack for Cloud AI",
+                            fontFamily = JetBrainsMonoFamily,
+                            fontSize = 11.sp,
+                            color = RawColors.TextMuted
+                        )
+                    }
+                    Box(
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(99.dp))
+                            .background(if (zipSaved) RawColors.MintSoft else RawColors.RaisedCard)
+                            .padding(horizontal = 9.dp, vertical = 5.dp)
+                    ) {
+                        Text(
+                            text = if (zipSaved) "SAVED" else "552 KB",
+                            fontFamily = JetBrainsMonoFamily,
+                            fontWeight = FontWeight.SemiBold,
+                            fontSize = 9.5.sp,
+                            letterSpacing = 0.7.sp,
+                            color = if (zipSaved) RawColors.Mint else RawColors.TextMuted
                         )
                     }
                 }
 
-                RawPressButton(
-                    enabled = !zipBusy,
-                    onClick = {
-                        zipError = null
-                        scope.launch {
-                            runCatching {
-                                val zipFile = cacheManager.prepareStylePackShareFile()
-                                val shareUri = FileProvider.getUriForFile(
-                                    context,
-                                    "${context.packageName}.fileprovider",
-                                    zipFile
-                                )
-                                val share = Intent(Intent.ACTION_SEND).apply {
-                                    type = "application/zip"
-                                    putExtra(Intent.EXTRA_STREAM, shareUri)
-                                    putExtra(Intent.EXTRA_SUBJECT, CacheManager.STYLE_PACK_ASSET_NAME)
-                                    clipData = ClipData.newRawUri(CacheManager.STYLE_PACK_ASSET_NAME, shareUri)
-                                    addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    RawSecondaryButton(
+                        text = when {
+                            zipBusy -> "Saving..."
+                            zipSaved -> "Downloaded"
+                            else -> "Download ZIP"
+                        },
+                        height = 42.dp,
+                        enabled = !zipBusy,
+                        leadingIcon = if (zipSaved) RawIconType.CHECK else RawIconType.DOWNLOAD,
+                        onClick = {
+                            zipError = null
+                            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                                zipBusy = true
+                                scope.launch {
+                                    val res = cacheManager.saveStylePackToDownloads()
+                                    zipBusy = false
+                                    res.onSuccess { msg ->
+                                        haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                                        zipSaved = true
+                                        zipStatus = msg
+                                    }.onFailure {
+                                        zipCreateLauncher.launch(CacheManager.STYLE_PACK_ASSET_NAME)
+                                    }
                                 }
-                                context.startActivity(Intent.createChooser(share, "Share Style Pack ZIP"))
-                            }.onFailure { err ->
-                                zipError = err.message ?: "Could not share ZIP."
+                            } else {
+                                zipCreateLauncher.launch(CacheManager.STYLE_PACK_ASSET_NAME)
                             }
+                        },
+                        modifier = Modifier.weight(1f)
+                    )
+
+                    RawSecondaryButton(
+                        text = "Share ZIP",
+                        height = 42.dp,
+                        enabled = !zipBusy,
+                        leadingIcon = RawIconType.SHARE,
+                        onClick = {
+                            zipError = null
+                            scope.launch {
+                                runCatching {
+                                    val zipFile = cacheManager.prepareStylePackShareFile()
+                                    val shareUri = FileProvider.getUriForFile(
+                                        context,
+                                        "${context.packageName}.fileprovider",
+                                        zipFile
+                                    )
+                                    val share = Intent(Intent.ACTION_SEND).apply {
+                                        type = "application/zip"
+                                        putExtra(Intent.EXTRA_STREAM, shareUri)
+                                        putExtra(Intent.EXTRA_SUBJECT, CacheManager.STYLE_PACK_ASSET_NAME)
+                                        clipData = ClipData.newRawUri(CacheManager.STYLE_PACK_ASSET_NAME, shareUri)
+                                        addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                                    }
+                                    context.startActivity(Intent.createChooser(share, "Share Style Pack ZIP"))
+                                }.onFailure { err ->
+                                    zipError = err.message ?: "Could not share ZIP."
+                                }
+                            }
+                        },
+                        modifier = Modifier.weight(1f)
+                    )
+                }
+
+                zipStatus?.let { msg ->
+                    Text(text = msg, style = RawTypography.labelMedium, color = RawColors.Mint)
+                }
+                zipError?.let { err ->
+                    Text(text = err, style = RawTypography.labelMedium, color = RawColors.ErrorCoral)
+                }
+            }
+
+            // #0E100E Monospace prompt container (.pre)
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(290.dp)
+                    .clip(RoundedCornerShape(18.dp))
+                    .background(RawColors.CodeSurface)
+                    .border(1.dp, RawColors.Divider, RoundedCornerShape(18.dp))
+                    .verticalScroll(rememberScrollState())
+                    .padding(14.dp)
+            ) {
+                Text(
+                    text = displayPrompt,
+                    fontFamily = JetBrainsMonoFamily,
+                    fontSize = 11.5.sp,
+                    lineHeight = 18.sp,
+                    color = Color(0xFFB9C0B9)
+                )
+            }
+        }
+
+        // Sticky .row2 CTA bar (.stk)
+        Box(
+            modifier = Modifier
+                .align(Alignment.BottomCenter)
+                .fillMaxWidth()
+                .background(
+                    Brush.verticalGradient(
+                        listOf(Color.Transparent, RawColors.BgPrimary.copy(alpha = 0.94f), RawColors.BgPrimary)
+                    )
+                )
+                .navigationBarsPadding()
+                .padding(start = 18.dp, end = 18.dp, top = 20.dp, bottom = 18.dp)
+        ) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
+                RawPressButton(
+                    onClick = {
+                        val copiedOk = runCatching {
+                            val cb = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+                            cb.setPrimaryClip(ClipData.newPlainText("raw_edit prompt", promptText))
+                        }.isSuccess
+                        if (copiedOk) {
+                            haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                            copied = true
+                            toastMsg = "Prompt copied"
+                            scope.launch {
+                                delay(2000)
+                                copied = false
+                            }
+                        } else {
+                            toastMsg = "Prompt too large — tap Share"
                         }
                     },
                     modifier = Modifier.weight(1f)
@@ -769,146 +913,71 @@ fun CopyPromptScreen(
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .height(46.dp)
-                            .clip(RoundedCornerShape(23.dp))
-                            .background(RawColors.RaisedCard),
+                            .height(52.dp)
+                            .clip(RoundedCornerShape(99.dp))
+                            .background(RawColors.Mint),
                         horizontalArrangement = Arrangement.Center,
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        RawIcon(type = RawIconType.SHARE, size = 17.dp)
-                        Spacer(modifier = Modifier.width(7.dp))
-                        Text("Share ZIP", style = RawTypography.labelLarge)
+                        RawIcon(
+                            type = if (copied) RawIconType.CHECK else RawIconType.COPY,
+                            size = 18.dp,
+                            tint = RawColors.PrimaryBtnText
+                        )
+                        Spacer(modifier = Modifier.width(8.dp))
+                        SplitFlapText(
+                            text = if (copied) "Copied" else "Copy prompt",
+                            style = RawTypography.labelLarge,
+                            color = RawColors.PrimaryBtnText
+                        )
                     }
                 }
-            }
-        }
 
-        // Prompt preview box
-        Box(
-            modifier = Modifier
-                .weight(1f)
-                .heightIn(min = 120.dp)
-                .fillMaxWidth()
-                .clip(RoundedCornerShape(20.dp))
-                .background(RawColors.CardSurface)
-                .border(1.dp, RawColors.Divider, RoundedCornerShape(20.dp))
-                .verticalScroll(rememberScrollState())
-                .padding(14.dp)
-        ) {
-            Text(
-                text = displayPrompt,
-                fontFamily = JetBrainsMonoFamily,
-                fontSize = 11.5.sp,
-                lineHeight = 17.sp,
-                color = RawColors.TextPrimary
-            )
-        }
-
-        promptNotice?.let { msg ->
-            Text(text = msg, style = RawTypography.labelSmall, color = RawColors.ErrorCoral)
-        }
-
-        // Copy prompt + Share prompt row
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(12.dp)
-        ) {
-            val copyBg by animateColorAsState(
-                targetValue = if (copied) RawColors.SuccessMint else RawColors.PrimaryBtnBg,
-                animationSpec = tween(220, easing = RawEasings.Morph),
-                label = "copy_btn_bg"
-            )
-            RawPressButton(
-                onClick = {
-                    promptNotice = null
-                    val copiedOk = runCatching {
-                        val cb = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
-                        cb.setPrimaryClip(ClipData.newPlainText("raw_edit prompt", promptText))
-                    }.isSuccess
-                    if (copiedOk) {
-                        haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-                        copied = true
+                RawSecondaryButton(
+                    text = "Share",
+                    height = 52.dp,
+                    leadingIcon = RawIconType.SHARE,
+                    onClick = {
                         scope.launch {
-                            delay(2000)
-                            copied = false
-                        }
-                    } else {
-                        promptNotice = "Prompt is too large for clipboard — tap Share instead."
-                    }
-                },
-                modifier = Modifier.weight(1.4f)
-            ) {
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(56.dp)
-                        .clip(RoundedCornerShape(28.dp))
-                        .background(copyBg),
-                    horizontalArrangement = Arrangement.Center,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    RawIcon(
-                        type = if (copied) RawIconType.CHECK else RawIconType.COPY,
-                        size = 20.dp,
-                        tint = RawColors.PrimaryBtnText
-                    )
-                    Spacer(modifier = Modifier.width(8.dp))
-                    SplitFlapText(
-                        text = if (copied) "Copied" else "Copy prompt",
-                        style = RawTypography.labelLarge,
-                        color = RawColors.PrimaryBtnText
-                    )
-                }
-            }
-
-            RawPressButton(
-                onClick = {
-                    promptNotice = null
-                    scope.launch {
-                        if (promptText.length <= 120_000) {
-                            val shareIntent = Intent(Intent.ACTION_SEND).apply {
-                                type = "text/plain"
-                                putExtra(Intent.EXTRA_TEXT, promptText)
-                            }
-                            context.startActivity(Intent.createChooser(shareIntent, "Share prompt"))
-                        } else {
-                            val txtFile = withContext(Dispatchers.IO) {
-                                File(cacheManager.sharedPacksDir, "raw_edit_prompt.txt").apply {
-                                    writeText(promptText, Charsets.UTF_8)
+                            if (promptText.length <= 120_000) {
+                                val shareIntent = Intent(Intent.ACTION_SEND).apply {
+                                    type = "text/plain"
+                                    putExtra(Intent.EXTRA_TEXT, promptText)
                                 }
+                                context.startActivity(Intent.createChooser(shareIntent, "Share prompt"))
+                            } else {
+                                val txtFile = withContext(Dispatchers.IO) {
+                                    File(cacheManager.sharedPacksDir, "raw_edit_prompt.txt").apply {
+                                        writeText(promptText, Charsets.UTF_8)
+                                    }
+                                }
+                                val shareUri = FileProvider.getUriForFile(
+                                    context,
+                                    "${context.packageName}.fileprovider",
+                                    txtFile
+                                )
+                                val shareIntent = Intent(Intent.ACTION_SEND).apply {
+                                    type = "text/plain"
+                                    putExtra(Intent.EXTRA_STREAM, shareUri)
+                                    clipData = ClipData.newRawUri("raw_edit_prompt.txt", shareUri)
+                                    addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                                }
+                                context.startActivity(Intent.createChooser(shareIntent, "Share prompt file"))
                             }
-                            val shareUri = FileProvider.getUriForFile(
-                                context,
-                                "${context.packageName}.fileprovider",
-                                txtFile
-                            )
-                            val shareIntent = Intent(Intent.ACTION_SEND).apply {
-                                type = "text/plain"
-                                putExtra(Intent.EXTRA_STREAM, shareUri)
-                                clipData = ClipData.newRawUri("raw_edit_prompt.txt", shareUri)
-                                addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
-                            }
-                            context.startActivity(Intent.createChooser(shareIntent, "Share prompt file"))
                         }
-                    }
-                },
-                modifier = Modifier.weight(1f)
-            ) {
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(56.dp)
-                        .clip(RoundedCornerShape(28.dp))
-                        .background(RawColors.RaisedCard),
-                    horizontalArrangement = Arrangement.Center,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    RawIcon(type = RawIconType.SHARE, size = 20.dp)
-                    Spacer(modifier = Modifier.width(8.dp))
-                    Text("Share", style = RawTypography.labelLarge)
-                }
+                    },
+                    modifier = Modifier.weight(1f)
+                )
             }
         }
+
+        RawToastBanner(
+            message = toastMsg,
+            modifier = Modifier
+                .align(Alignment.BottomCenter)
+                .navigationBarsPadding()
+                .padding(bottom = 86.dp)
+        )
     }
 }
 
@@ -923,12 +992,20 @@ fun CodePasteScreen(
 ) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
+    val animEnabled = rememberAnimationsEnabled()
 
     var codeText by remember(project.id) { mutableStateOf(cacheManager.resolveHtmlCode(project.code)) }
     var validating by remember { mutableStateOf(false) }
     var validationResult by remember { mutableStateOf<CodeValidationResult?>(null) }
     var forceRawEditLarge by remember { mutableStateOf(false) }
-    var clipboardNotice by remember { mutableStateOf<String?>(null) }
+    var toastMsg by remember { mutableStateOf<String?>(null) }
+
+    LaunchedEffect(toastMsg) {
+        if (toastMsg != null) {
+            delay(1900)
+            toastMsg = null
+        }
+    }
 
     fun runValidation(text: String) {
         if (text.isBlank()) {
@@ -947,7 +1024,6 @@ fun CodePasteScreen(
         contract = ActivityResultContracts.OpenDocument()
     ) { uri ->
         if (uri != null) {
-            clipboardNotice = null
             scope.launch {
                 val loaded = withContext(Dispatchers.IO) {
                     runCatching {
@@ -959,7 +1035,7 @@ fun CodePasteScreen(
                     forceRawEditLarge = false
                     runValidation(loaded)
                 } else {
-                    clipboardNotice = "Selected file is empty or unreadable."
+                    toastMsg = "Selected file is empty"
                 }
             }
         }
@@ -971,9 +1047,9 @@ fun CodePasteScreen(
         }
     }
 
-    fun buildUpdatedProject(res: CodeValidationResult): ProjectEntity {
+    suspend fun buildUpdatedProject(res: CodeValidationResult): ProjectEntity = withContext(Dispatchers.IO) {
         val storedCode = cacheManager.persistHtmlCode(project.id, res.cleanedHtml)
-        return project.copy(
+        project.copy(
             code = storedCode,
             layersJson = "",
             codeDurationSec = res.durationSec,
@@ -981,343 +1057,323 @@ fun CodePasteScreen(
         )
     }
 
-    Column(
+    val valid = validationResult?.takeIf { it.isValid }
+    val bottomClearance = if (valid != null) 168.dp else 112.dp
+
+    Box(
         modifier = Modifier
             .fillMaxSize()
             .background(RawColors.BgPrimary)
             .statusBarsPadding()
-            .navigationBarsPadding()
             .imePadding()
-            .padding(20.dp),
-        verticalArrangement = Arrangement.spacedBy(12.dp)
     ) {
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            CircleActionButton(icon = RawIconType.BACK, onClick = onBack)
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(10.dp)
-            ) {
-                Text(
-                    text = "${codeText.length} chars (unlimited)",
-                    style = RawTypography.labelMedium
-                )
-                Box(contentAlignment = Alignment.TopEnd) {
-                    RawPixelMascot(
-                        kind = PixelMascotKind.CODE_BOT,
-                        size = 40.dp
-                    )
-                    PixelSparkle(
-                        size = 10.dp,
-                        phaseOffsetMs = 240,
-                        modifier = Modifier.offset(x = 4.dp, y = (-4).dp)
-                    )
-                }
-            }
-        }
-
-        KineticHeading(
-            words = listOf("Have", "a", "code?"),
-            style = RawTypography.headlineLarge
-        )
-
-        // Action row: Paste + Pick .html + Load sample + Clear
-        Row(
+        Column(
             modifier = Modifier
-                .fillMaxWidth()
-                .horizontalScroll(rememberScrollState()),
-            horizontalArrangement = Arrangement.spacedBy(10.dp)
+                .fillMaxSize()
+                .verticalScroll(rememberScrollState())
+                .padding(start = 18.dp, end = 18.dp, bottom = bottomClearance),
+            verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
-            RawPressButton(
-                onClick = {
-                    clipboardNotice = null
-                    scope.launch {
-                        val full = readClipboardText(context)
-                        if (full.isNotBlank()) {
-                            codeText = full
-                            forceRawEditLarge = false
-                            runValidation(full)
-                        } else {
-                            clipboardNotice = "Clipboard is empty — copy HTML code first or tap Pick .html file."
-                            delay(3000)
-                            clipboardNotice = null
-                        }
-                    }
-                }
-            ) {
-                Row(
-                    modifier = Modifier
-                        .height(44.dp)
-                        .clip(RoundedCornerShape(22.dp))
-                        .background(RawColors.PrimaryBtnBg)
-                        .padding(horizontal = 16.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(6.dp)
-                ) {
-                    RawIcon(RawIconType.PASTE, size = 16.dp, tint = RawColors.PrimaryBtnText)
-                    Text("Paste", style = RawTypography.labelLarge, color = RawColors.PrimaryBtnText)
-                }
-            }
-
-            RawPressButton(
-                onClick = {
-                    htmlFilePicker.launch(arrayOf("text/html", "text/plain", "*/*"))
-                }
-            ) {
-                Box(
-                    modifier = Modifier
-                        .height(44.dp)
-                        .clip(RoundedCornerShape(22.dp))
-                        .background(RawColors.RaisedCard)
-                        .padding(horizontal = 16.dp),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Text("Pick .html file", style = RawTypography.labelLarge)
-                }
-            }
-
-            RawPressButton(
-                onClick = {
-                    clipboardNotice = null
-                    scope.launch {
-                        val sample = withContext(Dispatchers.IO) {
-                            runCatching {
-                                context.assets.open("sample.html").bufferedReader().use { it.readText() }
-                            }.getOrDefault("")
-                        }
-                        if (sample.isNotBlank()) {
-                            codeText = sample
-                            forceRawEditLarge = false
-                            runValidation(sample)
-                        }
-                    }
-                }
-            ) {
-                Box(
-                    modifier = Modifier
-                        .height(44.dp)
-                        .clip(RoundedCornerShape(22.dp))
-                        .background(RawColors.RaisedCard)
-                        .padding(horizontal = 16.dp),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Text("Load 6s sample", style = RawTypography.labelLarge)
-                }
-            }
-
-            if (codeText.isNotEmpty()) {
-                RawPressButton(
-                    onClick = {
-                        codeText = ""
-                        forceRawEditLarge = false
-                        validationResult = null
-                        clipboardNotice = null
-                    }
-                ) {
-                    Box(
-                        modifier = Modifier
-                            .height(44.dp)
-                            .clip(RoundedCornerShape(22.dp))
-                            .background(RawColors.CardSurface)
-                            .border(1.dp, RawColors.Divider, RoundedCornerShape(22.dp))
-                            .padding(horizontal = 16.dp),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Text("Clear", style = RawTypography.labelLarge, color = RawColors.TextMuted)
-                    }
-                }
-            }
-        }
-
-        clipboardNotice?.let { msg ->
-            Text(text = msg, style = RawTypography.labelSmall, color = RawColors.TextMuted)
-        }
-
-        // Big unlimited paste box (uses lightweight head/tail preview above 15k chars so Android 9 never lags)
-        if (codeText.length > LARGE_EDITOR_THRESHOLD && !forceRawEditLarge) {
-            Column(
+            Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .weight(1f)
-                    .clip(RoundedCornerShape(20.dp))
-                    .background(RawColors.CardSurface)
-                    .border(1.dp, RawColors.Divider, RoundedCornerShape(20.dp))
-                    .padding(16.dp),
-                verticalArrangement = Arrangement.spacedBy(10.dp)
+                    .height(58.dp),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
             ) {
+                CircleActionButton(icon = RawIconType.BACK, onClick = onBack, size = 42.dp)
                 Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
                     Text(
-                        text = "${codeText.length} chars loaded (unlimited)",
-                        style = RawTypography.labelLarge,
-                        color = RawColors.SuccessMint
-                    )
-                    Text(
-                        text = "Edit raw text",
-                        style = RawTypography.labelSmall,
-                        color = RawColors.TextMuted,
-                        modifier = Modifier
-                            .clip(RoundedCornerShape(10.dp))
-                            .background(RawColors.RaisedCard)
-                            .clickable { forceRawEditLarge = true }
-                            .padding(horizontal = 10.dp, vertical = 5.dp)
-                    )
-                }
-                val previewStr = codeText.take(1400) + "\n\n... (${codeText.length - 2000} middle chars kept intact) ...\n\n" + codeText.takeLast(600)
-                Box(
-                    modifier = Modifier
-                        .weight(1f)
-                        .fillMaxWidth()
-                        .verticalScroll(rememberScrollState())
-                ) {
-                    Text(
-                        text = previewStr,
+                        text = "${codeText.length} chars (unlimited)",
                         fontFamily = JetBrainsMonoFamily,
                         fontSize = 11.sp,
-                        lineHeight = 16.sp,
                         color = RawColors.TextMuted
+                    )
+                    RawPixelMascot(kind = PixelMascotKind.CODE_BOT, size = 38.dp)
+                }
+            }
+
+            KineticHeading(
+                words = listOf("Have", "a", "code?"),
+                style = RawTypography.headlineLarge
+            )
+
+            // Compact horizontal action chips (.btn.g.sm)
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .horizontalScroll(rememberScrollState()),
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                RawSecondaryButton(
+                    text = "Paste",
+                    height = 40.dp,
+                    leadingIcon = RawIconType.PASTE,
+                    fillWidth = false,
+                    onClick = {
+                        scope.launch {
+                            val full = readClipboardText(context)
+                            if (full.isNotBlank()) {
+                                codeText = full
+                                forceRawEditLarge = false
+                                runValidation(full)
+                            } else {
+                                toastMsg = "Clipboard empty — copy code or pick .html file"
+                            }
+                        }
+                    }
+                )
+                RawSecondaryButton(
+                    text = "Pick .html file",
+                    height = 40.dp,
+                    leadingIcon = RawIconType.FILE,
+                    fillWidth = false,
+                    onClick = { htmlFilePicker.launch(arrayOf("text/html", "text/plain", "*/*")) }
+                )
+                RawSecondaryButton(
+                    text = "Load 6s sample",
+                    height = 40.dp,
+                    leadingIcon = RawIconType.FILM,
+                    fillWidth = false,
+                    onClick = {
+                        scope.launch {
+                            val sample = withContext(Dispatchers.IO) {
+                                runCatching {
+                                    context.assets.open("sample.html").bufferedReader().use { it.readText() }
+                                }.getOrDefault("")
+                            }
+                            if (sample.isNotBlank()) {
+                                codeText = sample
+                                forceRawEditLarge = false
+                                runValidation(sample)
+                            }
+                        }
+                    }
+                )
+                if (codeText.isNotEmpty()) {
+                    RawSecondaryButton(
+                        text = "Clear",
+                        height = 40.dp,
+                        leadingIcon = RawIconType.CLOSE,
+                        fillWidth = false,
+                        onClick = {
+                            codeText = ""
+                            forceRawEditLarge = false
+                            validationResult = null
+                        }
                     )
                 }
             }
-        } else {
-            OutlinedTextField(
-                value = codeText,
-                onValueChange = {
-                    codeText = it
-                    validationResult = null
-                },
-                placeholder = {
-                    Text("Paste HTML code from Cloud AI here (unlimited length)...", color = RawColors.TextMuted)
-                },
-                textStyle = RawTypography.labelMedium.copy(
-                    fontFamily = JetBrainsMonoFamily,
-                    color = RawColors.TextPrimary
-                ),
-                shape = RoundedCornerShape(20.dp),
-                colors = OutlinedTextFieldDefaults.colors(
-                    focusedBorderColor = RawColors.TextPrimary,
-                    unfocusedBorderColor = RawColors.Divider,
-                    focusedContainerColor = RawColors.CardSurface,
-                    unfocusedContainerColor = RawColors.CardSurface,
-                    cursorColor = RawColors.TextPrimary
-                ),
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .weight(1f)
-            )
-        }
 
-        val animEnabled = rememberAnimationsEnabled()
-        val statusState = when {
-            validating -> "validating"
-            validationResult != null -> "result_${validationResult!!.isValid}_${validationResult!!.summaryMessage}"
-            else -> "empty"
-        }
-        AnimatedContent(
-            targetState = statusState,
-            transitionSpec = {
-                if (!animEnabled) {
-                    fadeIn(tween(0)) togetherWith fadeOut(tween(0))
-                } else {
-                    (fadeIn(tween(220, easing = RawEasings.Morph)) +
-                        scaleIn(initialScale = 0.97f, animationSpec = tween(220, easing = RawEasings.Morph)))
-                        .togetherWith(
-                            fadeOut(tween(150)) +
-                                scaleOut(targetScale = 0.97f, animationSpec = tween(150))
-                        )
-                }
-            },
-            label = "code_validation_morph"
-        ) { target ->
-            if (target == "validating") {
-                Row(
+            // Code box / collapsed card for large payloads
+            if (codeText.length > LARGE_EDITOR_THRESHOLD && !forceRawEditLarge) {
+                Column(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .clip(RoundedCornerShape(16.dp))
-                        .background(RawColors.HeroSurface)
-                        .padding(14.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(12.dp)
+                        .clip(RoundedCornerShape(22.dp))
+                        .background(RawColors.CardSurface)
+                        .border(1.dp, RawColors.Divider, RoundedCornerShape(22.dp))
+                        .padding(16.dp),
+                    verticalArrangement = Arrangement.spacedBy(10.dp)
                 ) {
-                    CircularProgressIndicator(
-                        color = RawColors.TextPrimary,
-                        modifier = Modifier.size(20.dp),
-                        strokeWidth = 2.dp
+                    Text(
+                        text = "${codeText.count { it == '\n' } + 1} lines  •  ${codeText.length} chars (collapsed)",
+                        fontFamily = JetBrainsMonoFamily,
+                        fontSize = 11.5.sp,
+                        color = RawColors.Mint
                     )
-                    Text("Testing code in offline sandbox...", style = RawTypography.bodyMedium)
-                }
-            } else {
-                val res = validationResult
-                if (res != null && target != "empty") {
-                    val accent = if (res.isValid) RawColors.SuccessMint else RawColors.ErrorCoral
-                    Column(
+                    val previewStr = codeText.take(1200) + "\n\n... (${codeText.length - 1700} middle chars kept intact) ...\n\n" + codeText.takeLast(500)
+                    Box(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .clip(RoundedCornerShape(16.dp))
-                            .background(accent.copy(alpha = 0.13f))
-                            .border(1.dp, accent.copy(alpha = 0.45f), RoundedCornerShape(16.dp))
-                            .padding(14.dp)
+                            .height(170.dp)
+                            .verticalScroll(rememberScrollState())
                     ) {
-                        Text(text = res.summaryMessage, style = RawTypography.bodyMedium, color = accent)
-                        res.warning?.let { warn ->
-                            Spacer(modifier = Modifier.height(4.dp))
-                            Text(text = warn, style = RawTypography.labelSmall, color = RawColors.TextMuted)
+                        Text(
+                            text = previewStr,
+                            fontFamily = JetBrainsMonoFamily,
+                            fontSize = 11.sp,
+                            lineHeight = 16.sp,
+                            color = RawColors.TextMuted
+                        )
+                    }
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(10.dp)
+                    ) {
+                        RawSecondaryButton(
+                            text = "Show editor",
+                            height = 42.dp,
+                            onClick = { forceRawEditLarge = true },
+                            modifier = Modifier.weight(1f)
+                        )
+                        RawSecondaryButton(
+                            text = "Clear",
+                            height = 42.dp,
+                            isDanger = true,
+                            onClick = {
+                                codeText = ""
+                                forceRawEditLarge = false
+                                validationResult = null
+                            },
+                            modifier = Modifier.weight(1f)
+                        )
+                    }
+                }
+            } else {
+                OutlinedTextField(
+                    value = codeText,
+                    onValueChange = {
+                        codeText = it
+                        validationResult = null
+                    },
+                    placeholder = { Text("Paste HTML code here...", color = RawColors.TextMuted) },
+                    textStyle = RawTypography.labelMedium.copy(
+                        fontFamily = JetBrainsMonoFamily,
+                        fontSize = 12.sp,
+                        lineHeight = 19.sp,
+                        color = RawColors.TextPrimary
+                    ),
+                    shape = RoundedCornerShape(16.dp),
+                    colors = OutlinedTextFieldDefaults.colors(
+                        focusedBorderColor = RawColors.MintFocus,
+                        unfocusedBorderColor = RawColors.Divider,
+                        focusedContainerColor = RawColors.RaisedCard,
+                        unfocusedContainerColor = RawColors.RaisedCard,
+                        cursorColor = RawColors.Mint
+                    ),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(300.dp)
+                )
+            }
+
+            // Morphing Testing / Valid / Invalid Banners (.ban2)
+            val statusKey = when {
+                validating -> "testing"
+                validationResult != null -> "res_${validationResult!!.isValid}_${validationResult!!.summaryMessage}"
+                else -> "idle"
+            }
+            AnimatedContent(
+                targetState = statusKey,
+                transitionSpec = {
+                    if (!animEnabled) fadeIn(tween(0)) togetherWith fadeOut(tween(0))
+                    else (fadeIn(tween(200, easing = RawEasings.Morph)) + scaleIn(initialScale = 0.97f, animationSpec = tween(200)))
+                        .togetherWith(fadeOut(tween(140)) + scaleOut(targetScale = 0.97f, animationSpec = tween(140)))
+                },
+                label = "code_ban_morph"
+            ) { target ->
+                when {
+                    target == "testing" -> {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clip(RoundedCornerShape(16.dp))
+                                .background(RawColors.RaisedCard)
+                                .border(1.dp, RawColors.Divider, RoundedCornerShape(16.dp))
+                                .padding(horizontal = 16.dp, vertical = 14.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(12.dp)
+                        ) {
+                            CircularProgressIndicator(
+                                color = RawColors.Mint,
+                                strokeWidth = 2.dp,
+                                modifier = Modifier.size(18.dp)
+                            )
+                            Text(
+                                text = "Testing code in offline sandbox...",
+                                style = RawTypography.bodyLarge.copy(fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
+                            )
+                        }
+                    }
+                    target != "idle" && validationResult != null -> {
+                        val res = validationResult!!
+                        val bg = if (res.isValid) RawColors.MintSoft else RawColors.ErrorSoft
+                        val bd = if (res.isValid) RawColors.MintBorder else RawColors.ErrorBorder
+                        val fg = if (res.isValid) RawColors.Mint else RawColors.ErrorCoral
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clip(RoundedCornerShape(16.dp))
+                                .background(bg)
+                                .border(1.dp, bd, RoundedCornerShape(16.dp))
+                                .padding(horizontal = 16.dp, vertical = 14.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(12.dp)
+                        ) {
+                            RawIcon(
+                                type = if (res.isValid) RawIconType.CHECK else RawIconType.WARN,
+                                size = 20.dp,
+                                tint = fg
+                            )
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text(
+                                    text = res.summaryMessage,
+                                    style = RawTypography.bodyLarge.copy(fontSize = 13.sp, fontWeight = FontWeight.SemiBold),
+                                    color = fg
+                                )
+                                res.warning?.let { w ->
+                                    Spacer(modifier = Modifier.height(3.dp))
+                                    Text(
+                                        text = w,
+                                        fontSize = 12.sp,
+                                        color = fg.copy(alpha = 0.78f)
+                                    )
+                                }
+                            }
                         }
                     }
                 }
             }
         }
 
-        val valid = validationResult?.takeIf { it.isValid }
-        AnimatedContent(
-            targetState = valid != null,
-            transitionSpec = {
-                if (!animEnabled) {
-                    fadeIn(tween(0)) togetherWith fadeOut(tween(0))
-                } else {
-                    (fadeIn(tween(220, easing = RawEasings.Morph)) +
-                        scaleIn(initialScale = 0.96f, animationSpec = tween(220, easing = RawEasings.Morph)))
-                        .togetherWith(
-                            fadeOut(tween(140)) +
-                                scaleOut(targetScale = 0.96f, animationSpec = tween(140))
-                        )
-                }
-            },
-            label = "code_cta_morph"
-        ) { isValid ->
-            val currentValid = valid
-            if (isValid && currentValid != null) {
+        // Sticky gradient bottom actions (.stk)
+        Box(
+            modifier = Modifier
+                .align(Alignment.BottomCenter)
+                .fillMaxWidth()
+                .background(
+                    Brush.verticalGradient(
+                        listOf(Color.Transparent, RawColors.BgPrimary.copy(alpha = 0.94f), RawColors.BgPrimary)
+                    )
+                )
+                .navigationBarsPadding()
+                .padding(start = 18.dp, end = 18.dp, top = 20.dp, bottom = 18.dp)
+        ) {
+            if (valid != null) {
                 Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                     RawPressButton(
-                        onClick = { onOpenKeyframeSheet(buildUpdatedProject(currentValid)) },
+                        onClick = {
+                            scope.launch {
+                                onOpenKeyframeSheet(buildUpdatedProject(valid))
+                            }
+                        },
                         modifier = Modifier.fillMaxWidth()
                     ) {
                         Row(
                             modifier = Modifier
                                 .fillMaxWidth()
                                 .height(46.dp)
-                                .clip(RoundedCornerShape(23.dp))
-                                .background(RawColors.HeroSurface)
-                                .border(1.dp, RawColors.Divider, RoundedCornerShape(23.dp)),
+                                .clip(RoundedCornerShape(99.dp))
+                                .background(RawColors.RaisedCard)
+                                .border(1.dp, RawColors.DividerStrong, RoundedCornerShape(99.dp)),
                             horizontalArrangement = Arrangement.Center,
                             verticalAlignment = Alignment.CenterVertically
                         ) {
                             RawPixelMascot(
                                 kind = PixelMascotKind.LENS_BOT,
                                 size = 24.dp,
-                                interactive = false
+                                interactive = false,
+                                noBob = true,
+                                noBlink = true
                             )
                             Spacer(modifier = Modifier.width(8.dp))
                             Text(
                                 text = "Contact sheet (auto-fit & PDF)",
-                                style = RawTypography.labelLarge.copy(fontSize = 13.5.sp),
-                                color = RawColors.TextPrimary
+                                style = RawTypography.labelLarge.copy(fontSize = 13.5.sp)
                             )
                         }
                     }
@@ -1326,59 +1382,53 @@ fun CodePasteScreen(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.spacedBy(10.dp)
                     ) {
-                        RawPressButton(
-                            onClick = { onValidatedAndSaved(buildUpdatedProject(currentValid)) },
-                            modifier = Modifier.weight(1f)
-                        ) {
-                            Box(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .height(56.dp)
-                                    .clip(RoundedCornerShape(28.dp))
-                                    .background(RawColors.RaisedCard),
-                                contentAlignment = Alignment.Center
-                            ) {
-                                Text("Save", style = RawTypography.labelLarge)
-                            }
-                        }
-                        RawPressButton(
+                        RawSecondaryButton(
+                            text = "Save",
+                            height = 52.dp,
                             onClick = {
-                                if (project.audioUri.isNotBlank()) {
-                                    onCreateNow(buildUpdatedProject(currentValid))
-                                } else {
-                                    onValidatedAndSaved(buildUpdatedProject(currentValid))
+                                scope.launch {
+                                    onValidatedAndSaved(buildUpdatedProject(valid))
                                 }
                             },
-                            modifier = Modifier.weight(1.4f)
-                        ) {
-                            Row(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .height(56.dp)
-                                    .clip(RoundedCornerShape(28.dp))
-                                    .background(RawColors.PrimaryBtnBg),
-                                horizontalArrangement = Arrangement.Center,
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                RawIcon(RawIconType.PLAY, size = 18.dp, tint = RawColors.PrimaryBtnText)
-                                Spacer(modifier = Modifier.width(8.dp))
-                                Text(
-                                    text = if (project.audioUri.isNotBlank()) "Create video" else "Use code",
-                                    style = RawTypography.labelLarge,
-                                    color = RawColors.PrimaryBtnText
-                                )
-                            }
-                        }
+                            modifier = Modifier.weight(1f)
+                        )
+                        BigPrimaryButton(
+                            text = if (project.audioUri.isNotBlank()) "Create video" else "Use code",
+                            onClick = {
+                                scope.launch {
+                                    val updated = buildUpdatedProject(valid)
+                                    if (project.audioUri.isNotBlank()) {
+                                        onCreateNow(updated)
+                                    } else {
+                                        onValidatedAndSaved(updated)
+                                    }
+                                }
+                            },
+                            modifier = Modifier.weight(1f)
+                        )
                     }
                 }
             } else {
                 BigPrimaryButton(
-                    text = "Check code",
-                    enabled = codeText.isNotBlank() && !validating,
-                    leadingIcon = RawIconType.CHECK,
-                    onClick = { runValidation(codeText) }
+                    text = if (validating) "Testing..." else "Check code",
+                    enabled = !validating,
+                    onClick = {
+                        if (codeText.isBlank()) {
+                            toastMsg = "Paste some code first"
+                        } else {
+                            runValidation(codeText)
+                        }
+                    }
                 )
             }
         }
+
+        RawToastBanner(
+            message = toastMsg,
+            modifier = Modifier
+                .align(Alignment.BottomCenter)
+                .navigationBarsPadding()
+                .padding(bottom = if (valid != null) 144.dp else 86.dp)
+        )
     }
 }

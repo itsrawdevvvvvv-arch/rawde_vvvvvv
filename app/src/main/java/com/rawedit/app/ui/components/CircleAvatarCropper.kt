@@ -14,12 +14,16 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.Slider
+import androidx.compose.material3.SliderDefaults
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -62,6 +66,10 @@ fun CircleAvatarCropperDialog(
     var offsetX by remember { mutableFloatStateOf(0f) }
     var offsetY by remember { mutableFloatStateOf(0f) }
 
+    // Pre-allocate EvenOdd overlay Path per size change instead of allocating per frame
+    var cachedSize by remember { mutableStateOf(IntSize.Zero) }
+    var cachedPath by remember { mutableStateOf<Path?>(null) }
+
     Dialog(
         onDismissRequest = onCancel,
         properties = DialogProperties(usePlatformDefaultWidth = false)
@@ -70,92 +78,113 @@ fun CircleAvatarCropperDialog(
             modifier = Modifier
                 .fillMaxSize()
                 .background(RawColors.BgPrimary)
-                .padding(20.dp),
+                .statusBarsPadding()
+                .navigationBarsPadding()
+                .padding(horizontal = 20.dp, vertical = 20.dp),
             verticalArrangement = Arrangement.SpaceBetween
         ) {
-            Column {
-                Text("Adjust photo", style = RawTypography.headlineMedium)
-                Spacer(modifier = Modifier.height(4.dp))
-                Text("Pinch to zoom and drag to center inside the circle.", style = RawTypography.bodyMedium)
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text("Crop photo", style = RawTypography.headlineMedium)
+                Text("drag • zoom", style = RawTypography.labelMedium)
             }
 
-            Box(
+            Column(
                 modifier = Modifier
-                    .fillMaxWidth()
                     .weight(1f)
-                    .padding(vertical = 16.dp)
-                    .clip(RoundedCornerShape(24.dp))
-                    .background(RawColors.CardSurface)
-                    .onSizeChanged { boxSize = it }
-                    .pointerInput(Unit) {
-                        detectTransformGestures { _, pan, zoom, _ ->
-                            userScale = (userScale * zoom).coerceIn(1f, 4f)
-                            offsetX += pan.x
-                            offsetY += pan.y
-                        }
-                    },
-                contentAlignment = Alignment.Center
+                    .fillMaxWidth(),
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.Center
             ) {
-                Canvas(
-                    modifier = Modifier.fillMaxSize()
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth(0.86f)
+                        .aspectRatio(1f)
+                        .clip(RoundedCornerShape(20.dp))
+                        .background(Color.Black)
+                        .onSizeChanged { boxSize = it }
+                        .pointerInput(Unit) {
+                            detectTransformGestures { _, pan, zoom, _ ->
+                                userScale = (userScale * zoom).coerceIn(1f, 2.5f)
+                                offsetX += pan.x
+                                offsetY += pan.y
+                            }
+                        },
+                    contentAlignment = Alignment.Center
                 ) {
-                    val cropDiameter = min(size.width, size.height) * 0.78f
-                    val baseScale = maxOf(
-                        cropDiameter / sourceBitmap.width.toFloat(),
-                        cropDiameter / sourceBitmap.height.toFloat()
-                    )
-                    val totalScale = baseScale * userScale
-                    val drawW = sourceBitmap.width * totalScale
-                    val drawH = sourceBitmap.height * totalScale
-                    val maxDx = ((drawW - cropDiameter) * 0.5f).coerceAtLeast(0f)
-                    val maxDy = ((drawH - cropDiameter) * 0.5f).coerceAtLeast(0f)
-                    val cx = size.width * 0.5f + offsetX.coerceIn(-maxDx, maxDx)
-                    val cy = size.height * 0.5f + offsetY.coerceIn(-maxDy, maxDy)
+                    Canvas(modifier = Modifier.fillMaxSize()) {
+                        val curIntSize = IntSize(size.width.roundToInt(), size.height.roundToInt())
+                        val cropDiameter = min(size.width, size.height) * 0.85f
+                        val baseScale = maxOf(
+                            cropDiameter / sourceBitmap.width.toFloat(),
+                            cropDiameter / sourceBitmap.height.toFloat()
+                        )
+                        val totalScale = baseScale * userScale
+                        val drawW = sourceBitmap.width * totalScale
+                        val drawH = sourceBitmap.height * totalScale
+                        val maxDx = ((drawW - cropDiameter) * 0.5f).coerceAtLeast(0f)
+                        val maxDy = ((drawH - cropDiameter) * 0.5f).coerceAtLeast(0f)
+                        val cx = size.width * 0.5f + offsetX.coerceIn(-maxDx, maxDx)
+                        val cy = size.height * 0.5f + offsetY.coerceIn(-maxDy, maxDy)
 
-                    drawImage(
-                        image = imgBmp,
-                        dstOffset = IntOffset((cx - drawW * 0.5f).roundToInt(), (cy - drawH * 0.5f).roundToInt()),
-                        dstSize = IntSize(drawW.roundToInt(), drawH.roundToInt())
-                    )
+                        drawImage(
+                            image = imgBmp,
+                            dstOffset = IntOffset((cx - drawW * 0.5f).roundToInt(), (cy - drawH * 0.5f).roundToInt()),
+                            dstSize = IntSize(drawW.roundToInt(), drawH.roundToInt())
+                        )
 
-                    // GPU-safe EvenOdd path scrim outside crop circle (no BlendMode.Clear black glitch)
-                    val r = cropDiameter * 0.5f
-                    val centerX = size.width * 0.5f
-                    val centerY = size.height * 0.5f
-                    val scrimPath = Path().apply {
-                        fillType = PathFillType.EvenOdd
-                        addRect(ComposeRect(0f, 0f, size.width, size.height))
-                        addOval(ComposeRect(centerX - r, centerY - r, centerX + r, centerY + r))
+                        val r = cropDiameter * 0.5f
+                        val centerX = size.width * 0.5f
+                        val centerY = size.height * 0.5f
+                        val scrim = if (cachedPath != null && cachedSize == curIntSize) {
+                            cachedPath!!
+                        } else {
+                            Path().apply {
+                                fillType = PathFillType.EvenOdd
+                                addRect(ComposeRect(0f, 0f, size.width, size.height))
+                                addOval(ComposeRect(centerX - r, centerY - r, centerX + r, centerY + r))
+                            }.also {
+                                cachedSize = curIntSize
+                                cachedPath = it
+                            }
+                        }
+                        drawPath(scrim, Color.Black.copy(alpha = 0.65f))
+                        drawCircle(
+                            color = RawColors.Mint.copy(alpha = 0.55f),
+                            radius = r,
+                            center = Offset(centerX, centerY),
+                            style = Stroke(width = 1.5.dp.toPx())
+                        )
                     }
-                    drawPath(scrimPath, Color.Black.copy(alpha = 0.65f))
-                    drawCircle(
-                        color = RawColors.TextPrimary,
-                        radius = r,
-                        center = Offset(centerX, centerY),
-                        style = Stroke(width = 2.dp.toPx())
-                    )
                 }
+
+                Spacer(modifier = Modifier.height(18.dp))
+
+                Slider(
+                    value = userScale,
+                    onValueChange = { userScale = it },
+                    valueRange = 1f..2.5f,
+                    colors = SliderDefaults.colors(
+                        thumbColor = RawColors.Mint,
+                        activeTrackColor = RawColors.Mint,
+                        inactiveTrackColor = RawColors.PillGrey
+                    ),
+                    modifier = Modifier.fillMaxWidth(0.86f)
+                )
             }
 
             Row(
                 modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(12.dp)
+                horizontalArrangement = Arrangement.spacedBy(10.dp)
             ) {
-                RawPressButton(
+                RawSecondaryButton(
+                    text = "Cancel",
                     onClick = onCancel,
                     modifier = Modifier.weight(1f)
-                ) {
-                    Box(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .height(56.dp)
-                            .clip(RoundedCornerShape(28.dp))
-                            .background(RawColors.RaisedCard),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Text("Cancel", style = RawTypography.labelLarge)
-                    }
-                }
+                )
                 RawPressButton(
                     onClick = {
                         val cropped = cropBitmapTo512(
@@ -172,12 +201,12 @@ fun CircleAvatarCropperDialog(
                     Box(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .height(56.dp)
-                            .clip(RoundedCornerShape(28.dp))
-                            .background(RawColors.PrimaryBtnBg),
+                            .height(52.dp)
+                            .clip(RoundedCornerShape(99.dp))
+                            .background(RawColors.Mint),
                         contentAlignment = Alignment.Center
                     ) {
-                        Text("Use photo", style = RawTypography.labelLarge, color = RawColors.PrimaryBtnText)
+                        Text("Use Photo", style = RawTypography.labelLarge, color = RawColors.PrimaryBtnText)
                     }
                 }
             }
@@ -198,7 +227,7 @@ private fun cropBitmapTo512(
 
     val viewW = boxSize.width.toFloat().coerceAtLeast(1f)
     val viewH = boxSize.height.toFloat().coerceAtLeast(1f)
-    val cropDiameter = min(viewW, viewH) * 0.78f
+    val cropDiameter = min(viewW, viewH) * 0.85f
     val baseScale = maxOf(
         cropDiameter / source.width.toFloat(),
         cropDiameter / source.height.toFloat()

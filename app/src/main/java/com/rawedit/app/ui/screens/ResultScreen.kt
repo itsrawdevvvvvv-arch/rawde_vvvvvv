@@ -11,7 +11,6 @@ import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.togetherWith
-import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
@@ -25,15 +24,12 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
@@ -45,14 +41,18 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.core.content.FileProvider
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.media3.common.MediaItem
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.exoplayer.ExoPlayer
@@ -62,8 +62,10 @@ import com.rawedit.app.data.local.VideoEntity
 import com.rawedit.app.ui.components.BigPrimaryButton
 import com.rawedit.app.ui.components.CircleActionButton
 import com.rawedit.app.ui.components.FormatHelpers
+import com.rawedit.app.ui.components.RawConfirmDialog
+import com.rawedit.app.ui.components.RawSecondaryButton
+import com.rawedit.app.ui.components.RawToastBanner
 import com.rawedit.app.ui.icons.PixelMascotKind
-import com.rawedit.app.ui.icons.PixelSparkle
 import com.rawedit.app.ui.icons.RawIcon
 import com.rawedit.app.ui.icons.RawIconType
 import com.rawedit.app.ui.icons.RawPixelMascot
@@ -72,8 +74,10 @@ import com.rawedit.app.ui.motion.RawEasings
 import com.rawedit.app.ui.motion.RawPressButton
 import com.rawedit.app.ui.motion.ResultCelebrationOverlay
 import com.rawedit.app.ui.motion.rememberAnimationsEnabled
+import com.rawedit.app.ui.theme.JetBrainsMonoFamily
 import com.rawedit.app.ui.theme.RawColors
 import com.rawedit.app.ui.theme.RawTypography
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import java.io.File
 
@@ -93,9 +97,16 @@ fun ResultScreen(
     val animEnabled = rememberAnimationsEnabled()
 
     var saving by remember { mutableStateOf(false) }
-    var saveFeedback by remember { mutableStateOf<String?>(null) }
+    var toastMsg by remember { mutableStateOf<String?>(null) }
     var celebratedOnce by remember(video.id) { mutableStateOf(false) }
     var showDeleteConfirm by remember { mutableStateOf(false) }
+
+    LaunchedEffect(toastMsg) {
+        if (toastMsg != null) {
+            delay(1900)
+            toastMsg = null
+        }
+    }
 
     val printReveal = remember(video.id) { Animatable(if (playCelebration && animEnabled) 0f else 1f) }
     LaunchedEffect(video.id, playCelebration) {
@@ -103,7 +114,7 @@ fun ResultScreen(
             celebratedOnce = true
             if (animEnabled) {
                 printReveal.snapTo(0f)
-                printReveal.animateTo(1f, tween(480, easing = RawEasings.SnappyOut))
+                printReveal.animateTo(1f, tween(420, easing = RawEasings.SnappyOut))
             }
         }
     }
@@ -116,8 +127,16 @@ fun ResultScreen(
         }
     }
 
-    DisposableEffect(player) {
+    val lifecycleOwner = LocalLifecycleOwner.current
+    DisposableEffect(player, lifecycleOwner) {
+        val observer = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_PAUSE || event == Lifecycle.Event.ON_STOP) {
+                player.pause()
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
         onDispose {
+            lifecycleOwner.lifecycle.removeObserver(observer)
             player.release()
         }
     }
@@ -127,36 +146,49 @@ fun ResultScreen(
             .fillMaxSize()
             .background(RawColors.BgPrimary)
             .statusBarsPadding()
-            .navigationBarsPadding()
     ) {
         Column(
             modifier = Modifier
                 .fillMaxSize()
                 .verticalScroll(rememberScrollState())
-                .padding(20.dp),
-            verticalArrangement = Arrangement.spacedBy(16.dp)
+                .padding(start = 18.dp, end = 18.dp, bottom = 118.dp),
+            verticalArrangement = Arrangement.spacedBy(14.dp)
         ) {
+            // Top bar matching R.result
             Row(
-                modifier = Modifier.fillMaxWidth(),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(58.dp),
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                CircleActionButton(icon = RawIconType.BACK, onClick = onBack)
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(10.dp)
+                CircleActionButton(icon = RawIconType.BACK, onClick = onBack, size = 42.dp)
+
+                Box(
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(99.dp))
+                        .background(RawColors.RaisedCard)
+                        .padding(horizontal = 10.dp, vertical = 5.dp)
                 ) {
-                    Text("1920x1080  •  30 fps", style = RawTypography.labelMedium)
-                    CircleActionButton(
-                        icon = RawIconType.TRASH,
-                        onClick = { showDeleteConfirm = true },
-                        size = 40.dp,
-                        backgroundColor = RawColors.ErrorCoral.copy(alpha = 0.14f),
-                        iconTint = RawColors.ErrorCoral
+                    Text(
+                        text = "1920X1080  •  30 FPS",
+                        fontFamily = JetBrainsMonoFamily,
+                        fontWeight = FontWeight.SemiBold,
+                        fontSize = 9.5.sp,
+                        letterSpacing = 0.7.sp,
+                        color = RawColors.TextMuted
                     )
                 }
+
+                CircleActionButton(
+                    icon = RawIconType.TRASH,
+                    onClick = { showDeleteConfirm = true },
+                    size = 42.dp,
+                    iconTint = RawColors.ErrorCoral
+                )
             }
 
+            // Headline + PHANTOM_BUDDY
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween,
@@ -167,31 +199,25 @@ fun ResultScreen(
                     style = RawTypography.headlineLarge,
                     modifier = Modifier.weight(1f)
                 )
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(4.dp)
-                ) {
-                    PixelSparkle(size = 12.dp, phaseOffsetMs = 100)
-                    RawPixelMascot(
-                        kind = PixelMascotKind.PHANTOM_BUDDY,
-                        size = 46.dp
-                    )
-                }
+                RawPixelMascot(
+                    kind = PixelMascotKind.PHANTOM_BUDDY,
+                    size = 64.dp
+                )
             }
 
-            // ExoPlayer 16:9 frame with snapping corner brackets celebration
+            // Native hardware ExoPlayer 16:9 stage (.vid)
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
                     .aspectRatio(16f / 9f)
                     .graphicsLayer {
                         val p = printReveal.value
-                        scaleY = 0.85f + 0.15f * p
+                        scaleY = 0.88f + 0.12f * p
                         alpha = p
                     }
-                    .clip(RoundedCornerShape(22.dp))
+                    .clip(RoundedCornerShape(14.dp))
                     .background(Color.Black)
-                    .border(1.dp, RawColors.Divider, RoundedCornerShape(22.dp))
+                    .border(1.dp, RawColors.Divider, RoundedCornerShape(14.dp))
             ) {
                 AndroidView(
                     factory = { ctx ->
@@ -206,66 +232,43 @@ fun ResultScreen(
                     },
                     modifier = Modifier.fillMaxSize()
                 )
-
-                // Snapping corner brackets
-                val bracketScale = 1f + (1f - printReveal.value) * 0.25f
-                Canvas(modifier = Modifier.fillMaxSize()) {
-                    val pad = 10.dp.toPx() * bracketScale
-                    val len = 18.dp.toPx()
-                    val sw = 2.5.dp.toPx()
-                    val c = RawColors.TextPrimary
-                    // TL
-                    drawLine(c, Offset(pad, pad), Offset(pad + len, pad), sw, StrokeCap.Round)
-                    drawLine(c, Offset(pad, pad), Offset(pad, pad + len), sw, StrokeCap.Round)
-                    // TR
-                    drawLine(c, Offset(size.width - pad, pad), Offset(size.width - pad - len, pad), sw, StrokeCap.Round)
-                    drawLine(c, Offset(size.width - pad, pad), Offset(size.width - pad, pad + len), sw, StrokeCap.Round)
-                    // BL
-                    drawLine(c, Offset(pad, size.height - pad), Offset(pad + len, size.height - pad), sw, StrokeCap.Round)
-                    drawLine(c, Offset(pad, size.height - pad), Offset(pad, size.height - pad - len), sw, StrokeCap.Round)
-                    // BR
-                    drawLine(c, Offset(size.width - pad, size.height - pad), Offset(size.width - pad - len, size.height - pad), sw, StrokeCap.Round)
-                    drawLine(c, Offset(size.width - pad, size.height - pad), Offset(size.width - pad, size.height - pad - len), sw, StrokeCap.Round)
-                }
             }
 
-            // Title and stats
+            // Video metadata card (.card.pad)
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .clip(RoundedCornerShape(20.dp))
+                    .clip(RoundedCornerShape(22.dp))
                     .background(RawColors.CardSurface)
-                    .border(1.dp, RawColors.Divider, RoundedCornerShape(20.dp))
+                    .border(1.dp, RawColors.Divider, RoundedCornerShape(22.dp))
                     .padding(16.dp)
             ) {
-                Text(video.title, style = RawTypography.titleLarge)
-                Spacer(modifier = Modifier.height(6.dp))
+                Text(
+                    text = video.title,
+                    style = RawTypography.titleLarge.copy(fontWeight = FontWeight.Bold)
+                )
+                Spacer(modifier = Modifier.height(4.dp))
                 Text(
                     text = "${FormatHelpers.formatDuration(video.durationSec)}  •  ${FormatHelpers.formatFileSize(video.sizeBytes)}  •  MP4 (H.264 + AAC)",
                     style = RawTypography.labelMedium
                 )
             }
 
-            saveFeedback?.let { msg ->
-                Text(
-                    text = msg,
-                    style = RawTypography.bodyMedium,
-                    color = if (msg.startsWith("Saved")) RawColors.SuccessMint else RawColors.ErrorCoral
-                )
-            }
-
-            // Save to phone + Share
+            // .row2 Save to phone (morphs Mint -> secondary grey after saved) + Share
+            val isSaved = video.savedToGalleryUri != null
             Row(
                 modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(12.dp)
+                horizontalArrangement = Arrangement.spacedBy(10.dp)
             ) {
-                val saveBtnBg by animateColorAsState(
-                    targetValue = if (video.savedToGalleryUri != null) RawColors.SuccessMint else RawColors.PrimaryBtnBg,
-                    animationSpec = tween(if (animEnabled) 260 else 0, easing = RawEasings.Morph),
-                    label = "result_save_bg"
+                val saveBg by animateColorAsState(
+                    targetValue = if (isSaved) RawColors.RaisedCard else RawColors.Mint,
+                    animationSpec = tween(if (animEnabled) 220 else 0, easing = RawEasings.Morph),
+                    label = "res_save_bg"
                 )
+                val saveFg = if (isSaved) RawColors.TextPrimary else RawColors.PrimaryBtnText
+
                 RawPressButton(
-                    enabled = !saving && video.savedToGalleryUri == null,
+                    enabled = !saving && !isSaved,
                     onClick = {
                         saving = true
                         scope.launch {
@@ -273,52 +276,55 @@ fun ResultScreen(
                             saving = false
                             res.onSuccess { uri ->
                                 onSavedToGallery(uri.toString())
-                                saveFeedback = "Saved to Movies/raw_edit"
+                                toastMsg = "Saved to Movies/raw_edit"
                             }.onFailure { err ->
-                                saveFeedback = err.message ?: "Could not save video."
+                                toastMsg = err.message ?: "Could not save video"
                             }
                         }
                     },
-                    modifier = Modifier.weight(1.3f)
+                    modifier = Modifier.weight(1f)
                 ) {
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .height(58.dp)
-                            .clip(RoundedCornerShape(29.dp))
-                            .background(saveBtnBg),
+                            .height(52.dp)
+                            .clip(RoundedCornerShape(99.dp))
+                            .background(saveBg)
+                            .then(
+                                if (isSaved) Modifier.border(1.dp, RawColors.Divider, RoundedCornerShape(99.dp))
+                                else Modifier
+                            ),
                         horizontalArrangement = Arrangement.Center,
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         RawIcon(
-                            type = if (video.savedToGalleryUri != null) RawIconType.CHECK else RawIconType.DOWNLOAD,
-                            size = 20.dp,
-                            tint = RawColors.PrimaryBtnText
+                            type = if (isSaved) RawIconType.CHECK else RawIconType.DOWNLOAD,
+                            size = 18.dp,
+                            tint = saveFg
                         )
                         Spacer(modifier = Modifier.width(8.dp))
                         val labelStr = when {
                             saving -> "Saving..."
-                            video.savedToGalleryUri != null -> "Saved"
+                            isSaved -> "Saved"
                             else -> "Save to phone"
                         }
                         AnimatedContent(
                             targetState = labelStr,
                             transitionSpec = {
                                 if (!animEnabled) fadeIn(tween(0)) togetherWith fadeOut(tween(0))
-                                else fadeIn(tween(180)) togetherWith fadeOut(tween(140))
+                                else fadeIn(tween(180)) togetherWith fadeOut(tween(130))
                             },
-                            label = "save_label_morph"
-                        ) { text ->
-                            Text(
-                                text = text,
-                                style = RawTypography.labelLarge,
-                                color = RawColors.PrimaryBtnText
-                            )
+                            label = "res_save_lbl"
+                        ) { t ->
+                            Text(text = t, style = RawTypography.labelLarge, color = saveFg)
                         }
                     }
                 }
 
-                RawPressButton(
+                RawSecondaryButton(
+                    text = "Share",
+                    height = 52.dp,
+                    leadingIcon = RawIconType.SHARE,
                     onClick = {
                         val file = File(video.fileUri)
                         if (file.exists()) {
@@ -336,23 +342,23 @@ fun ResultScreen(
                         }
                     },
                     modifier = Modifier.weight(1f)
-                ) {
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .height(58.dp)
-                            .clip(RoundedCornerShape(29.dp))
-                            .background(RawColors.RaisedCard),
-                        horizontalArrangement = Arrangement.Center,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        RawIcon(RawIconType.SHARE, size = 20.dp)
-                        Spacer(modifier = Modifier.width(8.dp))
-                        Text("Share", style = RawTypography.labelLarge)
-                    }
-                }
+                )
             }
+        }
 
+        // Sticky gradient bottom CTA (.stk)
+        Box(
+            modifier = Modifier
+                .align(Alignment.BottomCenter)
+                .fillMaxWidth()
+                .background(
+                    Brush.verticalGradient(
+                        listOf(Color.Transparent, RawColors.BgPrimary.copy(alpha = 0.94f), RawColors.BgPrimary)
+                    )
+                )
+                .navigationBarsPadding()
+                .padding(start = 18.dp, end = 18.dp, top = 20.dp, bottom = 18.dp)
+        ) {
             BigPrimaryButton(
                 text = "Make another",
                 leadingIcon = RawIconType.PLUS,
@@ -364,33 +370,27 @@ fun ResultScreen(
             play = playCelebration,
             modifier = Modifier.fillMaxSize()
         )
+
+        RawToastBanner(
+            message = toastMsg,
+            modifier = Modifier
+                .align(Alignment.BottomCenter)
+                .navigationBarsPadding()
+                .padding(bottom = 86.dp)
+        )
     }
 
     if (showDeleteConfirm) {
-        AlertDialog(
-            onDismissRequest = { showDeleteConfirm = false },
-            containerColor = RawColors.HeroSurface,
-            titleContentColor = RawColors.TextPrimary,
-            textContentColor = RawColors.TextMuted,
-            title = { Text("Delete this reel?") },
-            text = {
-                Text("Deletes \"${video.title}\" and its local MP4 from raw_edit. Any copy saved to your phone's Movies folder stays untouched.")
+        RawConfirmDialog(
+            title = "Delete this reel?",
+            body = "The MP4 will be removed from your phone. Any copy saved to Movies stays untouched.",
+            confirmLabel = "Delete",
+            isDanger = true,
+            onConfirm = {
+                showDeleteConfirm = false
+                onDeleteVideo()
             },
-            confirmButton = {
-                TextButton(
-                    onClick = {
-                        showDeleteConfirm = false
-                        onDeleteVideo()
-                    }
-                ) {
-                    Text("Delete", color = RawColors.ErrorCoral)
-                }
-            },
-            dismissButton = {
-                TextButton(onClick = { showDeleteConfirm = false }) {
-                    Text("Cancel", color = RawColors.TextPrimary)
-                }
-            }
+            onDismiss = { showDeleteConfirm = false }
         )
     }
 }

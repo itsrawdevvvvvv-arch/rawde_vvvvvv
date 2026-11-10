@@ -7,7 +7,6 @@ import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -18,12 +17,13 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.navigationBarsPadding
-import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Text
@@ -36,22 +36,24 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.core.content.FileProvider
 import com.rawedit.app.data.CacheManager
 import com.rawedit.app.ui.components.BigPrimaryButton
 import com.rawedit.app.ui.components.CircleAvatarCropperDialog
-import com.rawedit.app.ui.components.RawEditLogoBadge
+import com.rawedit.app.ui.components.RawSecondaryButton
 import com.rawedit.app.ui.components.UserAvatarView
 import com.rawedit.app.ui.icons.PixelMascotKind
-import com.rawedit.app.ui.icons.PixelSparkle
-import com.rawedit.app.ui.icons.RawIcon
+import com.rawedit.app.ui.icons.PixelRawEditLogo
 import com.rawedit.app.ui.icons.RawIconType
 import com.rawedit.app.ui.icons.RawPixelMascot
 import com.rawedit.app.ui.motion.KineticHeading
-import com.rawedit.app.ui.motion.RawPressButton
-import com.rawedit.app.ui.theme.DotGridSurface
+import com.rawedit.app.ui.theme.JetBrainsMonoFamily
 import com.rawedit.app.ui.theme.RawColors
 import com.rawedit.app.ui.theme.RawTypography
 import kotlinx.coroutines.launch
@@ -90,160 +92,194 @@ fun ProfileSetupScreen(
         }
     }
 
-    DotGridSurface(
-        modifier = Modifier.fillMaxSize(),
-        backgroundColor = RawColors.BgPrimary,
-        dotColor = RawColors.HeroSurface
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(RawColors.BgPrimary)
+            .statusBarsPadding()
+            .imePadding()
     ) {
         Column(
             modifier = Modifier
                 .fillMaxSize()
-                .statusBarsPadding()
-                .navigationBarsPadding()
-                .imePadding()
-                .padding(24.dp),
-            verticalArrangement = Arrangement.SpaceBetween
+                .verticalScroll(rememberScrollState())
+                .padding(start = 18.dp, end = 18.dp, bottom = 120.dp)
         ) {
-            Column {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    RawEditLogoBadge(logoSize = 36.dp)
-                    Box(contentAlignment = Alignment.TopEnd) {
-                        RawPixelMascot(
-                            kind = PixelMascotKind.PHANTOM_BUDDY,
-                            size = 44.dp
-                        )
-                        PixelSparkle(
-                            size = 10.dp,
-                            phaseOffsetMs = 150,
-                            modifier = Modifier.offset(x = 4.dp, y = (-4).dp)
-                        )
-                    }
-                }
-                Spacer(modifier = Modifier.height(28.dp))
-                KineticHeading(
-                    words = listOf("Set", "up", "profile"),
-                    style = RawTypography.displayLarge
-                )
-                Spacer(modifier = Modifier.height(8.dp))
-                Text(
-                    text = "Everything stays locally on your phone.",
-                    style = RawTypography.bodyLarge,
-                    color = RawColors.TextMuted
-                )
+            // Top bar matching R.setup
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(58.dp),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                PixelRawEditLogo(width = 42.dp, height = 33.dp)
+                RawPixelMascot(kind = PixelMascotKind.PHANTOM_BUDDY, size = 38.dp)
+            }
 
-                Spacer(modifier = Modifier.height(34.dp))
+            Spacer(modifier = Modifier.height(6.dp))
+            KineticHeading(
+                words = listOf("Set", "up", "profile"),
+                style = RawTypography.headlineLarge
+            )
+            Spacer(modifier = Modifier.height(8.dp))
+            Text(
+                text = "Everything stays locally on your phone.",
+                style = RawTypography.bodyLarge.copy(fontSize = 14.sp),
+                color = RawColors.TextMuted
+            )
 
-                // Avatar picker section
-                Column(
+            Spacer(modifier = Modifier.height(22.dp))
+
+            // Avatar card (.card.pad with .ava-w Mint halo)
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(22.dp))
+                    .background(RawColors.CardSurface)
+                    .border(1.dp, RawColors.Divider, RoundedCornerShape(22.dp))
+                    .padding(16.dp),
+                horizontalAlignment = Alignment.CenterHorizontally
+            ) {
+                Box(
                     modifier = Modifier
-                        .fillMaxWidth()
-                        .clip(RoundedCornerShape(24.dp))
-                        .background(RawColors.CardSurface)
-                        .border(1.dp, RawColors.Divider, RoundedCornerShape(24.dp))
-                        .padding(20.dp),
-                    horizontalAlignment = Alignment.CenterHorizontally
+                        .size(126.dp)
+                        .border(1.dp, RawColors.Mint.copy(alpha = 0.28f), CircleShape),
+                    contentAlignment = Alignment.Center
                 ) {
                     UserAvatarView(
                         name = name.ifBlank { "R" },
                         photoPath = savedPhotoPath,
-                        size = 92.dp,
+                        size = 112.dp,
                         onClick = {
-                            galleryPicker.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly))
+                            galleryPicker.launch(
+                                PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)
+                            )
                         }
                     )
-                    Spacer(modifier = Modifier.height(14.dp))
-                    Text("Profile photo (optional)", style = RawTypography.bodyMedium)
-                    Spacer(modifier = Modifier.height(14.dp))
-                    Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                        RawPressButton(
-                            onClick = {
-                                galleryPicker.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly))
-                            }
-                        ) {
-                            Row(
-                                modifier = Modifier
-                                    .height(48.dp)
-                                    .clip(RoundedCornerShape(24.dp))
-                                    .background(RawColors.RaisedCard)
-                                    .padding(horizontal = 16.dp),
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.spacedBy(8.dp)
-                            ) {
-                                RawIcon(RawIconType.IMAGE, size = 18.dp)
-                                Text("Gallery", style = RawTypography.labelLarge)
-                            }
-                        }
-                        RawPressButton(
-                            onClick = {
-                                val tempFile = cacheManager.createCameraTempFile()
-                                val uri = FileProvider.getUriForFile(
-                                    context,
-                                    "${context.packageName}.fileprovider",
-                                    tempFile
-                                )
-                                cameraTempUri = uri
-                                cameraLauncher.launch(uri)
-                            }
-                        ) {
-                            Row(
-                                modifier = Modifier
-                                    .height(48.dp)
-                                    .clip(RoundedCornerShape(24.dp))
-                                    .background(RawColors.RaisedCard)
-                                    .padding(horizontal = 16.dp),
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.spacedBy(8.dp)
-                            ) {
-                                RawIcon(RawIconType.CAMERA, size = 18.dp)
-                                Text("Camera", style = RawTypography.labelLarge)
-                            }
-                        }
-                    }
-                    if (savedPhotoPath != null) {
-                        Spacer(modifier = Modifier.height(10.dp))
-                        Text(
-                            text = "Remove photo",
-                            style = RawTypography.bodyMedium,
-                            color = RawColors.ErrorCoral,
-                            modifier = Modifier
-                                .clip(RoundedCornerShape(12.dp))
-                                .clickable { savedPhotoPath = null }
-                                .padding(horizontal = 12.dp, vertical = 6.dp)
-                        )
-                    }
                 }
 
-                Spacer(modifier = Modifier.height(22.dp))
-
-                Text("Your name", style = RawTypography.titleMedium)
                 Spacer(modifier = Modifier.height(10.dp))
-                OutlinedTextField(
-                    value = name,
-                    onValueChange = { if (it.length <= 32) name = it },
-                    placeholder = { Text("Enter your name", color = RawColors.TextMuted) },
-                    singleLine = true,
-                    shape = RoundedCornerShape(18.dp),
-                    colors = OutlinedTextFieldDefaults.colors(
-                        focusedBorderColor = RawColors.TextPrimary,
-                        unfocusedBorderColor = RawColors.Divider,
-                        focusedContainerColor = RawColors.CardSurface,
-                        unfocusedContainerColor = RawColors.CardSurface,
-                        focusedTextColor = RawColors.TextPrimary,
-                        unfocusedTextColor = RawColors.TextPrimary,
-                        cursorColor = RawColors.TextPrimary
-                    ),
-                    modifier = Modifier.fillMaxWidth()
+                Text(
+                    text = "Profile photo (optional)",
+                    style = RawTypography.titleMedium.copy(fontWeight = FontWeight.Bold)
                 )
+                Spacer(modifier = Modifier.height(14.dp))
+
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    RawSecondaryButton(
+                        text = "Gallery",
+                        height = 42.dp,
+                        leadingIcon = RawIconType.IMAGE,
+                        onClick = {
+                            galleryPicker.launch(
+                                PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)
+                            )
+                        },
+                        modifier = Modifier.weight(1f)
+                    )
+                    RawSecondaryButton(
+                        text = "Camera",
+                        height = 42.dp,
+                        leadingIcon = RawIconType.CAMERA,
+                        onClick = {
+                            val tempFile = cacheManager.createCameraTempFile()
+                            val uri = FileProvider.getUriForFile(
+                                context,
+                                "${context.packageName}.fileprovider",
+                                tempFile
+                            )
+                            cameraTempUri = uri
+                            cameraLauncher.launch(uri)
+                        },
+                        modifier = Modifier.weight(1f)
+                    )
+                }
+
+                if (savedPhotoPath != null) {
+                    Spacer(modifier = Modifier.height(10.dp))
+                    RawSecondaryButton(
+                        text = "Remove photo",
+                        height = 42.dp,
+                        isDanger = true,
+                        onClick = { savedPhotoPath = null }
+                    )
+                }
             }
 
+            Spacer(modifier = Modifier.height(22.dp))
+
+            // Your name + live N/32 mono counter (.lbl)
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 2.dp),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    text = "Your name",
+                    style = RawTypography.bodyMedium.copy(fontWeight = FontWeight.SemiBold, fontSize = 13.sp),
+                    color = RawColors.TextMuted
+                )
+                Text(
+                    text = "${name.length}/32",
+                    fontFamily = JetBrainsMonoFamily,
+                    fontSize = 11.sp,
+                    color = RawColors.TextMuted
+                )
+            }
+            Spacer(modifier = Modifier.height(10.dp))
+            OutlinedTextField(
+                value = name,
+                onValueChange = { if (it.length <= 32) name = it },
+                placeholder = { Text("What should we call you?", color = RawColors.TextMuted) },
+                singleLine = true,
+                shape = RoundedCornerShape(16.dp),
+                colors = OutlinedTextFieldDefaults.colors(
+                    focusedBorderColor = RawColors.MintFocus,
+                    unfocusedBorderColor = RawColors.Divider,
+                    focusedContainerColor = RawColors.RaisedCard,
+                    unfocusedContainerColor = RawColors.RaisedCard,
+                    focusedTextColor = RawColors.TextPrimary,
+                    unfocusedTextColor = RawColors.TextPrimary,
+                    cursorColor = RawColors.Mint
+                ),
+                modifier = Modifier.fillMaxWidth()
+            )
+
+            Spacer(modifier = Modifier.height(28.dp))
+            Box(
+                modifier = Modifier.fillMaxWidth(),
+                contentAlignment = Alignment.Center
+            ) {
+                RawPixelMascot(
+                    kind = PixelMascotKind.PEEKING_CAT,
+                    size = 78.dp,
+                    awakeOverride = true
+                )
+            }
+        }
+
+        // Sticky gradient CTA footer (.stk)
+        Box(
+            modifier = Modifier
+                .align(Alignment.BottomCenter)
+                .fillMaxWidth()
+                .background(
+                    Brush.verticalGradient(
+                        listOf(Color.Transparent, RawColors.BgPrimary.copy(alpha = 0.94f), RawColors.BgPrimary)
+                    )
+                )
+                .navigationBarsPadding()
+                .padding(start = 18.dp, end = 18.dp, top = 20.dp, bottom = 18.dp)
+        ) {
             BigPrimaryButton(
                 text = "Continue to raw_edit",
                 enabled = name.trim().isNotEmpty(),
-                leadingIcon = RawIconType.ARROW_RIGHT,
                 onClick = { onComplete(name.trim(), savedPhotoPath) }
             )
         }

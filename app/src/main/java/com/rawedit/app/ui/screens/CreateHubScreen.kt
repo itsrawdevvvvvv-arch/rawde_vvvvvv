@@ -8,6 +8,7 @@ import androidx.compose.animation.fadeOut
 import androidx.compose.animation.scaleIn
 import androidx.compose.animation.scaleOut
 import androidx.compose.animation.togetherWith
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
@@ -27,12 +28,10 @@ import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -41,8 +40,14 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.StrokeJoin
+import androidx.compose.ui.graphics.drawscope.Fill
+import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -50,26 +55,28 @@ import androidx.compose.ui.unit.sp
 import com.rawedit.app.data.local.ProjectEntity
 import com.rawedit.app.ui.components.CircleActionButton
 import com.rawedit.app.ui.components.FormatHelpers
-import com.rawedit.app.ui.icons.IllustrationKind
+import com.rawedit.app.ui.components.RawConfirmDialog
+import com.rawedit.app.ui.components.RawToastBanner
 import com.rawedit.app.ui.icons.PixelMascotKind
 import com.rawedit.app.ui.icons.PixelSparkle
 import com.rawedit.app.ui.icons.PixelTypeMarqueeBadge
 import com.rawedit.app.ui.icons.RawIcon
 import com.rawedit.app.ui.icons.RawIconType
-import com.rawedit.app.ui.icons.RawLineArtIllustration
 import com.rawedit.app.ui.icons.RawPixelMascot
-import com.rawedit.app.ui.motion.CascadeSkewCard
 import com.rawedit.app.ui.motion.KineticHeading
 import com.rawedit.app.ui.motion.RawEasings
 import com.rawedit.app.ui.motion.RawPressButton
 import com.rawedit.app.ui.motion.SwipeToCreateSlider
 import com.rawedit.app.ui.motion.rememberAnimationsEnabled
-import com.rawedit.app.ui.theme.DotGridSurface
+import com.rawedit.app.ui.theme.InterFontFamily
+import com.rawedit.app.ui.theme.JetBrainsMonoFamily
 import com.rawedit.app.ui.theme.RawColors
 import com.rawedit.app.ui.theme.RawTypography
+import kotlinx.coroutines.delay
 
 private data class StepRowModel(
     val number: Int,
+    val icon: RawIconType,
     val title: String,
     val subtitle: String,
     val statusText: String,
@@ -94,10 +101,19 @@ fun CreateHubScreen(
     val hasCode = project.code.isNotBlank()
     val canCreate = hasAudio && hasCode
     var showDeleteConfirm by remember { mutableStateOf(false) }
+    var toastMsg by remember { mutableStateOf<String?>(null) }
+
+    LaunchedEffect(toastMsg) {
+        if (toastMsg != null) {
+            delay(1900)
+            toastMsg = null
+        }
+    }
 
     val steps = listOf(
         StepRowModel(
             number = 1,
+            icon = RawIconType.MIC,
             title = "Add voice",
             subtitle = if (hasAudio) {
                 val srtNote = if (project.srtCueCount > 0) " • ${project.srtCueCount} SRT cues" else ""
@@ -112,6 +128,7 @@ fun CreateHubScreen(
         ),
         StepRowModel(
             number = 2,
+            icon = RawIconType.ZIP,
             title = "Copy prompt",
             subtitle = "Download style pack ZIP + copy prompt into Cloud AI",
             statusText = if (hasAudio) "Ready" else "Step 1 first",
@@ -121,6 +138,7 @@ fun CreateHubScreen(
         ),
         StepRowModel(
             number = 3,
+            icon = RawIconType.CODE,
             title = "Paste code",
             subtitle = if (hasCode) {
                 "Validated • ${FormatHelpers.formatDuration(project.codeDurationSec)}"
@@ -142,298 +160,328 @@ fun CreateHubScreen(
     ) {
         LazyColumn(
             modifier = Modifier.fillMaxSize(),
-            contentPadding = PaddingValues(start = 20.dp, end = 20.dp, top = 12.dp, bottom = 126.dp),
-            verticalArrangement = Arrangement.spacedBy(16.dp)
+            contentPadding = PaddingValues(start = 18.dp, end = 18.dp, top = 8.dp, bottom = 128.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
+            // Top bar with Back squircle + Trash squircle
             item {
                 Row(
-                    modifier = Modifier.fillMaxWidth(),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(58.dp),
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     CircleActionButton(
                         icon = RawIconType.BACK,
                         onClick = onBack,
-                        size = 44.dp
+                        size = 42.dp
                     )
                     CircleActionButton(
                         icon = RawIconType.TRASH,
                         onClick = { showDeleteConfirm = true },
-                        size = 44.dp,
-                        backgroundColor = RawColors.ErrorCoral.copy(alpha = 0.14f),
+                        size = 42.dp,
                         iconTint = RawColors.ErrorCoral
                     )
                 }
             }
 
+            // Title + peeking phantom mascot
             item {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.Bottom
-                ) {
-                    Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                        KineticHeading(
-                            words = listOf("Typography"),
-                            style = RawTypography.displayLarge.copy(fontSize = 31.sp, lineHeight = 36.sp)
-                        )
-                        KineticHeading(
-                            words = listOf("Reel"),
-                            style = RawTypography.displayLarge.copy(fontSize = 31.sp, lineHeight = 36.sp)
-                        )
-                    }
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(6.dp)
-                    ) {
-                        PixelSparkle(size = 12.dp, phaseOffsetMs = 150)
-                        RawPixelMascot(kind = PixelMascotKind.PEEKING_CAT, size = 56.dp)
-                    }
+                Box(modifier = Modifier.fillMaxWidth()) {
+                    KineticHeading(
+                        words = listOf("Typography", "Reel"),
+                        style = RawTypography.headlineLarge,
+                        modifier = Modifier.padding(end = 76.dp)
+                    )
+                    RawPixelMascot(
+                        kind = PixelMascotKind.PHANTOM_BUDDY,
+                        size = 52.dp,
+                        modifier = Modifier
+                            .align(Alignment.TopEnd)
+                            .offset(x = (-4).dp, y = (-6).dp)
+                    )
                 }
             }
 
-            // Minimal hero banner with animated white pixel companions & line art
+            // Mint line-art stage banner (.ban)
             item {
-                DotGridSurface(
+                Box(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .height(166.dp)
-                        .clip(RoundedCornerShape(24.dp))
-                        .border(1.dp, RawColors.Divider.copy(alpha = 0.65f), RoundedCornerShape(24.dp)),
-                    backgroundColor = RawColors.HeroSurface
+                        .height(130.dp)
+                        .clip(RoundedCornerShape(22.dp))
+                        .background(RawColors.CardSurface)
+                        .border(1.dp, RawColors.Divider, RoundedCornerShape(22.dp))
                 ) {
-                    Box(
-                        modifier = Modifier.fillMaxSize(),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        RawLineArtIllustration(
-                            kind = IllustrationKind.HERO_TYPOGRAPHY,
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .height(148.dp)
-                        )
-                        RawPixelMascot(
-                            kind = PixelMascotKind.TV_BOT,
-                            size = 52.dp,
-                            modifier = Modifier
-                                .align(Alignment.BottomStart)
-                                .padding(start = 16.dp, bottom = 10.dp)
-                        )
-                        PixelTypeMarqueeBadge(
-                            size = 64.dp,
-                            modifier = Modifier
-                                .align(Alignment.TopEnd)
-                                .padding(top = 12.dp, end = 16.dp)
-                        )
-                        PixelSparkle(
-                            size = 13.dp,
-                            phaseOffsetMs = 340,
-                            modifier = Modifier
-                                .align(Alignment.TopStart)
-                                .offset(x = 18.dp, y = 14.dp)
-                        )
-                    }
+                    HubBannerLineArt(modifier = Modifier.fillMaxSize())
+
+                    RawPixelMascot(
+                        kind = PixelMascotKind.TV_BOT,
+                        size = 44.dp,
+                        modifier = Modifier
+                            .align(Alignment.BottomStart)
+                            .padding(start = 10.dp, bottom = 6.dp)
+                    )
+                    RawPixelMascot(
+                        kind = PixelMascotKind.LENS_BOT,
+                        size = 44.dp,
+                        modifier = Modifier
+                            .align(Alignment.BottomEnd)
+                            .padding(end = 12.dp, bottom = 4.dp)
+                    )
+                    PixelSparkle(
+                        size = 12.dp,
+                        phaseOffsetMs = 260,
+                        modifier = Modifier
+                            .align(Alignment.TopEnd)
+                            .padding(top = 12.dp, end = 64.dp)
+                    )
+                    PixelTypeMarqueeBadge(
+                        size = 24.dp,
+                        modifier = Modifier
+                            .align(Alignment.TopEnd)
+                            .padding(top = 10.dp, end = 14.dp)
+                    )
                 }
             }
 
-            // Two minimal stat pills directly below preview banner
+            // Two outlined stat pills (.stats / .stat)
             item {
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.spacedBy(10.dp)
                 ) {
-                    StatPillCard(
-                        icon = RawIconType.CLOCK,
+                    HubStatPill(
+                        icon = RawIconType.MIC,
                         text = if (hasAudio) FormatHelpers.formatDuration(project.audioDurationSec) else "No audio yet",
                         modifier = Modifier.weight(1f)
                     )
-                    StatPillCard(
-                        icon = RawIconType.BOLT,
+                    HubStatPill(
+                        icon = RawIconType.FILE,
                         text = if (hasAudio) FormatHelpers.formatFileSize(project.audioSizeBytes) else "1080p MP4",
                         modifier = Modifier.weight(1f)
                     )
                 }
             }
 
+            // Reel Steps heading + .sp readiness pill
             item {
                 val badgeBg by animateColorAsState(
-                    targetValue = if (canCreate) RawColors.SuccessMint.copy(alpha = 0.16f) else RawColors.HeroSurface,
+                    targetValue = if (canCreate) RawColors.MintSoft else RawColors.RaisedCard,
                     animationSpec = tween(if (animEnabled) 260 else 0, easing = RawEasings.Morph),
-                    label = "hub_badge_bg"
-                )
-                val badgeBorder by animateColorAsState(
-                    targetValue = if (canCreate) RawColors.SuccessMint.copy(alpha = 0.45f) else RawColors.Divider.copy(alpha = 0.7f),
-                    animationSpec = tween(if (animEnabled) 260 else 0, easing = RawEasings.Morph),
-                    label = "hub_badge_border"
+                    label = "hub_sp_bg"
                 )
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(top = 4.dp),
+                        .padding(top = 6.dp, start = 2.dp, end = 2.dp),
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     Text(
                         text = "Reel Steps",
-                        style = RawTypography.titleLarge
+                        fontFamily = InterFontFamily,
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 19.sp,
+                        letterSpacing = (-0.5).sp,
+                        color = RawColors.TextPrimary
                     )
                     Box(
                         modifier = Modifier
-                            .clip(RoundedCornerShape(15.dp))
+                            .clip(RoundedCornerShape(99.dp))
                             .background(badgeBg)
-                            .border(1.dp, badgeBorder, RoundedCornerShape(15.dp))
-                            .padding(horizontal = 12.dp, vertical = 6.dp)
+                            .padding(horizontal = 11.dp, vertical = 6.dp)
                     ) {
                         AnimatedContent(
                             targetState = canCreate,
                             transitionSpec = {
-                                if (!animEnabled) {
-                                    fadeIn(tween(0)) togetherWith fadeOut(tween(0))
-                                } else {
-                                    (fadeIn(tween(200, easing = RawEasings.Morph)) +
-                                        scaleIn(initialScale = 0.94f, animationSpec = tween(200)))
-                                        .togetherWith(
-                                            fadeOut(tween(140)) +
-                                                scaleOut(targetScale = 0.94f, animationSpec = tween(140))
-                                        )
-                                }
+                                if (!animEnabled) fadeIn(tween(0)) togetherWith fadeOut(tween(0))
+                                else (fadeIn(tween(180)) + scaleIn(initialScale = 0.94f, animationSpec = tween(180)))
+                                    .togetherWith(fadeOut(tween(130)) + scaleOut(targetScale = 0.94f, animationSpec = tween(130)))
                             },
-                            label = "hub_ready_text"
+                            label = "hub_ready_pill"
                         ) { ready ->
                             Text(
-                                text = if (ready) "Ready to create" else "Steps 1 & 3 needed",
-                                style = RawTypography.labelSmall,
-                                color = if (ready) RawColors.SuccessMint else RawColors.TextMuted
+                                text = if (ready) "READY TO CREATE" else "STEPS 1 & 3 NEEDED",
+                                fontFamily = JetBrainsMonoFamily,
+                                fontWeight = FontWeight.SemiBold,
+                                fontSize = 10.sp,
+                                letterSpacing = 0.6.sp,
+                                color = if (ready) RawColors.Mint else RawColors.TextMuted
                             )
                         }
                     }
                 }
             }
 
-            itemsIndexed(steps, key = { _, s -> s.number }) { index, step ->
-                CascadeSkewCard(index = index) {
-                    StepActionRow(step = step, animEnabled = animEnabled)
-                }
+            itemsIndexed(steps, key = { _, s -> s.number }) { _, step ->
+                StepActionCard(step = step, animEnabled = animEnabled)
             }
 
+            // Crisp white-bordered Contact Sheet step card when validated code is present
             if (hasCode) {
                 item {
                     RawPressButton(onClick = onOpenKeyframeSheet) {
                         Row(
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .clip(RoundedCornerShape(20.dp))
-                                .background(RawColors.HeroSurface)
-                                .border(1.dp, RawColors.Divider, RoundedCornerShape(20.dp))
-                                .padding(horizontal = 18.dp, vertical = 14.dp),
+                                .clip(RoundedCornerShape(22.dp))
+                                .background(RawColors.CardSurface)
+                                .border(1.dp, Color.White, RoundedCornerShape(22.dp))
+                                .padding(14.dp),
                             verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.SpaceBetween
+                            horizontalArrangement = Arrangement.spacedBy(12.dp)
                         ) {
-                            Row(
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.spacedBy(12.dp),
+                            RawPixelMascot(
+                                kind = PixelMascotKind.LENS_BOT,
+                                size = 34.dp,
+                                interactive = false,
+                                noBob = true,
+                                noBlink = true
+                            )
+                            Text(
+                                text = "Preview contact sheet (auto-fit & PDF)",
+                                style = RawTypography.titleMedium.copy(fontWeight = FontWeight.Bold),
                                 modifier = Modifier.weight(1f)
-                            ) {
-                                RawPixelMascot(
-                                    kind = PixelMascotKind.LENS_BOT,
-                                    size = 30.dp,
-                                    interactive = false
-                                )
-                                Column {
-                                    Text(
-                                        text = "Preview contact sheet (auto-fit & PDF)",
-                                        style = RawTypography.titleMedium.copy(fontSize = 14.5.sp)
-                                    )
-                                    Text(
-                                        text = "Inspect timestamps & export PDF/ZIP for Cloud AI",
-                                        style = RawTypography.labelSmall,
-                                        color = RawColors.TextMuted
-                                    )
-                                }
-                            }
-                            RawIcon(RawIconType.ARROW_RIGHT, size = 18.dp, tint = RawColors.TextPrimary)
+                            )
+                            RawIcon(
+                                type = RawIconType.CHEVRON_RIGHT,
+                                size = 18.dp,
+                                tint = RawColors.TextPrimary
+                            )
                         }
                     }
                 }
             }
         }
 
-        // Bottom Swipe-to-create bar with subtle fade scrim
+        // Sticky gradient bottom footer (.stk) + SwipeToCreateSlider
         Box(
             modifier = Modifier
                 .align(Alignment.BottomCenter)
                 .fillMaxWidth()
                 .background(
                     Brush.verticalGradient(
-                        colors = listOf(
-                            Color.Transparent,
-                            RawColors.BgPrimary.copy(alpha = 0.88f),
-                            RawColors.BgPrimary
-                        )
+                        listOf(Color.Transparent, RawColors.BgPrimary.copy(alpha = 0.94f), RawColors.BgPrimary)
                     )
                 )
                 .navigationBarsPadding()
-                .padding(horizontal = 20.dp, vertical = 14.dp)
+                .padding(start = 18.dp, end = 18.dp, top = 20.dp, bottom = 18.dp)
         ) {
             SwipeToCreateSlider(
                 unlocked = canCreate,
                 rightTag = if (hasAudio) FormatHelpers.formatDuration(project.audioDurationSec) else "1080p",
-                onTriggered = onSwipeCreate
+                onTriggered = onSwipeCreate,
+                onLockedTap = { toastMsg = "Finish steps 1 and 3 first" }
             )
         }
+
+        RawToastBanner(
+            message = toastMsg,
+            modifier = Modifier
+                .align(Alignment.BottomCenter)
+                .navigationBarsPadding()
+                .padding(bottom = 86.dp)
+        )
     }
 
     if (showDeleteConfirm) {
-        AlertDialog(
-            onDismissRequest = { showDeleteConfirm = false },
-            containerColor = RawColors.HeroSurface,
-            titleContentColor = RawColors.TextPrimary,
-            textContentColor = RawColors.TextMuted,
-            title = { Text("Delete this draft?") },
-            text = {
-                Text("Deletes project \"${project.title.ifBlank { "Untitled Reel" }}\", its imported audio, subtitles, and HTML code from raw_edit.")
+        RawConfirmDialog(
+            title = "Delete this draft?",
+            body = "This removes the draft and its voiceover from your phone.",
+            confirmLabel = "Delete",
+            isDanger = true,
+            onConfirm = {
+                showDeleteConfirm = false
+                onDeleteProject()
             },
-            confirmButton = {
-                TextButton(
-                    onClick = {
-                        showDeleteConfirm = false
-                        onDeleteProject()
-                    }
-                ) {
-                    Text("Delete", color = RawColors.ErrorCoral)
-                }
-            },
-            dismissButton = {
-                TextButton(onClick = { showDeleteConfirm = false }) {
-                    Text("Cancel", color = RawColors.TextPrimary)
-                }
-            }
+            onDismiss = { showDeleteConfirm = false }
         )
     }
 }
 
 @Composable
-private fun StatPillCard(
+private fun HubBannerLineArt(modifier: Modifier = Modifier) {
+    val playTri = remember { Path() }
+    val waveLeft = remember { Path() }
+    val waveRight = remember { Path() }
+
+    Canvas(modifier = modifier) {
+        val w = size.width
+        val h = size.height
+        val strokeCol = RawColors.Mint.copy(alpha = 0.45f)
+        val waveCol = RawColors.Mint.copy(alpha = 0.28f)
+        val sw = 2.dp.toPx()
+
+        // Centered 16:9 stage outline
+        val rw = w * 0.35f
+        val rh = h * 0.52f
+        val rx = (w - rw) * 0.5f
+        val ry = h * 0.17f
+        drawRect(
+            color = strokeCol,
+            topLeft = Offset(rx, ry),
+            size = Size(rw, rh),
+            style = Stroke(sw)
+        )
+
+        // Filled Mint play triangle center
+        playTri.reset()
+        val cx = w * 0.5f
+        val cy = ry + rh * 0.5f
+        val pr = 11.dp.toPx()
+        playTri.moveTo(cx - pr * 0.65f, cy - pr)
+        playTri.lineTo(cx + pr, cy)
+        playTri.lineTo(cx - pr * 0.65f, cy + pr)
+        playTri.close()
+        drawPath(playTri, RawColors.Mint, style = Fill)
+
+        // Crisp Mint waveform spikes left & right
+        val by = h * 0.86f
+        waveLeft.reset()
+        waveLeft.moveTo(w * 0.06f, by)
+        waveLeft.lineTo(w * 0.24f, by)
+        waveLeft.lineTo(w * 0.26f, by - 12.dp.toPx())
+        waveLeft.lineTo(w * 0.28f, by + 9.dp.toPx())
+        waveLeft.lineTo(w * 0.30f, by - 8.dp.toPx())
+        waveLeft.lineTo(w * 0.32f, by)
+        waveLeft.lineTo(w * 0.44f, by)
+        drawPath(waveLeft, waveCol, style = Stroke(sw, cap = StrokeCap.Square, join = StrokeJoin.Miter))
+
+        waveRight.reset()
+        waveRight.moveTo(w * 0.59f, by)
+        waveRight.lineTo(w * 0.68f, by)
+        waveRight.lineTo(w * 0.70f, by - 12.dp.toPx())
+        waveRight.lineTo(w * 0.72f, by + 9.dp.toPx())
+        waveRight.lineTo(w * 0.74f, by - 8.dp.toPx())
+        waveRight.lineTo(w * 0.76f, by)
+        waveRight.lineTo(w * 0.94f, by)
+        drawPath(waveRight, waveCol, style = Stroke(sw, cap = StrokeCap.Square, join = StrokeJoin.Miter))
+    }
+}
+
+@Composable
+private fun HubStatPill(
     icon: RawIconType,
     text: String,
     modifier: Modifier = Modifier
 ) {
     Row(
         modifier = modifier
-            .height(44.dp)
-            .clip(RoundedCornerShape(22.dp))
-            .background(RawColors.CardSurface)
-            .border(1.dp, RawColors.Divider.copy(alpha = 0.6f), RoundedCornerShape(22.dp))
-            .padding(horizontal = 14.dp),
+            .clip(RoundedCornerShape(14.dp))
+            .border(1.dp, RawColors.Divider, RoundedCornerShape(14.dp))
+            .padding(horizontal = 14.dp, vertical = 12.dp),
         verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.Center
+        horizontalArrangement = Arrangement.spacedBy(8.dp)
     ) {
-        RawIcon(type = icon, size = 15.dp, tint = RawColors.TextMuted)
-        Spacer(modifier = Modifier.width(8.dp))
+        RawIcon(type = icon, size = 18.dp, tint = RawColors.TextMuted)
         Text(
             text = text,
-            style = RawTypography.labelMedium,
-            color = RawColors.TextPrimary,
+            fontFamily = JetBrainsMonoFamily,
+            fontWeight = FontWeight.SemiBold,
+            fontSize = 11.5.sp,
+            color = RawColors.TextMuted,
             maxLines = 1,
             overflow = TextOverflow.Ellipsis
         )
@@ -441,24 +489,14 @@ private fun StatPillCard(
 }
 
 @Composable
-private fun StepActionRow(
+private fun StepActionCard(
     step: StepRowModel,
     animEnabled: Boolean
 ) {
-    val borderColor by animateColorAsState(
-        targetValue = if (step.statusDone) RawColors.SuccessMint.copy(alpha = 0.42f) else RawColors.Divider.copy(alpha = 0.6f),
-        animationSpec = tween(if (animEnabled) 260 else 0, easing = RawEasings.Morph),
-        label = "step_border_${step.number}"
-    )
     val badgeBg by animateColorAsState(
-        targetValue = if (step.statusDone) RawColors.SuccessMint.copy(alpha = 0.16f) else RawColors.RaisedCard,
-        animationSpec = tween(if (animEnabled) 260 else 0, easing = RawEasings.Morph),
-        label = "step_badge_${step.number}"
-    )
-    val circleBg by animateColorAsState(
-        targetValue = if (step.enabled) RawColors.TextPrimary else RawColors.RaisedCard,
+        targetValue = if (step.statusDone) RawColors.MintSoft else RawColors.RaisedCard,
         animationSpec = tween(if (animEnabled) 240 else 0, easing = RawEasings.Morph),
-        label = "step_circle_${step.number}"
+        label = "step_bdg_${step.number}"
     )
 
     RawPressButton(
@@ -468,45 +506,42 @@ private fun StepActionRow(
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .clip(RoundedCornerShape(20.dp))
+                .clip(RoundedCornerShape(22.dp))
                 .background(RawColors.CardSurface)
-                .border(1.dp, borderColor, RoundedCornerShape(20.dp))
-                .padding(horizontal = 18.dp, vertical = 16.dp),
+                .border(1.dp, RawColors.Divider, RoundedCornerShape(22.dp))
+                .padding(14.dp),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(12.dp)
         ) {
+            Box(
+                modifier = Modifier
+                    .size(44.dp)
+                    .clip(RoundedCornerShape(14.dp))
+                    .background(RawColors.RaisedCard)
+                    .border(1.dp, RawColors.Divider, RoundedCornerShape(14.dp)),
+                contentAlignment = Alignment.Center
+            ) {
+                RawIcon(
+                    type = step.icon,
+                    size = 20.dp,
+                    tint = if (step.enabled) RawColors.TextPrimary else RawColors.TextMuted
+                )
+            }
+
             Column(modifier = Modifier.weight(1f)) {
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
-                    Text(
-                        text = "${step.number}. ${step.title}",
-                        style = RawTypography.titleMedium.copy(fontWeight = FontWeight.SemiBold),
-                        color = if (step.enabled) RawColors.TextPrimary else RawColors.TextMuted,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                        modifier = Modifier.weight(1f, fill = false)
-                    )
-                    Box(
-                        modifier = Modifier
-                            .clip(RoundedCornerShape(8.dp))
-                            .background(badgeBg)
-                            .padding(horizontal = 8.dp, vertical = 2.dp)
-                    ) {
-                        Text(
-                            text = step.statusText,
-                            style = RawTypography.labelSmall,
-                            color = if (step.statusDone) RawColors.SuccessMint else RawColors.TextMuted,
-                            maxLines = 1,
-                            softWrap = false
-                        )
-                    }
-                }
-                Spacer(modifier = Modifier.height(4.dp))
+                Text(
+                    text = "${step.number}. ${step.title}",
+                    style = RawTypography.titleMedium.copy(fontSize = 15.5.sp, fontWeight = FontWeight.Bold),
+                    color = if (step.enabled) RawColors.TextPrimary else RawColors.TextMuted,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+                Spacer(modifier = Modifier.height(3.dp))
                 Text(
                     text = step.subtitle,
-                    style = RawTypography.bodyMedium,
+                    fontSize = 12.sp,
+                    lineHeight = 16.sp,
+                    color = RawColors.TextMuted,
                     maxLines = 2,
                     overflow = TextOverflow.Ellipsis
                 )
@@ -514,33 +549,20 @@ private fun StepActionRow(
 
             Box(
                 modifier = Modifier
-                    .size(40.dp)
-                    .clip(CircleShape)
-                    .background(circleBg),
-                contentAlignment = Alignment.Center
+                    .clip(RoundedCornerShape(99.dp))
+                    .background(badgeBg)
+                    .padding(horizontal = 9.dp, vertical = 5.dp)
             ) {
-                AnimatedContent(
-                    targetState = step.statusDone,
-                    transitionSpec = {
-                        if (!animEnabled) {
-                            fadeIn(tween(0)) togetherWith fadeOut(tween(0))
-                        } else {
-                            (scaleIn(initialScale = 0.7f, animationSpec = tween(220, easing = RawEasings.Morph)) +
-                                fadeIn(tween(200)))
-                                .togetherWith(
-                                    scaleOut(targetScale = 0.7f, animationSpec = tween(140)) +
-                                        fadeOut(tween(140))
-                                )
-                        }
-                    },
-                    label = "step_icon_${step.number}"
-                ) { done ->
-                    RawIcon(
-                        type = if (done) RawIconType.CHECK else RawIconType.PLAY,
-                        size = 16.dp,
-                        tint = if (step.enabled) RawColors.PrimaryBtnText else RawColors.TextMuted
-                    )
-                }
+                Text(
+                    text = step.statusText.uppercase(),
+                    fontFamily = JetBrainsMonoFamily,
+                    fontWeight = FontWeight.SemiBold,
+                    fontSize = 9.5.sp,
+                    letterSpacing = 0.7.sp,
+                    color = if (step.statusDone) RawColors.Mint else RawColors.TextMuted,
+                    maxLines = 1,
+                    softWrap = false
+                )
             }
         }
     }

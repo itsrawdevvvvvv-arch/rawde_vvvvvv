@@ -91,7 +91,7 @@ private fun RawEditAppRoot(container: AppContainer) {
                 .background(RawColors.BgPrimary),
             contentAlignment = Alignment.Center
         ) {
-            CircularProgressIndicator(color = RawColors.TextPrimary)
+            CircularProgressIndicator(color = RawColors.Mint)
         }
         return
     }
@@ -144,9 +144,11 @@ private fun MainAuthenticatedHost(
     var backStack by remember { mutableStateOf<List<AppRoute>>(listOf(AppRoute.Tabs)) }
     var currentTab by remember { mutableStateOf(MainTab.HOME) }
     var isForward by remember { mutableStateOf(true) }
+    var navigatingNewDraft by remember { mutableStateOf(false) }
     val currentRoute = backStack.last()
 
     fun pushRoute(route: AppRoute) {
+        if (backStack.lastOrNull() == route) return
         isForward = true
         backStack = backStack + route
     }
@@ -160,10 +162,16 @@ private fun MainAuthenticatedHost(
 
     fun switchTab(target: MainTab) {
         if (target == MainTab.CREATE) {
+            if (navigatingNewDraft) return
+            navigatingNewDraft = true
             scope.launch {
-                val activeDraft = projects.firstOrNull { it.state == ProjectEntity.STATE_IN_PROGRESS }
-                val projectId = activeDraft?.id ?: container.repository.createEmptyProject()
-                pushRoute(AppRoute.CreateHub(projectId))
+                try {
+                    val activeDraft = projects.firstOrNull { it.state == ProjectEntity.STATE_IN_PROGRESS }
+                    val projectId = activeDraft?.id ?: container.repository.createEmptyProject()
+                    pushRoute(AppRoute.CreateHub(projectId))
+                } finally {
+                    navigatingNewDraft = false
+                }
             }
             return
         }
@@ -205,9 +213,16 @@ private fun MainAuthenticatedHost(
                                     userProfile = userProfile,
                                     onOpenProfile = { switchTab(MainTab.PROFILE) },
                                     onStartNewReel = { _ ->
-                                        scope.launch {
-                                            val id = container.repository.createEmptyProject()
-                                            pushRoute(AppRoute.CreateHub(id))
+                                        if (!navigatingNewDraft) {
+                                            navigatingNewDraft = true
+                                            scope.launch {
+                                                try {
+                                                    val id = container.repository.createEmptyProject()
+                                                    pushRoute(AppRoute.CreateHub(id))
+                                                } finally {
+                                                    navigatingNewDraft = false
+                                                }
+                                            }
                                         }
                                     }
                                 )

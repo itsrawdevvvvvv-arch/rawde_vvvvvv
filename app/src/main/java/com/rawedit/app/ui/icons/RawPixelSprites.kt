@@ -1,5 +1,6 @@
 package com.rawedit.app.ui.icons
 
+import android.graphics.Bitmap
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.RepeatMode
@@ -12,7 +13,6 @@ import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.size
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -22,19 +22,25 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.geometry.Offset
-import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.FilterQuality
+import androidx.compose.ui.graphics.ImageBitmap
+import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.unit.IntOffset
+import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
 import com.rawedit.app.ui.motion.rememberAnimationsEnabled
 import com.rawedit.app.ui.theme.RawColors
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import java.util.concurrent.ConcurrentHashMap
 import kotlin.math.PI
+import kotlin.math.roundToInt
 import kotlin.math.sin
 
 enum class PixelMascotKind {
@@ -46,376 +52,402 @@ enum class PixelMascotKind {
     MIC_BOT,
     ZIP_BOT,
     CODE_BOT,
-    LENS_BOT
+    LENS_BOT,
+    AVATAR_FACE,
+    PIXEL_CURSOR
 }
 
-private val PE_WHITE = Color(0xFFFFFFFF)
-private val PE_LIGHT = Color(0xFFD2D2D2)
-private val PE_GREY = Color(0xFF7B7B7B)
-private val PE_DARK = Color(0xFF141414)
-private val PE_CORAL = Color(0xFFFF7285)
-private val PE_MINT = Color(0xFF7BE0A0)
+private const val COL_WHITE = 0xFFEFF3EE.toInt()
+private const val COL_GREY = 0xFF8D8D8D.toInt()
+private const val COL_EYE = 0xFF0A0A0A.toInt()
+private const val COL_DARK = 0xFF3A3A3A.toInt()
+private const val COL_OFF = 0xFFCFCFCF.toInt()
+private const val COL_MINT = 0xFF8CE3A8.toInt()
+private const val COL_CORAL = 0xFFFF8F80.toInt()
 
-private val CAT_SLEEP_0 = listOf(
-    "...WW............WW...",
-    "..WGGW..........WGGW..",
-    "..WGGWW........WWGGW..",
-    "..WWWWWWWWWWWWWWWWWW..",
-    ".WWWWWWWWWWWWWWWWWWWW.",
-    ".WWWWWWWWWWWWWWWWWWWW.",
-    ".WWWWDDDWWWWWWDDDWWWW.",
-    ".WWWWWWWWWWWWWWWWWWWW.",
-    "WW.WWWWWWWDDWWWWWWW.WW",
-    ".WWWWWWWWWWWWWWWWWWWW.",
-    ".DWWWDWWWWWWWWWWWDWWWD",
-    ".LWWWL...........LWWWL"
+// Every grid strictly maintains uniform row lengths so pixel baking never skews.
+private val CAT_SLEEP = listOf(
+    "#...#...........",
+    "#####.#########.",
+    "#eee##########gg",
+    "###############g",
+    ".#############g.",
+    "..###########..."
 )
 
-private val CAT_BLINK_1 = listOf(
-    "...WW............WW...",
-    "..WGGW..........WGGW..",
-    "..WGGWW........WWGGW..",
-    "..WWWWWWWWWWWWWWWWWW..",
-    ".WWWWWWWWWWWWWWWWWWWW.",
-    ".WWWWDDWWWWWWWWDDWWWW.",
-    ".WWWWDDWWWWWWWWDDWWWW.",
-    ".WWWWWWWWWWWWWWWWWWWW.",
-    "WW.WWWWWWWDDWWWWWWW.WW",
-    ".WWWWWWWWWWWWWWWWWWWW.",
-    ".DWWWDWWWWWWWWWWWDWWWD",
-    ".LWWWL...........LWWWL"
+private val CAT_AWAKE = listOf(
+    "#...#...........",
+    "#####.#########.",
+    "#e#e##########gg",
+    "###############g",
+    ".#############g.",
+    "..###########..."
 )
 
-private val CAT_HAPPY_TAP = listOf(
-    "...WW............WW...",
-    "..WGGW....RR....WGGW..",
-    "..WGGWW..RRRR..WWGGW..",
-    "..WWWWWWWWWWWWWWWWWW..",
-    ".WWWWWWWWWWWWWWWWWWWW.",
-    ".WWWWDWDWWWWWWWDWDWWW.",
-    ".WWWDWWWDWWWWWDWWWDWW.",
-    ".WWWWWWWWWWWWWWWWWWWW.",
-    "WW.WWPWWWWDDWWWWPWW.WW",
-    ".WWWWWWWWWWWWWWWWWWWW.",
-    ".LWWWL..........LWWWL.",
-    "..DDD............DDD.."
+private val CAT_HAPPY = listOf(
+    "#...#..mm.......",
+    "#####.#########.",
+    "#e#e##########gg",
+    "#r#r###########g",
+    ".#############g.",
+    "..###########..."
 )
 
-private val TV_BOT_0 = listOf(
-    "...W..........W...",
-    "....W........W....",
-    ".....W......W.....",
-    "......WWWWWW......",
-    "..WWWWWWWWWWWWWW..",
-    ".WWWWWWWWWWWWWWWW.",
-    ".WWDDDDDDDDDDDDWW.",
-    ".WWDDWWDDDDWWDDWW.",
-    ".WWDDWWDDDDWWDDWW.",
-    ".WWDDDDDDDDDDDDWW.",
-    ".WWDDDDWWWWDDDDWW.",
-    ".WWWWWWWWWWWWWWWW.",
-    "..WWWWWWWWWWWWWW..",
-    "....WW......WW....",
-    "...WWW......WWW...",
-    ".................."
+private val TV_OPEN = listOf(
+    "..g......g..",
+    "...g....g...",
+    "....gggg....",
+    "gggggggggggg",
+    "g##########g",
+    "g#ee####ee#g",
+    "g#ee####ee#g",
+    "g##e####e##g",
+    "g###eeee###g",
+    "gggggggggggg",
+    ".gg......gg."
 )
 
-private val TV_BOT_1 = listOf(
-    "..................",
-    "...W..........W...",
-    "....W........W....",
-    ".....WWWWWWWW.....",
-    "..WWWWWWWWWWWWWW..",
-    ".WWWWWWWWWWWWWWWW.",
-    ".WWDDDDDDDDDDDDWW.",
-    ".WWDDDDDDDDDDDDWW.",
-    ".WWDDWWDDDDWWDDWW.",
-    ".WWDDDDWWWWDDDDWW.",
-    ".WWDDDDDDDDDDDDWW.",
-    ".WWWWWWWWWWWWWWWW.",
-    "..WWWWWWWWWWWWWW..",
-    "....WW......WW....",
-    "....WWW....WWW....",
-    ".................."
+private val TV_BLINK = listOf(
+    "..g......g..",
+    "...g....g...",
+    "....gggg....",
+    "gggggggggggg",
+    "g##########g",
+    "g##########g",
+    "g##########g",
+    "g##########g",
+    "g###eeee###g",
+    "gggggggggggg",
+    ".gg......gg."
 )
 
-private val TV_BOT_HAPPY = listOf(
-    "..W............W..",
-    "...W...M..M...W...",
-    "....W........W....",
-    "......WWWWWW......",
-    "..WWWWWWWWWWWWWW..",
-    ".WWWWWWWWWWWWWWWW.",
-    ".WWDDDDDDDDDDDDWW.",
-    ".WWDDWDDDDDDWDDWW.",
-    ".WWDWDWDDDDWDWDWW.",
-    ".WWDDDDDDDDDDDDWW.",
-    ".WWDDDDWWWWDDDDWW.",
-    ".WWWWWWWWWWWWWWWW.",
-    "..WWWWWWWWWWWWWW..",
-    "...WW........WW...",
-    "..WWW........WWW..",
-    ".................."
+private val TV_HAPPY = listOf(
+    "..m......m..",
+    "...g....g...",
+    "....gggg....",
+    "gggggggggggg",
+    "g##########g",
+    "g#m#####m##g",
+    "g#e#m##m#e#g",
+    "g##########g",
+    "g###eeee###g",
+    "gggggggggggg",
+    ".gg......gg."
 )
 
-private val PHANTOM_0 = listOf(
-    ".....WWWWWW.....",
-    "...WWWWWWWWWW...",
-    "..WWWWWWWWWWWW..",
-    ".WWWWWWWWWWWWWW.",
-    ".WWWWDDWWWWDDWW.",
-    ".WWWWDDWWWWDDWW.",
-    ".WWWWWWWWWWWWWW.",
-    ".WWWWWWWWWWWWWW.",
-    ".WWWWWWWWWWWWWW.",
-    ".WWWWWWWWWWWWWW.",
-    ".WWWLWWWWWWLWWW.",
-    ".WW.WWW..WWW.WW.",
-    ".W...W....W...W."
+private val MIC_OPEN = listOf(
+    "....####....",
+    "...######...",
+    "..##e##e##..",
+    "..########..",
+    "..###ee###..",
+    "..########..",
+    "...######...",
+    ".g........g.",
+    ".gg......gg.",
+    "..gggggggg..",
+    ".....gg.....",
+    "...gggggg..."
 )
 
-private val PHANTOM_1 = listOf(
-    ".....WWWWWW.....",
-    "...WWWWWWWWWW...",
-    "..WWWWWWWWWWWW..",
-    ".WWWWWWWWWWWWWW.",
-    ".WWWDDWWWWDDWWW.",
-    ".WWWDDWWWWDDWWW.",
-    ".WWWWWWWWWWWWWW.",
-    ".WWWWWWDDWWWWWW.",
-    ".WWWWWWWWWWWWWW.",
-    ".WWWWWWWWWWWWWW.",
-    ".WWWW.WWWW.WWWW.",
-    "..WW...WW...WW..",
-    "................"
+private val MIC_BLINK = listOf(
+    "....####....",
+    "...######...",
+    "..########..",
+    "..########..",
+    "..###ee###..",
+    "..########..",
+    "...######...",
+    ".g........g.",
+    ".gg......gg.",
+    "..gggggggg..",
+    ".....gg.....",
+    "...gggggg..."
 )
 
-private val PHANTOM_TAP = listOf(
-    "......RRRR......",
-    ".....RRRRRR.....",
-    "...WWWWWWWWWW...",
-    "..WWWWWWWWWWWW..",
-    ".WWWWWWWWWWWWWW.",
-    ".WWWDWDWWWDWDWW.",
-    ".WWWWWWWWWWWWWW.",
-    ".WWWWWWWWWWWWWW.",
-    ".WWWWWWWWWWWWWW.",
-    ".WWWWWWWWWWWWWW.",
-    ".WW.WWW..WWW.WW.",
-    ".W...W....W...W.",
-    "................"
+private val ZIP_OPEN = listOf(
+    "gggggggggggg",
+    "g####g#####g",
+    "g#ee#gg#ee#g",
+    "g####g#####g",
+    "g####gg####g",
+    "g####g#####g",
+    "g####gg####g",
+    "g####g#####g",
+    "gggggggggggg",
+    ".gg......gg."
 )
 
-private val SPEECH_PLAY_0 = listOf(
-    "..WWWWWWWWWWWWWW..",
-    ".WDDDDDDDDDDDDDDW.",
-    "WDDDDDDWDDDDDDDDDW",
-    "WDDDDDDWWDDDDDDDDW",
-    "WDDDDDDWWWDDDDDDDW",
-    "WDDDDDDWWWWDDDDDDW",
-    "WDDDDDDWWWDDDDDDDW",
-    "WDDDDDDWWDDDDDDDDW",
-    "WDDDDDDWDDDDDDDDDW",
-    ".WDDDDDDDDDDDDDDW.",
-    "..WWWWW..WWWWWWWW.",
-    "...W..W...........",
-    "....WW............"
+private val ZIP_BLINK = listOf(
+    "gggggggggggg",
+    "g####g#####g",
+    "g####gg####g",
+    "g####g#####g",
+    "g####gg####g",
+    "g####g#####g",
+    "g####gg####g",
+    "g####g#####g",
+    "gggggggggggg",
+    ".gg......gg."
 )
 
-private val SPEECH_PLAY_1 = listOf(
-    "..WWWWWWWWWWWWWW..",
-    ".WDDDDDDDDDDDDDDW.",
-    "WDDDDDDDDDDDDDDDDW",
-    "WDDDDDDDWDDDDDDDDW",
-    "WDDDDDDDWWDDDDDDDW",
-    "WDDDDDDDWWWDDDDDDW",
-    "WDDDDDDDWWDDDDDDDW",
-    "WDDDDDDDWDDDDDDDDW",
-    "WDDDDDDDDDDDDDDDDW",
-    ".WDDDDDDDDDDDDDDW.",
-    "..WWWWWWWWWW..WWW.",
-    "...........W..W...",
-    "............WW...."
+private val CODE_OPEN = listOf(
+    "....g..g....",
+    ".gggggggggg.",
+    "g##########g",
+    "g##e####e##g",
+    "g#e######e#g",
+    "g##e####e##g",
+    "g##########g",
+    "g###eeee###g",
+    ".gggggggggg.",
+    "..g......g.."
 )
 
-private val FOLDER_PLAY_0 = listOf(
-    ".WWWWWW...........",
-    "WDDDDDDW..........",
-    "WDDDDDDWWWWWWWWWW.",
-    "WDDDDDDDDDDDDDDDDW",
-    "WDDDDDDWDDDDDDDDDW",
-    "WDDDDDDWWDDDDDDDDW",
-    "WDDDDDDWWWDDDDDDDW",
-    "WDDDDDDWWDDDDDDDDW",
-    "WDDDDDDWDDDDDDDDDW",
-    "WDDDDDDDDDDDDDDDDW",
-    ".WWWWWWWWWWWWWWWW.",
-    ".................."
+private val CODE_BLINK = listOf(
+    "....g..g....",
+    ".gggggggggg.",
+    "g##########g",
+    "g##########g",
+    "g#e######e#g",
+    "g##########g",
+    "g##########g",
+    "g###eeee###g",
+    ".gggggggggg.",
+    "..g......g.."
 )
 
-private val FOLDER_PLAY_1 = listOf(
-    "..................",
-    ".WWWWWW...........",
-    "WDDDDDDW..........",
-    "WDDDDDDWWWWWWWWWW.",
-    "WDDDDDDDDDDDDDDDDW",
-    "WDDDDDDDWDDDDDDDDW",
-    "WDDDDDDDWWDDDDDDDW",
-    "WDDDDDDDWWWDDDDDDW",
-    "WDDDDDDDWWDDDDDDDW",
-    "WDDDDDDDWDDDDDDDDW",
-    "WDDDDDDDDDDDDDDDDW",
-    ".WWWWWWWWWWWWWWWW."
+private val LENS_OPEN = listOf(
+    "...gggggg...",
+    ".gg######gg.",
+    ".g########g.",
+    "g###e#ee###g",
+    "g##eeeeee##g",
+    "g##eeeeee##g",
+    "g###eeee###g",
+    ".g########g.",
+    ".gg######gg.",
+    "...gggggg...",
+    "....g..g...."
 )
 
-private val MIC_BOT_0 = listOf(
-    ".....WWWWWW.....",
-    "....WDDDDDDW....",
-    "....WDWDDWDW....",
-    "....WDDDDDDW....",
-    "....WDDDDDDW....",
-    ".....WWWWWW.....",
-    "..W..........W..",
-    "..WWDDDDDDDDWW..",
-    "...WWWWWWWWWW...",
-    ".......WW.......",
-    ".......WW.......",
-    "....WWWWWWWW...."
+private val LENS_BLINK = listOf(
+    "...gggggg...",
+    ".gg######gg.",
+    ".g########g.",
+    "g##########g",
+    "g##########g",
+    "g##eeeeee##g",
+    "g##########g",
+    ".g########g.",
+    ".gg######gg.",
+    "...gggggg...",
+    "....g..g...."
 )
 
-private val MIC_BOT_1 = listOf(
-    "....W......W....",
-    ".....WWWWWW.....",
-    "....WDDDDDDW....",
-    "....WDDDDDDW....",
-    "....WDWDDWDW....",
-    "....WDDDDDDW....",
-    ".....WWWWWW.....",
-    "..WWDDDDDDDDWW..",
-    "...WWWWWWWWWW...",
-    ".......WW.......",
-    "....WWWWWWWW....",
-    "................"
+private val GHO_OPEN = listOf(
+    "...######...",
+    "..########..",
+    ".##########.",
+    ".##ee##ee##.",
+    ".##ee##ee##.",
+    ".##########.",
+    ".####ee####.",
+    ".##########.",
+    ".##########.",
+    ".##.####.##.",
+    ".#...##...#."
 )
 
-private val ZIP_BOT_0 = listOf(
-    "..WWWWWWWWWWWW..",
-    ".WDDDDWWDDDDDDW.",
-    ".WDDDDDDWWDDDDW.",
-    ".WDDDDWWDDDDDDW.",
-    ".WDDDDDDDDDDDDW.",
-    ".WDDWWDDDDWWDDW.",
-    ".WDDWWDDDDWWDDW.",
-    ".WDDDDWWWWDDDDW.",
-    ".WDDDDDDDDDDDDW.",
-    "..WWWWWWWWWWWW..",
-    "....WW....WW....",
-    "...WWW....WWW..."
+private val GHO_BLINK = listOf(
+    "...######...",
+    "..########..",
+    ".##########.",
+    ".##########.",
+    ".##########.",
+    ".##########.",
+    ".####ee####.",
+    ".##########.",
+    ".##########.",
+    ".##.####.##.",
+    ".#...##...#."
 )
 
-private val ZIP_BOT_1 = listOf(
-    "..WWWWWWWWWWWW..",
-    ".WDDDDWWDDDDDDW.",
-    ".WDDDDDDWWDDDDW.",
-    ".WDDDDWWDDDDDDW.",
-    ".WDDDDDDDDDDDDW.",
-    ".WDDDDDDDDDDDDW.",
-    ".WDDWWDDDDWWDDW.",
-    ".WDDDDWWWWDDDDW.",
-    ".WDDDDDDDDDDDDW.",
-    "..WWWWWWWWWWWW..",
-    ".....WW..WW.....",
-    "....WWW..WWW...."
+private val FOLD_0 = listOf(
+    "####........",
+    "############",
+    "############",
+    "#####e######",
+    "#####ee#####",
+    "#####eee####",
+    "#####ee#####",
+    "#####e######",
+    "############"
 )
 
-private val CODE_BOT_0 = listOf(
-    ".WWWWWWWWWWWWWW.",
-    "WDDDDDDDDDDDDDDW",
-    "WDDWDDDDDDDDWDDW",
-    "WDDWDDWWWWDDWDDW",
-    "WDDDDDWDDWDDDDDW",
-    "WDDWDDWWWWDDWDDW",
-    "WDDWDDDDDDDDWDDW",
-    "WDDDDDDDDDDDDDDW",
-    ".WWWWWWWWWWWWWW.",
-    "....WW....WW....",
-    "...WWW....WWW..."
+private val SPEECH_0 = listOf(
+    ".##########.",
+    "#eeeeeeeeee#",
+    "#eeee#eeeee#",
+    "#eeee##eeee#",
+    "#eeee###eee#",
+    "#eeee##eeee#",
+    "#eeee#eeeee#",
+    "#eeeeeeeeee#",
+    ".###..#####.",
+    "..#.#.......",
+    "...##......."
 )
 
-private val CODE_BOT_1 = listOf(
-    ".WWWWWWWWWWWWWW.",
-    "WDDDDDDDDDDDDDDW",
-    "WDDDDDDDDDDDDDDW",
-    "WDDWWDDDDDDWWDDW",
-    "WDWDDWDDDDWDDWDW",
-    "WDDDDWWWWWWDDDDW",
-    "WDDDDDDDDDDDDDDW",
-    "WDDDDDDDDDDDDDDW",
-    ".WWWWWWWWWWWWWW.",
-    "...WW......WW...",
-    "..WWW......WWW.."
+private val FACE_STATIC = listOf(
+    "...####...",
+    "..######..",
+    "..######..",
+    "..######..",
+    "...####...",
+    "..........",
+    ".########.",
+    "##########",
+    "##########"
 )
 
-private val LENS_BOT_0 = listOf(
-    "...WWWWWW.......",
-    "..WDDDDDDW......",
-    ".WDDWWWWDDW.....",
-    ".WDDWDDWDDW.....",
-    ".WDDWDDWDDW.....",
-    ".WDDWWWWDDW.....",
-    "..WDDDDDDW......",
-    "...WWWWWWWW.....",
-    "........WWWWW...",
-    "..........WWWW..",
-    "...........WW..."
+private val CURSOR_0 = listOf(
+    "g.........",
+    "gg........",
+    "g#g.......",
+    "g##g......",
+    "g###g.....",
+    "g####g....",
+    "g#####g...",
+    "g##gg.....",
+    "g#g.g.....",
+    "gg...g...."
 )
 
-private val LENS_BOT_1 = listOf(
-    "...WWWWWW.......",
-    "..WDDDDDDW......",
-    ".WDDDDDDDDW.....",
-    ".WDDWWWWDDW.....",
-    ".WDDDDDDDDW.....",
-    ".WDDWWWWDDW.....",
-    "..WDDDDDDW......",
-    "...WWWWWWWW.....",
-    "........WWWWW...",
-    "..........WWWW..",
-    "...........WW..."
+private val SPARKLE_5 = listOf(
+    "..#..",
+    ".###.",
+    "#####",
+    ".###.",
+    "..#.."
 )
 
-private fun drawPixelGrid(
-    drawScope: androidx.compose.ui.graphics.drawscope.DrawScope,
-    rows: List<String>,
-    tint: Color = PE_WHITE
-) {
-    if (rows.isEmpty()) return
-    val gridH = rows.size
-    val gridW = rows.maxOf { it.length }.coerceAtLeast(1)
-    val cell = minOf(drawScope.size.width / gridW, drawScope.size.height / gridH)
-    val ox = (drawScope.size.width - cell * gridW) * 0.5f
-    val oy = (drawScope.size.height - cell * gridH) * 0.5f
-    val pad = 0.35f
+// Cache native 1x pixel ImageBitmaps ONCE per sprite key so GPU draws each mascot in 1 drawImage call.
+private object SpriteBitmapCache {
+    private val map = ConcurrentHashMap<String, ImageBitmap>()
 
-    for (r in 0 until gridH) {
-        val row = rows[r]
-        for (c in 0 until row.length) {
-            val ch = row[c]
-            val color = when (ch) {
-                'W' -> tint
-                'L' -> PE_LIGHT
-                'G' -> PE_GREY
-                'D' -> PE_DARK
-                'R', 'P' -> PE_CORAL
-                'M' -> PE_MINT
-                else -> continue
+    fun get(key: String, rows: List<String>, primaryTintArgb: Int): ImageBitmap {
+        val cacheKey = "${key}_$primaryTintArgb"
+        map[cacheKey]?.let { return it }
+
+        val h = rows.size.coerceAtLeast(1)
+        val w = rows.maxOfOrNull { it.length }?.coerceAtLeast(1) ?: 1
+        val bmp = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888)
+        for (y in 0 until h) {
+            val row = rows[y]
+            for (x in 0 until row.length) {
+                val col = when (row[x]) {
+                    '#' -> primaryTintArgb
+                    'g' -> COL_GREY
+                    'e' -> COL_EYE
+                    'd' -> COL_DARK
+                    'o' -> COL_OFF
+                    'm' -> COL_MINT
+                    'r' -> COL_CORAL
+                    else -> 0
+                }
+                if (col != 0) {
+                    bmp.setPixel(x, y, col)
+                }
             }
-            drawScope.drawRect(
-                color = color,
-                topLeft = Offset(ox + c * cell, oy + r * cell),
-                size = Size(cell + pad, cell + pad)
-            )
         }
+        val img = bmp.asImageBitmap()
+        map.putIfAbsent(cacheKey, img)
+        return img
+    }
+
+    val logoBitmap: ImageBitmap by lazy {
+        val w = 28
+        val h = 22
+        val bmp = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888)
+        fun r(x: Int, y: Int, rw: Int, rh: Int, col: Int) {
+            for (yy in y until (y + rh).coerceAtMost(h)) {
+                for (xx in x until (x + rw).coerceAtMost(w)) {
+                    if (xx >= 0 && yy >= 0) bmp.setPixel(xx, yy, col)
+                }
+            }
+        }
+        val antennae = arrayOf(6 to 1, 7 to 2, 8 to 3, 21 to 1, 20 to 2, 19 to 3)
+        antennae.forEach { (ax, ay) -> r(ax, ay, 1, 1, 0xFFBBBBBB.toInt()) }
+        r(11, 2, 6, 2, 0xFF555555.toInt())
+        r(1, 4, 26, 17, 0xFF9A9A9A.toInt())
+        r(2, 5, 24, 15, 0xFF262626.toInt())
+        r(3, 6, 18, 13, 0xFF000000.toInt())
+        r(22, 8, 3, 3, 0xFFCCCCCC.toInt())
+        r(22, 13, 3, 3, 0xFFCCCCCC.toInt())
+        r(4, 21, 3, 1, 0xFF555555.toInt())
+        r(21, 21, 3, 1, 0xFF555555.toInt())
+
+        val font = mapOf(
+            'R' to "110101110101101",
+            'A' to "010101111101101",
+            'W' to "101101101111101",
+            'E' to "111100110100111",
+            'D' to "110101101101110",
+            'I' to "111010010010111",
+            'T' to "111010010010010"
+        )
+        fun drawWord(x0: Int, y0: Int, text: String) {
+            text.forEachIndexed { idx, ch ->
+                val f = font[ch] ?: return@forEachIndexed
+                for (i in 0 until 15) {
+                    if (f[i] == '1') {
+                        r(x0 + idx * 4 + (i % 3), y0 + (i / 3), 1, 1, COL_WHITE)
+                    }
+                }
+            }
+        }
+        drawWord(6, 7, "RAW")
+        drawWord(4, 13, "EDIT")
+        bmp.asImageBitmap()
+    }
+}
+
+/**
+ * Retro pixel CRT TV logo badge with "RAW / EDIT" screen and gentle wobble.
+ */
+@Composable
+fun PixelRawEditLogo(
+    modifier: Modifier = Modifier,
+    width: Dp = 42.dp,
+    height: Dp = 33.dp
+) {
+    val animEnabled = rememberAnimationsEnabled()
+    val rot = if (animEnabled) {
+        val inf = rememberInfiniteTransition(label = "logo_wobble")
+        val r by inf.animateFloat(
+            initialValue = -2.8f,
+            targetValue = 2.8f,
+            animationSpec = infiniteRepeatable(tween(2000, easing = LinearEasing), RepeatMode.Reverse),
+            label = "wob"
+        )
+        r
+    } else {
+        0f
+    }
+
+    val bmp = remember { SpriteBitmapCache.logoBitmap }
+    Canvas(
+        modifier = modifier
+            .size(width, height)
+            .graphicsLayer { rotationZ = rot }
+    ) {
+        drawImage(
+            image = bmp,
+            srcSize = IntSize(bmp.width, bmp.height),
+            dstSize = IntSize(this.size.width.roundToInt(), this.size.height.roundToInt()),
+            filterQuality = FilterQuality.None
+        )
     }
 }
 
@@ -424,71 +456,89 @@ fun RawPixelMascot(
     kind: PixelMascotKind,
     modifier: Modifier = Modifier,
     size: Dp = 54.dp,
-    tint: Color = PE_WHITE,
+    tint: Color = RawColors.TextPrimary,
     interactive: Boolean = true,
+    noBob: Boolean = false,
+    noBlink: Boolean = false,
+    awakeOverride: Boolean = false,
     onTap: (() -> Unit)? = null
 ) {
     val animEnabled = rememberAnimationsEnabled()
     val haptic = LocalHapticFeedback.current
     val scope = rememberCoroutineScope()
+    val tintArgb = tint.toArgb()
 
     var frameTick by remember(kind) { mutableIntStateOf(0) }
     var tappedMood by remember(kind) { mutableIntStateOf(0) }
     val hopAnim = remember(kind) { Animatable(0f) }
 
-    LaunchedEffect(kind, animEnabled) {
-        if (!animEnabled) return@LaunchedEffect
+    val staticSprite = kind == PixelMascotKind.AVATAR_FACE || kind == PixelMascotKind.PIXEL_CURSOR
+
+    // Lightweight periodic blink/step toggle (only when blink/idle is enabled)
+    LaunchedEffect(kind, animEnabled, noBlink) {
+        if (!animEnabled || staticSprite || noBlink) return@LaunchedEffect
         while (true) {
             delay(if (kind == PixelMascotKind.PEEKING_CAT) 720L else 480L)
-            frameTick = (frameTick + 1) % 4
+            frameTick = (frameTick + 1) % 12
         }
     }
 
-    val inf = rememberInfiniteTransition(label = "pixel_bob_${kind.name}")
-    val bobPhase by inf.animateFloat(
-        initialValue = 0f,
-        targetValue = (2f * PI).toFloat(),
-        animationSpec = infiniteRepeatable(tween(1900, easing = LinearEasing), RepeatMode.Restart),
-        label = "bob"
-    )
-    val bobDp = if (animEnabled && kind != PixelMascotKind.PEEKING_CAT) {
-        (sin(bobPhase) * 2.2f).dp
+    // GPU-only float bobbing via graphicsLayer (zero Canvas redraw or layout work!)
+    val bobPx = if (animEnabled && !noBob && !staticSprite && kind != PixelMascotKind.PEEKING_CAT) {
+        val inf = rememberInfiniteTransition(label = "pixel_bob_${kind.name}")
+        val bobPhase by inf.animateFloat(
+            initialValue = 0f,
+            targetValue = (2f * PI).toFloat(),
+            animationSpec = infiniteRepeatable(tween(2200, easing = LinearEasing), RepeatMode.Restart),
+            label = "bob"
+        )
+        sin(bobPhase) * 6f
     } else {
-        0.dp
+        0f
     }
 
-    val frames: List<List<String>> = when (kind) {
-        PixelMascotKind.PEEKING_CAT -> listOf(CAT_SLEEP_0, CAT_SLEEP_0, CAT_BLINK_1, CAT_SLEEP_0)
-        PixelMascotKind.TV_BOT -> listOf(TV_BOT_0, TV_BOT_1, TV_BOT_0, TV_BOT_1)
-        PixelMascotKind.PHANTOM_BUDDY -> listOf(PHANTOM_0, PHANTOM_1, PHANTOM_0, PHANTOM_1)
-        PixelMascotKind.SPEECH_PLAY -> listOf(SPEECH_PLAY_0, SPEECH_PLAY_1, SPEECH_PLAY_0, SPEECH_PLAY_1)
-        PixelMascotKind.FOLDER_PLAY -> listOf(FOLDER_PLAY_0, FOLDER_PLAY_1, FOLDER_PLAY_0, FOLDER_PLAY_1)
-        PixelMascotKind.MIC_BOT -> listOf(MIC_BOT_0, MIC_BOT_1, MIC_BOT_0, MIC_BOT_1)
-        PixelMascotKind.ZIP_BOT -> listOf(ZIP_BOT_0, ZIP_BOT_1, ZIP_BOT_0, ZIP_BOT_1)
-        PixelMascotKind.CODE_BOT -> listOf(CODE_BOT_0, CODE_BOT_1, CODE_BOT_0, CODE_BOT_1)
-        PixelMascotKind.LENS_BOT -> listOf(LENS_BOT_0, LENS_BOT_1, LENS_BOT_0, LENS_BOT_1)
-    }
-    val tapGrid: List<String> = when (kind) {
-        PixelMascotKind.PEEKING_CAT -> CAT_HAPPY_TAP
-        PixelMascotKind.TV_BOT -> TV_BOT_HAPPY
-        PixelMascotKind.PHANTOM_BUDDY -> PHANTOM_TAP
-        else -> frames[1]
+    val activeRows: List<String> = when (kind) {
+        PixelMascotKind.PEEKING_CAT -> when {
+            awakeOverride || tappedMood > 0 -> CAT_HAPPY
+            else -> CAT_SLEEP
+        }
+        PixelMascotKind.TV_BOT -> when {
+            tappedMood > 0 -> TV_HAPPY
+            frameTick == 11 -> TV_BLINK
+            else -> TV_OPEN
+        }
+        PixelMascotKind.MIC_BOT -> if (frameTick == 11) MIC_BLINK else MIC_OPEN
+        PixelMascotKind.ZIP_BOT -> if (frameTick == 11) ZIP_BLINK else ZIP_OPEN
+        PixelMascotKind.CODE_BOT -> if (frameTick == 11) CODE_BLINK else CODE_OPEN
+        PixelMascotKind.LENS_BOT -> if (frameTick == 11) LENS_BLINK else LENS_OPEN
+        PixelMascotKind.PHANTOM_BUDDY -> if (frameTick == 11) GHO_BLINK else GHO_OPEN
+        PixelMascotKind.FOLDER_PLAY -> FOLD_0
+        PixelMascotKind.SPEECH_PLAY -> SPEECH_0
+        PixelMascotKind.AVATAR_FACE -> FACE_STATIC
+        PixelMascotKind.PIXEL_CURSOR -> CURSOR_0
     }
 
-    val activeRows = if (tappedMood > 0) tapGrid else frames[frameTick % frames.size]
+    val stateTag = when {
+        tappedMood > 0 || awakeOverride -> "alt"
+        frameTick == 11 -> "blk"
+        else -> "std"
+    }
+    val bmp = remember(kind, stateTag, tintArgb) {
+        SpriteBitmapCache.get("${kind.name}_$stateTag", activeRows, tintArgb)
+    }
+
     val interactionSource = remember { MutableInteractionSource() }
 
     Box(
         modifier = modifier
             .size(size)
-            .offset(y = bobDp)
             .graphicsLayer {
-                translationY = -hopAnim.value * 16f
-                scaleX = 1f + hopAnim.value * 0.10f
+                translationY = bobPx - hopAnim.value * 18f
+                scaleX = 1f + hopAnim.value * 0.09f
                 scaleY = 1f - hopAnim.value * 0.05f
             }
             .let { base ->
-                if (interactive) {
+                if (interactive && !staticSprite) {
                     base.clickable(interactionSource = interactionSource, indication = null) {
                         haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
                         tappedMood = 1
@@ -507,181 +557,128 @@ fun RawPixelMascot(
             }
     ) {
         Canvas(modifier = Modifier.matchParentSize()) {
-            drawPixelGrid(this, activeRows, tint)
-
-            // Cute floating Zzz above sleepy cat when snoozing
-            if (kind == PixelMascotKind.PEEKING_CAT && tappedMood == 0 && animEnabled) {
-                val p = (sin(bobPhase) * 0.5f + 0.5f)
-                val zAlpha = 0.45f + 0.50f * p
-                val u = this.size.width / 22f
-                val zColor = RawColors.TextPrimary.copy(alpha = zAlpha)
-                val zx = this.size.width * 0.72f
-                val zy = this.size.height * (0.14f - p * 0.08f)
-                drawRect(zColor, Offset(zx, zy), Size(u * 2.1f, u * 0.55f))
-                drawRect(zColor, Offset(zx + u * 0.7f, zy + u * 0.65f), Size(u * 0.7f, u * 0.55f))
-                drawRect(zColor, Offset(zx, zy + u * 1.25f), Size(u * 2.1f, u * 0.55f))
+            val scale = minOf(this.size.width / bmp.width.toFloat(), this.size.height / bmp.height.toFloat())
+            val drawW = (bmp.width * scale).roundToInt().coerceAtLeast(1)
+            val drawH = (bmp.height * scale).roundToInt().coerceAtLeast(1)
+            val ox = ((this.size.width - drawW) * 0.5f).roundToInt()
+            val oy = if (kind == PixelMascotKind.PEEKING_CAT) {
+                (this.size.height - drawH).roundToInt()
+            } else {
+                ((this.size.height - drawH) * 0.5f).roundToInt()
             }
+            drawImage(
+                image = bmp,
+                srcSize = IntSize(bmp.width, bmp.height),
+                dstOffset = IntOffset(ox, oy),
+                dstSize = IntSize(drawW, drawH),
+                filterQuality = FilterQuality.None
+            )
         }
     }
 }
 
 /**
- * Retro pixel [T] marquee box + clicking pixel arrow cursor (straight from typography reel aesthetic).
+ * Pixel pointer cursor badge for Hero CTA Card ("Start creating") matching raw_edit.html curb animation.
  */
 @Composable
 fun PixelTypeMarqueeBadge(
     modifier: Modifier = Modifier,
-    size: Dp = 96.dp
+    size: Dp = 44.dp
 ) {
     val animEnabled = rememberAnimationsEnabled()
-    val inf = rememberInfiniteTransition(label = "marquee_t")
-    val pulse by inf.animateFloat(
-        initialValue = 0f,
-        targetValue = 1f,
-        animationSpec = infiniteRepeatable(tween(1400, easing = LinearEasing), RepeatMode.Reverse),
-        label = "pulse"
-    )
-    var tapped by remember { mutableIntStateOf(0) }
-    val scale = if (tapped > 0) 1.07f else 1f
-    val scope = rememberCoroutineScope()
+    val phase = if (animEnabled) {
+        val inf = rememberInfiniteTransition(label = "cur_click")
+        val p by inf.animateFloat(
+            initialValue = 0f,
+            targetValue = 1f,
+            animationSpec = infiniteRepeatable(tween(2200, easing = LinearEasing), RepeatMode.Restart),
+            label = "clk"
+        )
+        p
+    } else {
+        0f
+    }
 
-    val boxGrid = listOf(
-        "WW..WW..WW..WW..",
-        "WW..........WW..",
-        "................",
-        "W..WWWWWWWWWW..W",
-        "W..WWWWWWWWWW..W",
-        "...W...WW...W...",
-        ".......WW.......",
-        "W......WW......W",
-        "W......WW......W",
-        ".......WW.......",
-        ".......WW.......",
-        "W.....WWWW.....W",
-        "W..............W",
-        "................",
-        "WW..WW..WW..WW..",
-        "WW..........WW.."
-    )
-
-    val cursorGrid = listOf(
-        "W.......",
-        "WW......",
-        "WWD.....",
-        "WWDD....",
-        "WWDDD...",
-        "WWDDDD..",
-        "WWWWW...",
-        "..WW....",
-        "...WW..."
-    )
-
-    Box(
-        modifier = modifier
-            .size(size)
-            .graphicsLayer {
-                scaleX = scale
-                scaleY = scale
-            }
-            .clickable(
-                interactionSource = remember { MutableInteractionSource() },
-                indication = null
-            ) {
-                tapped = 1
-                scope.launch {
-                    delay(260)
-                    tapped = 0
-                }
-            }
-    ) {
-        Canvas(modifier = Modifier.matchParentSize()) {
-            val mainArea = this.size.width * 0.78f
-            val u = mainArea / 16f
-            val ox = this.size.width * 0.04f
-            val oy = this.size.height * 0.08f
-            for (r in boxGrid.indices) {
-                val row = boxGrid[r]
-                for (c in row.indices) {
-                    if (row[c] == 'W') {
-                        drawRect(
-                            color = PE_WHITE,
-                            topLeft = Offset(ox + c * u, oy + r * u),
-                            size = Size(u + 0.35f, u + 0.35f)
-                        )
-                    }
-                }
-            }
-
-            // Animated tapping white pixel arrow cursor overlapping lower-right corner
-            val clickDelta = if (animEnabled) pulse * 4.5f else 0f
-            val cu = this.size.width * 0.046f
-            val cx = this.size.width * 0.62f - clickDelta
-            val cy = this.size.height * 0.56f - clickDelta
-            for (r in cursorGrid.indices) {
-                val row = cursorGrid[r]
-                for (c in row.indices) {
-                    val col = when (row[c]) {
-                        'W' -> PE_WHITE
-                        'D' -> PE_DARK
-                        else -> continue
-                    }
-                    drawRect(
-                        color = col,
-                        topLeft = Offset(cx + c * cu, cy + r * cu),
-                        size = Size(cu + 0.35f, cu + 0.35f)
-                    )
-                }
-            }
+    val (tx, ty, sc) = when {
+        phase < 0.35f -> {
+            val k = phase / 0.35f
+            Triple(-22f * k, 8f * k, 1f)
+        }
+        phase < 0.45f -> Triple(-22f, 12f, 0.85f)
+        phase < 0.55f -> Triple(-22f, 8f, 1f)
+        else -> {
+            val k = (phase - 0.55f) / 0.45f
+            Triple(-22f * (1f - k), 8f * (1f - k), 1f)
         }
     }
-}
 
-/**
- * Twinkling white 4-point retro pixel sparkle star.
- */
-@Composable
-fun PixelSparkle(
-    modifier: Modifier = Modifier,
-    size: Dp = 18.dp,
-    phaseOffsetMs: Int = 0
-) {
-    val animEnabled = rememberAnimationsEnabled()
-    val inf = rememberInfiniteTransition(label = "spark_$phaseOffsetMs")
-    val phase by inf.animateFloat(
-        initialValue = 0f,
-        targetValue = 1f,
-        animationSpec = infiniteRepeatable(
-            tween(1500, delayMillis = phaseOffsetMs % 700, easing = LinearEasing),
-            RepeatMode.Reverse
-        ),
-        label = "sp"
-    )
-    val scale = if (animEnabled) 0.72f + 0.42f * phase else 1f
-    val alpha = if (animEnabled) 0.45f + 0.55f * phase else 0.9f
+    val bmp = remember { SpriteBitmapCache.get("cur_marq", CURSOR_0, COL_WHITE) }
 
     Canvas(
         modifier = modifier
             .size(size)
             .graphicsLayer {
-                scaleX = scale
-                scaleY = scale
-                this.alpha = alpha
+                translationX = tx
+                translationY = ty
+                scaleX = sc
+                scaleY = sc
             }
     ) {
-        val u = this.size.width / 5f
-        val star = listOf(
-            "..W..",
-            "..W..",
-            "WWWWW",
-            "..W..",
-            "..W.."
+        val s = minOf(this.size.width / bmp.width.toFloat(), this.size.height / bmp.height.toFloat())
+        val dw = (bmp.width * s).roundToInt().coerceAtLeast(1)
+        val dh = (bmp.height * s).roundToInt().coerceAtLeast(1)
+        drawImage(
+            image = bmp,
+            srcSize = IntSize(bmp.width, bmp.height),
+            dstOffset = IntOffset(((this.size.width - dw) * 0.5f).roundToInt(), ((this.size.height - dh) * 0.5f).roundToInt()),
+            dstSize = IntSize(dw, dh),
+            filterQuality = FilterQuality.None
         )
-        for (r in 0..4) {
-            for (c in 0..4) {
-                if (star[r][c] == 'W') {
-                    drawRect(PE_WHITE, Offset(c * u, r * u), Size(u + 0.3f, u + 0.3f))
-                }
+    }
+}
+
+/**
+ * Twinkling white 4-point retro pixel sparkle star using cached ImageBitmap + GPU layer scaling.
+ */
+@Composable
+fun PixelSparkle(
+    modifier: Modifier = Modifier,
+    size: Dp = 15.dp,
+    phaseOffsetMs: Int = 0
+) {
+    val animEnabled = rememberAnimationsEnabled()
+    val phase = if (animEnabled) {
+        val inf = rememberInfiniteTransition(label = "spark_$phaseOffsetMs")
+        val p by inf.animateFloat(
+            initialValue = 0f,
+            targetValue = 1f,
+            animationSpec = infiniteRepeatable(
+                tween(1500, delayMillis = phaseOffsetMs % 700, easing = LinearEasing),
+                RepeatMode.Reverse
+            ),
+            label = "sp"
+        )
+        p
+    } else {
+        1f
+    }
+    val bmp = remember { SpriteBitmapCache.get("spk_white", SPARKLE_5, COL_WHITE) }
+
+    Canvas(
+        modifier = modifier
+            .size(size)
+            .graphicsLayer {
+                val sc = 0.65f + 0.40f * phase
+                scaleX = sc
+                scaleY = sc
+                alpha = 0.40f + 0.60f * phase
             }
-        }
+    ) {
+        drawImage(
+            image = bmp,
+            srcSize = IntSize(bmp.width, bmp.height),
+            dstSize = IntSize(this.size.width.roundToInt(), this.size.height.roundToInt()),
+            filterQuality = FilterQuality.None
+        )
     }
 }

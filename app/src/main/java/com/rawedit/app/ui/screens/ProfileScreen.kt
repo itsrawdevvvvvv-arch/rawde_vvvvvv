@@ -6,9 +6,7 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedVisibility
-import androidx.compose.animation.animateContentSize
 import androidx.compose.animation.core.Animatable
-import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.expandVertically
 import androidx.compose.animation.fadeIn
@@ -20,9 +18,11 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.IntrinsicSize
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.defaultMinSize
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -52,34 +52,41 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.draw.rotate
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.zIndex
 import androidx.core.content.FileProvider
 import com.rawedit.app.BuildConfig
 import com.rawedit.app.data.CacheManager
 import com.rawedit.app.data.local.UserProfile
 import com.rawedit.app.data.local.VideoEntity
-import com.rawedit.app.ui.components.CircleAvatarCropperDialog
+import com.rawedit.app.ui.components.BigPrimaryButton
+import com.rawedit.app.ui.components.CircleActionButton
 import com.rawedit.app.ui.components.FormatHelpers
-import com.rawedit.app.ui.components.RawEditLogoBadge
+import com.rawedit.app.ui.components.RawSecondaryButton
+import com.rawedit.app.ui.components.RawToastBanner
 import com.rawedit.app.ui.components.UserAvatarView
 import com.rawedit.app.ui.icons.PixelMascotKind
-import com.rawedit.app.ui.icons.PixelSparkle
+import com.rawedit.app.ui.icons.PixelRawEditLogo
 import com.rawedit.app.ui.icons.RawIcon
 import com.rawedit.app.ui.icons.RawIconType
 import com.rawedit.app.ui.icons.RawPixelMascot
 import com.rawedit.app.ui.motion.RawEasings
 import com.rawedit.app.ui.motion.RawPressButton
 import com.rawedit.app.ui.motion.rememberAnimationsEnabled
-import com.rawedit.app.ui.theme.DotGridSurface
 import com.rawedit.app.ui.theme.InterFontFamily
 import com.rawedit.app.ui.theme.JetBrainsMonoFamily
 import com.rawedit.app.ui.theme.RawColors
 import com.rawedit.app.ui.theme.RawTypography
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -103,14 +110,20 @@ fun ProfileScreen(
     var cameraTempUri by remember { mutableStateOf<Uri?>(null) }
 
     var cacheSizeBytes by remember { mutableLongStateOf(0L) }
-    var cacheNotice by remember { mutableStateOf<String?>(null) }
+    var toastMsg by remember { mutableStateOf<String?>(null) }
 
-    // Photo shrink/expand transition animation (Section 4)
+    LaunchedEffect(toastMsg) {
+        if (toastMsg != null) {
+            delay(1900)
+            toastMsg = null
+        }
+    }
+
     val avatarAnim = remember { Animatable(1f) }
     LaunchedEffect(userProfile.profilePhotoPath) {
         if (animEnabled) {
-            avatarAnim.snapTo(0.35f)
-            avatarAnim.animateTo(1f, tween(340, easing = RawEasings.OvershootSettle))
+            avatarAnim.snapTo(0.45f)
+            avatarAnim.animateTo(1f, tween(320, easing = RawEasings.OvershootSettle))
         }
     }
 
@@ -141,87 +154,108 @@ fun ProfileScreen(
 
     val displayName = if (editingName) nameDraft.ifBlank { userProfile.userName } else userProfile.userName.ifBlank { "Creator" }
     val totalVideoSec = remember(videos) { videos.sumOf { it.durationSec } }
-    val lastReelDate = videos.firstOrNull()?.createdAt?.let { FormatHelpers.formatDate(it) } ?: "None yet"
+    val lastReelDate = remember(videos) {
+        videos.maxOfOrNull { it.createdAt }?.let { FormatHelpers.formatDate(it) } ?: "-"
+    }
 
-    LazyColumn(
+    Box(
         modifier = Modifier
             .fillMaxSize()
-            .background(RawColors.BgPrimary),
-        contentPadding = PaddingValues(bottom = 112.dp),
-        verticalArrangement = Arrangement.spacedBy(14.dp)
+            .background(RawColors.BgPrimary)
     ) {
-        // Dot-grid hero with ID Card treatment
-        item {
-            DotGridSurface(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .clip(RoundedCornerShape(bottomStart = 30.dp, bottomEnd = 30.dp)),
-                backgroundColor = RawColors.HeroSurface
-            ) {
-                // Faded giant background letters echoing reference
-                Text(
-                    text = "ID",
-                    fontFamily = InterFontFamily,
-                    fontWeight = FontWeight.ExtraBold,
-                    fontSize = 180.sp,
-                    color = RawColors.TextPrimary.copy(alpha = 0.03f),
-                    modifier = Modifier
-                        .align(Alignment.TopEnd)
-                        .padding(top = 12.dp, end = 12.dp)
-                )
-
-                Column(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .statusBarsPadding()
-                        .padding(horizontal = 20.dp, vertical = 18.dp)
-                ) {
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        RawEditLogoBadge(logoSize = 34.dp)
-                        Box(contentAlignment = Alignment.TopEnd) {
-                            RawPixelMascot(
-                                kind = PixelMascotKind.PEEKING_CAT,
-                                size = 50.dp
-                            )
-                            PixelSparkle(
-                                size = 11.dp,
-                                phaseOffsetMs = 160,
-                                modifier = Modifier.offset(x = 4.dp, y = (-4).dp)
-                            )
-                        }
-                    }
-                    Spacer(modifier = Modifier.height(14.dp))
-                    Text(
-                        text = "Hello again, $displayName!",
-                        style = RawTypography.headlineLarge
-                    )
-                    Spacer(modifier = Modifier.height(18.dp))
-
-                    // Tilted ID Card matching reference
+        LazyColumn(
+            modifier = Modifier.fillMaxSize(),
+            contentPadding = PaddingValues(bottom = 112.dp)
+        ) {
+            // Mint Radial Hero (.ph) + Overlapping Straight ID Card (.idc)
+            item {
+                Column(modifier = Modifier.fillMaxWidth()) {
                     Box(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .graphicsLayer { rotationZ = -1.6f }
-                            .clip(RoundedCornerShape(22.dp))
-                            .background(RawColors.RaisedCard)
-                            .border(1.dp, RawColors.PillGrey.copy(alpha = 0.7f), RoundedCornerShape(22.dp))
-                            .animateContentSize(
-                                animationSpec = if (animEnabled) {
-                                    spring(dampingRatio = 0.8f, stiffness = 360f)
-                                } else {
-                                    tween(0)
-                                }
+                            .defaultMinSize(minHeight = 180.dp)
+                            .clipToBounds()
+                            .background(
+                                Brush.radialGradient(
+                                    colors = listOf(
+                                        RawColors.Mint.copy(alpha = 0.11f),
+                                        Color.Transparent
+                                    )
+                                )
                             )
                     ) {
-                        Row(modifier = Modifier.fillMaxWidth()) {
+                        // Watermark "ID" kept inside matchParentSize so long names can wrap safely
+                        Box(modifier = Modifier.matchParentSize()) {
+                            Text(
+                                text = "ID",
+                                fontFamily = InterFontFamily,
+                                fontWeight = FontWeight.ExtraBold,
+                                fontSize = 176.sp,
+                                letterSpacing = (-10).sp,
+                                color = RawColors.TextPrimary.copy(alpha = 0.04f),
+                                modifier = Modifier
+                                    .align(Alignment.TopEnd)
+                                    .offset(x = 6.dp, y = (-12).dp)
+                            )
+                        }
+
+                        // Bottom hairline separator
+                        Box(
+                            modifier = Modifier
+                                .align(Alignment.BottomCenter)
+                                .fillMaxWidth()
+                                .height(1.dp)
+                                .background(RawColors.Divider)
+                        )
+
+                        Column(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .statusBarsPadding()
+                                .padding(start = 18.dp, end = 18.dp, top = 8.dp, bottom = 36.dp)
+                        ) {
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .height(52.dp),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                PixelRawEditLogo(width = 42.dp, height = 33.dp)
+                                RawPixelMascot(
+                                    kind = PixelMascotKind.PEEKING_CAT,
+                                    size = 54.dp,
+                                    noBlink = true
+                                )
+                            }
+                            Spacer(modifier = Modifier.height(6.dp))
+                            Text(
+                                text = "Hello again, $displayName!",
+                                style = RawTypography.headlineLarge.copy(fontSize = 29.sp)
+                            )
+                        }
+                    }
+
+                    // Straight Overlapping ID Card (.idc + .spine)
+                    Box(
+                        modifier = Modifier
+                            .zIndex(2f)
+                            .offset(y = (-24).dp)
+                            .padding(horizontal = 18.dp)
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(24.dp))
+                            .background(RawColors.CardSurface)
+                            .border(1.dp, RawColors.DividerStrong, RoundedCornerShape(24.dp))
+                    ) {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(IntrinsicSize.Min)
+                        ) {
                             Column(
                                 modifier = Modifier
                                     .weight(1f)
-                                    .padding(18.dp)
+                                    .padding(16.dp)
                             ) {
                                 Row(
                                     modifier = Modifier.fillMaxWidth(),
@@ -231,19 +265,19 @@ fun ProfileScreen(
                                     Text(
                                         text = "PROFILE  •  REEL MAKER",
                                         fontFamily = JetBrainsMonoFamily,
-                                        fontSize = 11.sp,
-                                        color = RawColors.TextMuted
+                                        fontWeight = FontWeight.ExtraBold,
+                                        fontSize = 10.5.sp,
+                                        letterSpacing = 1.0.sp,
+                                        color = RawColors.TextPrimary
                                     )
-                                    RawPixelMascot(
-                                        kind = PixelMascotKind.PHANTOM_BUDDY,
-                                        size = 24.dp
-                                    )
+                                    RawPixelMascot(kind = PixelMascotKind.PHANTOM_BUDDY, size = 30.dp)
                                 }
+
                                 Spacer(modifier = Modifier.height(14.dp))
 
                                 Row(
                                     verticalAlignment = Alignment.CenterVertically,
-                                    horizontalArrangement = Arrangement.spacedBy(16.dp)
+                                    horizontalArrangement = Arrangement.spacedBy(14.dp)
                                 ) {
                                     Box(
                                         modifier = Modifier.graphicsLayer {
@@ -254,278 +288,315 @@ fun ProfileScreen(
                                         UserAvatarView(
                                             name = displayName,
                                             photoPath = userProfile.profilePhotoPath,
-                                            size = 86.dp,
+                                            size = 84.dp,
                                             onClick = { showPhotoMenu = true }
+                                        )
+                                        CircleActionButton(
+                                            icon = RawIconType.EDIT,
+                                            size = 30.dp,
+                                            onClick = { showPhotoMenu = true },
+                                            modifier = Modifier
+                                                .align(Alignment.BottomEnd)
+                                                .offset(x = 6.dp, y = 4.dp)
                                         )
                                     }
 
                                     Column(modifier = Modifier.weight(1f)) {
-                                        Text(
-                                            text = "ID CARD OF",
-                                            fontFamily = JetBrainsMonoFamily,
-                                            fontSize = 11.sp,
-                                            color = RawColors.TextMuted
-                                        )
-                                        Spacer(modifier = Modifier.height(4.dp))
                                         Row(
                                             verticalAlignment = Alignment.CenterVertically,
+                                            horizontalArrangement = Arrangement.spacedBy(8.dp),
                                             modifier = Modifier.clickable { editingName = !editingName }
                                         ) {
                                             Text(
                                                 text = displayName,
-                                                style = RawTypography.headlineMedium,
-                                                maxLines = 1
+                                                fontFamily = InterFontFamily,
+                                                fontWeight = FontWeight.Black,
+                                                fontSize = 24.sp,
+                                                letterSpacing = (-1.0).sp,
+                                                color = RawColors.TextPrimary,
+                                                maxLines = 1,
+                                                overflow = TextOverflow.Ellipsis,
+                                                modifier = Modifier.weight(1f, fill = false)
                                             )
-                                            Spacer(modifier = Modifier.width(8.dp))
-                                            RawIcon(RawIconType.EDIT, size = 16.dp, tint = RawColors.TextMuted)
+                                            RawIcon(
+                                                type = RawIconType.EDIT,
+                                                size = 15.dp,
+                                                tint = RawColors.TextMuted
+                                            )
                                         }
-                                        Spacer(modifier = Modifier.height(6.dp))
+                                        Spacer(modifier = Modifier.height(4.dp))
                                         Text(
                                             text = "joined ${FormatHelpers.formatDate(userProfile.joinDateMillis)}",
-                                            style = RawTypography.bodyMedium
+                                            fontFamily = JetBrainsMonoFamily,
+                                            fontSize = 11.sp,
+                                            color = RawColors.TextMuted
                                         )
                                     }
                                 }
 
                                 AnimatedVisibility(
                                     visible = editingName,
-                                    enter = fadeIn(tween(220, easing = RawEasings.Morph)) +
-                                        expandVertically(tween(240, easing = RawEasings.Morph)),
-                                    exit = fadeOut(tween(140)) +
-                                        shrinkVertically(tween(180, easing = RawEasings.Morph))
+                                    enter = fadeIn(tween(200)) + expandVertically(tween(220, easing = RawEasings.Morph)),
+                                    exit = fadeOut(tween(140)) + shrinkVertically(tween(180))
                                 ) {
                                     Column {
-                                        Spacer(modifier = Modifier.height(14.dp))
-                                        Row(
-                                            verticalAlignment = Alignment.CenterVertically,
-                                            horizontalArrangement = Arrangement.spacedBy(8.dp)
-                                        ) {
-                                            OutlinedTextField(
-                                                value = nameDraft,
-                                                onValueChange = {
-                                                    if (it.length <= 32) {
-                                                        nameDraft = it
-                                                        if (it.trim().isNotEmpty()) {
-                                                            onUpdateName(it.trim())
-                                                        }
-                                                    }
-                                                },
-                                                singleLine = true,
-                                                placeholder = { Text("Your name", color = RawColors.TextMuted) },
-                                                shape = RoundedCornerShape(14.dp),
-                                                colors = OutlinedTextFieldDefaults.colors(
-                                                    focusedBorderColor = RawColors.TextPrimary,
-                                                    unfocusedBorderColor = RawColors.Divider,
-                                                    focusedTextColor = RawColors.TextPrimary,
-                                                    unfocusedTextColor = RawColors.TextPrimary
-                                                ),
-                                                modifier = Modifier.weight(1f)
-                                            )
-                                            RawPressButton(onClick = { editingName = false }) {
-                                                Box(
-                                                    modifier = Modifier
-                                                        .height(48.dp)
-                                                        .clip(RoundedCornerShape(14.dp))
-                                                        .background(RawColors.PrimaryBtnBg)
-                                                        .padding(horizontal = 14.dp),
-                                                    contentAlignment = Alignment.Center
-                                                ) {
-                                                    Text("Done", style = RawTypography.labelLarge, color = RawColors.PrimaryBtnText)
+                                        Spacer(modifier = Modifier.height(12.dp))
+                                        OutlinedTextField(
+                                            value = nameDraft,
+                                            onValueChange = {
+                                                if (it.length <= 32) {
+                                                    nameDraft = it
                                                 }
+                                            },
+                                            singleLine = true,
+                                            placeholder = { Text("Your name", color = RawColors.TextMuted) },
+                                            shape = RoundedCornerShape(14.dp),
+                                            colors = OutlinedTextFieldDefaults.colors(
+                                                focusedBorderColor = RawColors.MintFocus,
+                                                unfocusedBorderColor = RawColors.Divider,
+                                                focusedContainerColor = RawColors.RaisedCard,
+                                                unfocusedContainerColor = RawColors.RaisedCard,
+                                                focusedTextColor = RawColors.TextPrimary,
+                                                unfocusedTextColor = RawColors.TextPrimary,
+                                                cursorColor = RawColors.Mint
+                                            ),
+                                            modifier = Modifier.fillMaxWidth()
+                                        )
+                                        Spacer(modifier = Modifier.height(8.dp))
+                                        RawPressButton(
+                                            onClick = {
+                                                val trimmed = nameDraft.trim()
+                                                if (trimmed.isNotEmpty()) {
+                                                    onUpdateName(trimmed)
+                                                }
+                                                editingName = false
+                                            }
+                                        ) {
+                                            Box(
+                                                modifier = Modifier
+                                                    .height(34.dp)
+                                                    .clip(RoundedCornerShape(99.dp))
+                                                    .background(RawColors.Mint)
+                                                    .padding(horizontal = 16.dp),
+                                                contentAlignment = Alignment.Center
+                                            ) {
+                                                Text(
+                                                    text = "Done",
+                                                    style = RawTypography.labelLarge.copy(fontSize = 13.sp, fontWeight = FontWeight.SemiBold),
+                                                    color = RawColors.PrimaryBtnText
+                                                )
                                             }
                                         }
                                     }
                                 }
                             }
 
-                            // Right vertical strip matching reference ID card
+                            // Right vertical "ID CARD" spine (.spine)
                             Box(
                                 modifier = Modifier
-                                    .width(34.dp)
+                                    .width(42.dp)
                                     .fillMaxHeight()
-                                    .background(RawColors.CardSurface)
-                                    .padding(vertical = 18.dp),
+                                    .background(RawColors.RaisedCard),
                                 contentAlignment = Alignment.Center
                             ) {
                                 Text(
                                     text = "ID CARD",
                                     fontFamily = JetBrainsMonoFamily,
-                                    fontSize = 10.sp,
+                                    fontWeight = FontWeight.SemiBold,
+                                    fontSize = 11.sp,
+                                    letterSpacing = 3.5.sp,
                                     color = RawColors.TextMuted,
                                     maxLines = 1,
-                                    modifier = Modifier.rotate(90f)
+                                    softWrap = false,
+                                    modifier = Modifier.rotate(-90f)
                                 )
                             }
                         }
                     }
-
-                    Spacer(modifier = Modifier.height(12.dp))
-                    Text(
-                        text = "tap photo to update  •  tap name to edit",
-                        fontFamily = JetBrainsMonoFamily,
-                        fontSize = 11.sp,
-                        color = RawColors.TextMuted,
-                        modifier = Modifier.align(Alignment.CenterHorizontally)
-                    )
                 }
             }
-        }
 
-        // Bold Stat Cards (matching reference layout)
-        item {
-            Column(
-                modifier = Modifier.padding(horizontal = 20.dp),
-                verticalArrangement = Arrangement.spacedBy(12.dp)
-            ) {
-                Row(
+            // Stats card (.card.pad)
+            item {
+                Column(
                     modifier = Modifier
+                        .padding(horizontal = 18.dp)
+                        .offset(y = (-6).dp)
                         .fillMaxWidth()
                         .clip(RoundedCornerShape(22.dp))
                         .background(RawColors.CardSurface)
                         .border(1.dp, RawColors.Divider, RoundedCornerShape(22.dp))
-                        .padding(20.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.SpaceBetween
-                ) {
-                    Row(verticalAlignment = Alignment.Bottom) {
-                        Text(
-                            text = "${videos.size}",
-                            style = RawTypography.displayLarge.copy(fontSize = 38.sp)
-                        )
-                        Spacer(modifier = Modifier.width(8.dp))
-                        Text(
-                            text = if (videos.size == 1) "reel" else "reels",
-                            style = RawTypography.titleMedium,
-                            color = RawColors.TextMuted,
-                            modifier = Modifier.padding(bottom = 5.dp)
-                        )
-                    }
-                    Column(horizontalAlignment = Alignment.End) {
-                        Text(
-                            text = FormatHelpers.formatDurationLong(totalVideoSec),
-                            style = RawTypography.headlineMedium
-                        )
-                        Text(
-                            text = "Total video time",
-                            style = RawTypography.bodyMedium
-                        )
-                    }
-                }
-
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .clip(RoundedCornerShape(22.dp))
-                        .background(RawColors.CardSurface)
-                        .border(1.dp, RawColors.Divider, RoundedCornerShape(22.dp))
-                        .padding(horizontal = 20.dp, vertical = 16.dp),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Text("Last reel date", style = RawTypography.bodyMedium)
-                    Text(lastReelDate, style = RawTypography.titleMedium)
-                }
-            }
-        }
-
-        // Version & about app
-        item {
-            Column(
-                modifier = Modifier
-                    .padding(horizontal = 20.dp)
-                    .fillMaxWidth()
-                    .clip(RoundedCornerShape(22.dp))
-                    .background(RawColors.CardSurface)
-                    .border(1.dp, RawColors.Divider, RoundedCornerShape(22.dp))
-                    .padding(20.dp)
-            ) {
-                Text("Version & about app", style = RawTypography.bodyMedium)
-                Spacer(modifier = Modifier.height(10.dp))
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Text(
-                        text = BuildConfig.VERSION_NAME,
-                        style = RawTypography.displayLarge.copy(fontSize = 32.sp)
-                    )
-                    RawPressButton(onClick = { showAboutSheet = true }) {
-                        Box(
-                            modifier = Modifier
-                                .height(42.dp)
-                                .clip(RoundedCornerShape(21.dp))
-                                .background(RawColors.RaisedCard)
-                                .padding(horizontal = 18.dp),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Text("About app", style = RawTypography.labelLarge)
-                        }
-                    }
-                }
-            }
-        }
-
-        // Clear cache row
-        item {
-            Column(modifier = Modifier.padding(horizontal = 20.dp)) {
-                RawPressButton(
-                    onClick = {
-                        scope.launch {
-                            val freed = cacheManager.clearAllTempCache()
-                            cacheSizeBytes = cacheManager.getTempCacheSizeBytes()
-                            cacheNotice = "Cleared ${FormatHelpers.formatFileSize(freed)} of temp files."
-                        }
-                    }
+                        .padding(16.dp)
                 ) {
                     Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .clip(RoundedCornerShape(20.dp))
-                            .background(RawColors.CardSurface)
-                            .border(1.dp, RawColors.Divider, RoundedCornerShape(20.dp))
-                            .padding(horizontal = 20.dp, vertical = 18.dp),
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.Bottom
+                    ) {
+                        Column {
+                            Text(
+                                text = "${videos.size}",
+                                fontFamily = InterFontFamily,
+                                fontWeight = FontWeight.ExtraBold,
+                                fontSize = 48.sp,
+                                lineHeight = 48.sp,
+                                letterSpacing = (-2.4).sp,
+                                color = RawColors.TextPrimary
+                            )
+                            Text(
+                                text = "reels made",
+                                style = RawTypography.labelMedium
+                            )
+                        }
+                        Column(horizontalAlignment = Alignment.End) {
+                            Text(
+                                text = FormatHelpers.formatDurationLong(totalVideoSec),
+                                fontFamily = InterFontFamily,
+                                fontWeight = FontWeight.ExtraBold,
+                                fontSize = 32.sp,
+                                letterSpacing = (-1.4).sp,
+                                color = RawColors.TextPrimary
+                            )
+                            Text(
+                                text = "Total video time",
+                                style = RawTypography.labelMedium
+                            )
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(14.dp))
+                    Box(modifier = Modifier.fillMaxWidth().height(1.dp).background(RawColors.Divider))
+                    Spacer(modifier = Modifier.height(12.dp))
+
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.SpaceBetween,
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Column {
-                            Text("Clear cache", style = RawTypography.titleMedium)
-                            Text(
-                                text = cacheNotice ?: "Temp files: ${FormatHelpers.formatFileSize(cacheSizeBytes)}",
-                                style = RawTypography.bodyMedium
-                            )
-                        }
-                        RawIcon(RawIconType.TRASH, size = 20.dp, tint = RawColors.TextMuted)
+                        Text(text = "Last reel date", style = RawTypography.labelMedium)
+                        Text(
+                            text = lastReelDate,
+                            fontFamily = InterFontFamily,
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 13.sp,
+                            color = RawColors.TextPrimary
+                        )
                     }
                 }
             }
+
+            // Version & about app (.card.pr)
+            item {
+                Spacer(modifier = Modifier.height(4.dp))
+                Row(
+                    modifier = Modifier
+                        .padding(horizontal = 18.dp)
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(22.dp))
+                        .background(RawColors.CardSurface)
+                        .border(1.dp, RawColors.Divider, RoundedCornerShape(22.dp))
+                        .padding(16.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Column {
+                        Text(
+                            text = "Version & about app",
+                            style = RawTypography.titleMedium.copy(fontWeight = FontWeight.Bold)
+                        )
+                        Spacer(modifier = Modifier.height(3.dp))
+                        Text(
+                            text = BuildConfig.VERSION_NAME,
+                            style = RawTypography.labelMedium
+                        )
+                    }
+                    RawSecondaryButton(
+                        text = "About app",
+                        height = 42.dp,
+                        leadingIcon = RawIconType.INFO,
+                        fillWidth = false,
+                        onClick = { showAboutSheet = true }
+                    )
+                }
+            }
+
+            // Clear cache (.card.pr + coral TRASH squircle)
+            item {
+                Spacer(modifier = Modifier.height(10.dp))
+                Row(
+                    modifier = Modifier
+                        .padding(horizontal = 18.dp)
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(22.dp))
+                        .background(RawColors.CardSurface)
+                        .border(1.dp, RawColors.Divider, RoundedCornerShape(22.dp))
+                        .padding(16.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Column {
+                        Text(
+                            text = "Clear cache",
+                            style = RawTypography.titleMedium.copy(fontWeight = FontWeight.Bold)
+                        )
+                        Spacer(modifier = Modifier.height(3.dp))
+                        Text(
+                            text = "Temp files: ${FormatHelpers.formatFileSize(cacheSizeBytes)}",
+                            style = RawTypography.labelMedium
+                        )
+                    }
+                    CircleActionButton(
+                        icon = RawIconType.TRASH,
+                        size = 36.dp,
+                        iconTint = RawColors.ErrorCoral,
+                        onClick = {
+                            scope.launch {
+                                cacheManager.clearAllTempCache()
+                                cacheSizeBytes = cacheManager.getTempCacheSizeBytes()
+                                toastMsg = "Cache cleared"
+                            }
+                        }
+                    )
+                }
+            }
         }
+
+        RawToastBanner(
+            message = toastMsg,
+            modifier = Modifier
+                .align(Alignment.BottomCenter)
+                .padding(bottom = 96.dp)
+        )
     }
 
     if (showPhotoMenu) {
         ModalBottomSheet(
             onDismissRequest = { showPhotoMenu = false },
-            containerColor = RawColors.HeroSurface,
+            containerColor = RawColors.CardSurface,
             contentColor = RawColors.TextPrimary
         ) {
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(horizontal = 20.dp, vertical = 8.dp),
-                verticalArrangement = Arrangement.spacedBy(10.dp)
+                    .padding(horizontal = 20.dp, vertical = 6.dp)
             ) {
-                Text("Profile photo", style = RawTypography.headlineMedium)
+                Text(
+                    text = "Profile photo",
+                    style = RawTypography.titleLarge.copy(fontWeight = FontWeight.ExtraBold)
+                )
+                Spacer(modifier = Modifier.height(8.dp))
                 SheetActionRow(
                     icon = RawIconType.IMAGE,
-                    label = "Choose from gallery",
+                    label = "Gallery",
                     onClick = {
                         showPhotoMenu = false
                         galleryPicker.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly))
                     }
                 )
+                Box(modifier = Modifier.fillMaxWidth().height(1.dp).background(RawColors.Divider))
                 SheetActionRow(
                     icon = RawIconType.CAMERA,
-                    label = "Take photo",
+                    label = "Camera",
                     onClick = {
                         showPhotoMenu = false
                         val file = cacheManager.createCameraTempFile()
@@ -535,6 +606,7 @@ fun ProfileScreen(
                     }
                 )
                 if (userProfile.profilePhotoPath != null) {
+                    Box(modifier = Modifier.fillMaxWidth().height(1.dp).background(RawColors.Divider))
                     SheetActionRow(
                         icon = RawIconType.TRASH,
                         label = "Remove photo",
@@ -545,7 +617,7 @@ fun ProfileScreen(
                         }
                     )
                 }
-                Spacer(modifier = Modifier.height(20.dp))
+                Spacer(modifier = Modifier.height(22.dp))
             }
         }
     }
@@ -553,31 +625,57 @@ fun ProfileScreen(
     if (showAboutSheet) {
         ModalBottomSheet(
             onDismissRequest = { showAboutSheet = false },
-            containerColor = RawColors.HeroSurface,
+            containerColor = RawColors.CardSurface,
             contentColor = RawColors.TextPrimary
         ) {
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
                     .verticalScroll(rememberScrollState())
-                    .padding(horizontal = 20.dp, vertical = 12.dp),
-                verticalArrangement = Arrangement.spacedBy(12.dp)
+                    .padding(horizontal = 20.dp, vertical = 8.dp),
+                verticalArrangement = Arrangement.spacedBy(10.dp)
             ) {
-                RawEditLogoBadge(logoSize = 36.dp)
-                Text("About raw_edit", style = RawTypography.headlineMedium)
+                PixelRawEditLogo(width = 42.dp, height = 33.dp)
                 Text(
-                    text = "1. Add your MP3 voiceover (and optional SRT subtitles).\n2. Copy the prompt into Claude and paste the returned HTML code back here.\n3. Render a crisp 1920x1080 30 fps MP4 completely offline on your phone.",
-                    style = RawTypography.bodyLarge
+                    text = "About raw_edit",
+                    style = RawTypography.headlineMedium.copy(fontWeight = FontWeight.Black)
                 )
+                Text(
+                    text = "Version ${BuildConfig.VERSION_NAME}  •  100% offline  •  no ads",
+                    style = RawTypography.labelMedium
+                )
+                Spacer(modifier = Modifier.height(4.dp))
+                Text(
+                    text = "LICENSES",
+                    fontFamily = JetBrainsMonoFamily,
+                    fontWeight = FontWeight.Bold,
+                    fontSize = 11.sp,
+                    color = RawColors.TextPrimary
+                )
+                listOf(
+                    "Jetpack Compose - Apache-2.0",
+                    "Kotlin standard library - Apache-2.0",
+                    "AndroidX Media3 - Apache-2.0",
+                    "Coil image loading - Apache-2.0",
+                    "Bundled Google Fonts - SIL OFL 1.1"
+                ).forEachIndexed { i, lic ->
+                    if (i > 0) {
+                        Box(modifier = Modifier.fillMaxWidth().height(1.dp).background(RawColors.Divider))
+                    }
+                    Text(
+                        text = lic,
+                        fontSize = 13.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        color = RawColors.TextPrimary,
+                        modifier = Modifier.padding(vertical = 8.dp)
+                    )
+                }
                 Spacer(modifier = Modifier.height(6.dp))
-                Text("Open-source & font licenses", style = RawTypography.titleMedium)
-                Text(
-                    text = "• Bundled Fonts (Montserrat, Open Sans, Poppins, Inter, Bebas Neue, Anton, Oswald, Playfair Display, Space Grotesk, JetBrains Mono): SIL Open Font License (OFL 1.1).\n" +
-                        "• Jetpack Compose, Navigation, Room, DataStore, Media3 (ExoPlayer & Transformer), Coroutines, kotlinx.serialization, Coil: Apache License 2.0.\n" +
-                        "• 100% free, zero ads, zero servers, zero tracking.",
-                    style = RawTypography.bodyMedium
+                BigPrimaryButton(
+                    text = "Close",
+                    onClick = { showAboutSheet = false }
                 )
-                Spacer(modifier = Modifier.height(24.dp))
+                Spacer(modifier = Modifier.height(20.dp))
             }
         }
     }
@@ -591,6 +689,7 @@ fun ProfileScreen(
                 scope.launch {
                     val savedPath = cacheManager.saveProfileAvatar(cropped)
                     onUpdatePhoto(savedPath)
+                    toastMsg = "Photo updated"
                 }
             }
         )

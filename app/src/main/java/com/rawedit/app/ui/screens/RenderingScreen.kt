@@ -25,18 +25,23 @@ import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawWithContent
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.drawscope.clipRect
@@ -51,12 +56,12 @@ import com.rawedit.app.render.RenderStage
 import com.rawedit.app.render.RenderStateHolder
 import com.rawedit.app.ui.components.BigPrimaryButton
 import com.rawedit.app.ui.components.FormatHelpers
+import com.rawedit.app.ui.components.RawConfirmDialog
+import com.rawedit.app.ui.components.RawSecondaryButton
 import com.rawedit.app.ui.icons.PixelMascotKind
-import com.rawedit.app.ui.icons.PixelSparkle
 import com.rawedit.app.ui.icons.RawIcon
 import com.rawedit.app.ui.icons.RawIconType
 import com.rawedit.app.ui.icons.RawPixelMascot
-import com.rawedit.app.ui.motion.RawPressButton
 import com.rawedit.app.ui.theme.InterFontFamily
 import com.rawedit.app.ui.theme.JetBrainsMonoFamily
 import com.rawedit.app.ui.theme.RawColors
@@ -70,6 +75,8 @@ fun RenderingScreen(
 ) {
     val context = LocalContext.current
     val state by RenderStateHolder.state.collectAsState()
+    var showCancelConfirm by remember { mutableStateOf(false) }
+    var readyForCompletion by remember(projectId) { mutableStateOf(false) }
 
     val notifLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.RequestPermission()
@@ -77,7 +84,6 @@ fun RenderingScreen(
         RenderService.start(context, projectId)
     }
 
-    // Keep screen awake while rendering screen is active (Section 3.6)
     DisposableEffect(context) {
         val window = (context as? Activity)?.window
         window?.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
@@ -87,10 +93,16 @@ fun RenderingScreen(
     }
 
     LaunchedEffect(projectId) {
-        if (state.projectId != projectId ||
-            state.stage == RenderStage.IDLE ||
-            state.stage == RenderStage.CANCELLED
-        ) {
+        val cur = RenderStateHolder.state.value
+        val alreadyRunningForProject = cur.projectId == projectId && (
+            cur.stage == RenderStage.PREPARING ||
+                cur.stage == RenderStage.DRAWING_FRAMES ||
+                cur.stage == RenderStage.ADDING_VOICE ||
+                cur.stage == RenderStage.MUXING
+            )
+        if (!alreadyRunningForProject) {
+            RenderStateHolder.resetForNewRender(projectId)
+            readyForCompletion = true
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
                 val granted = ContextCompat.checkSelfPermission(
                     context,
@@ -104,231 +116,235 @@ fun RenderingScreen(
             } else {
                 RenderService.start(context, projectId)
             }
+        } else {
+            readyForCompletion = true
         }
     }
 
-    LaunchedEffect(state.stage, state.completedVideoId) {
-        if (state.stage == RenderStage.DONE && state.completedVideoId != null) {
+    LaunchedEffect(readyForCompletion, state.projectId, state.stage, state.completedVideoId) {
+        if (readyForCompletion &&
+            state.projectId == projectId &&
+            state.stage == RenderStage.DONE &&
+            state.completedVideoId != null
+        ) {
             onCompleted(state.completedVideoId!!)
         }
     }
 
-    Column(
+    val isFailed = readyForCompletion && (state.stage == RenderStage.ERROR || state.stage == RenderStage.CANCELLED)
+
+    Box(
         modifier = Modifier
             .fillMaxSize()
             .background(RawColors.BgPrimary)
             .statusBarsPadding()
-            .navigationBarsPadding()
-            .padding(20.dp),
-        verticalArrangement = Arrangement.SpaceBetween
     ) {
-        Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .verticalScroll(rememberScrollState())
+                .padding(start = 18.dp, end = 18.dp, bottom = 104.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp)
+        ) {
+            // Header (.bar)
             Row(
-                modifier = Modifier.fillMaxWidth(),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(58.dp),
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Text(
                     text = "Creating your reel",
-                    style = RawTypography.headlineLarge,
-                    modifier = Modifier.weight(1f)
-                )
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(6.dp)
-                ) {
-                    PixelSparkle(size = 11.dp, phaseOffsetMs = 120)
-                    RawPixelMascot(
-                        kind = PixelMascotKind.TV_BOT,
-                        size = 48.dp
-                    )
-                }
-            }
-
-            // Live 16:9 preview frame of what is being drawn
-            Box(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .aspectRatio(16f / 9f)
-                    .clip(RoundedCornerShape(22.dp))
-                    .background(Color.Black)
-                    .border(1.dp, RawColors.Divider, RoundedCornerShape(22.dp)),
-                contentAlignment = Alignment.Center
-            ) {
-                val bmp = state.previewBitmap
-                if (bmp != null) {
-                    val imgBmp = remember(bmp) { bmp.asImageBitmap() }
-                    Image(
-                        bitmap = imgBmp,
-                        contentDescription = "Live render preview",
-                        contentScale = ContentScale.Fit,
-                        modifier = Modifier.fillMaxSize()
-                    )
-                } else {
-                    RawIcon(RawIconType.FILM, size = 36.dp, tint = RawColors.TextMuted)
-                }
-            }
-
-            // Giant ghost word filling bottom-to-top in exact pixel alignment with real progress
-            val targetFraction = (state.progressPercent / 100f).coerceIn(0f, 1f)
-            val smoothFraction by animateFloatAsState(
-                targetValue = targetFraction,
-                animationSpec = tween(durationMillis = 220),
-                label = "render_word_fill"
-            )
-            Box(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(110.dp)
-                    .clip(RoundedCornerShape(22.dp))
-                    .background(RawColors.HeroSurface)
-                    .border(1.dp, RawColors.Divider, RoundedCornerShape(22.dp)),
-                contentAlignment = Alignment.Center
-            ) {
-                // Base faded ghost word
-                Text(
-                    text = "RENDERING",
                     fontFamily = InterFontFamily,
                     fontWeight = FontWeight.ExtraBold,
-                    fontSize = 48.sp,
-                    letterSpacing = (-1.5).sp,
-                    color = RawColors.TextPrimary.copy(alpha = 0.14f),
-                    maxLines = 1,
-                    softWrap = false
+                    fontSize = 23.sp,
+                    letterSpacing = (-1.0).sp,
+                    color = RawColors.TextPrimary
                 )
-                // Identical white word clipped smoothly from bottom to top
-                Text(
-                    text = "RENDERING",
-                    fontFamily = InterFontFamily,
-                    fontWeight = FontWeight.ExtraBold,
-                    fontSize = 48.sp,
-                    letterSpacing = (-1.5).sp,
-                    color = RawColors.TextPrimary,
-                    maxLines = 1,
-                    softWrap = false,
-                    modifier = Modifier.drawWithContent {
-                        val topY = size.height * (1f - smoothFraction)
-                        clipRect(left = 0f, top = topY, right = size.width, bottom = size.height) {
-                            this@drawWithContent.drawContent()
-                        }
-                    }
-                )
+                RawPixelMascot(kind = PixelMascotKind.TV_BOT, size = 40.dp)
             }
 
-            // Mono status line + elapsed / ETA (after 5%)
-            Column(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .clip(RoundedCornerShape(20.dp))
-                    .background(RawColors.CardSurface)
-                    .border(1.dp, RawColors.Divider, RoundedCornerShape(20.dp))
-                    .padding(16.dp),
-                verticalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween
+            if (isFailed) {
+                // Error empty state matching R.render err
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(top = 64.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.spacedBy(10.dp)
                 ) {
+                    RawPixelMascot(kind = PixelMascotKind.CODE_BOT, size = 86.dp)
                     Text(
-                        text = state.statusText,
-                        fontFamily = JetBrainsMonoFamily,
-                        fontSize = 14.sp,
-                        color = RawColors.TextPrimary
+                        text = if (state.stage == RenderStage.CANCELLED) "Render cancelled" else "Render failed",
+                        style = RawTypography.headlineMedium.copy(fontWeight = FontWeight.Bold)
                     )
                     Text(
-                        text = "${state.progressPercent}%",
-                        fontFamily = JetBrainsMonoFamily,
-                        fontWeight = FontWeight.Bold,
-                        fontSize = 14.sp,
-                        color = RawColors.TextPrimary
+                        text = state.errorMessage ?: "Your files are safe on your phone.",
+                        style = RawTypography.bodyMedium
                     )
-                }
-
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Text(
-                        text = "Elapsed: ${FormatHelpers.formatDuration(state.elapsedSeconds.toDouble())}",
-                        style = RawTypography.labelMedium
-                    )
+                    Spacer(modifier = Modifier.height(16.dp))
                     Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(10.dp)
                     ) {
-                        val eta = state.etaSeconds
-                        if (state.progressPercent >= 5 && eta != null && state.stage == RenderStage.DRAWING_FRAMES) {
-                            Text(
-                                text = "About ${FormatHelpers.formatDuration(eta.toDouble())} left",
-                                style = RawTypography.labelMedium
-                            )
+                        BigPrimaryButton(
+                            text = "Try again",
+                            onClick = {
+                                RenderStateHolder.resetForNewRender(projectId)
+                                RenderService.start(context, projectId)
+                            },
+                            modifier = Modifier.weight(1f)
+                        )
+                        RawSecondaryButton(
+                            text = "Back to steps",
+                            height = 52.dp,
+                            onClick = onCancelledOrBack,
+                            modifier = Modifier.weight(1f)
+                        )
+                    }
+                }
+            } else {
+                // Live 16:9 frame preview (.fr)
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .aspectRatio(16f / 9f)
+                        .clip(RoundedCornerShape(12.dp))
+                        .background(Color.Black)
+                        .border(1.dp, RawColors.Divider, RoundedCornerShape(12.dp)),
+                    contentAlignment = Alignment.Center
+                ) {
+                    val bmp = state.previewBitmap
+                    if (bmp != null && !bmp.isRecycled) {
+                        val imgBmp = remember(bmp) { bmp.asImageBitmap() }
+                        Image(
+                            bitmap = imgBmp,
+                            contentDescription = "Live render preview",
+                            contentScale = ContentScale.Fit,
+                            modifier = Modifier.fillMaxSize()
+                        )
+                    } else {
+                        RawIcon(RawIconType.FILM, size = 34.dp, tint = RawColors.TextMuted)
+                    }
+                }
+
+                // Giant stacked "REN / DER / ING" filling bottom-to-top from #262B26 to Mint #8CE3A8 (.gi)
+                val targetFraction = (state.progressPercent / 100f).coerceIn(0f, 1f)
+                val smoothFraction by animateFloatAsState(
+                    targetValue = targetFraction,
+                    animationSpec = tween(durationMillis = 200),
+                    label = "gi_fill"
+                )
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(226.dp)
+                        .clip(RoundedCornerShape(22.dp))
+                        .background(RawColors.CardSurface)
+                        .border(1.dp, RawColors.Divider, RoundedCornerShape(22.dp)),
+                    contentAlignment = Alignment.Center
+                ) {
+                    val stackedStyle = RawTypography.displayLarge.copy(
+                        fontSize = 68.sp,
+                        lineHeight = 58.sp,
+                        letterSpacing = (-3.0).sp
+                    )
+                    Text(
+                        text = "REN\nDER\nING",
+                        style = stackedStyle,
+                        color = Color(0xFF262B26)
+                    )
+                    Text(
+                        text = "REN\nDER\nING",
+                        style = stackedStyle,
+                        color = RawColors.Mint,
+                        modifier = Modifier.drawWithContent {
+                            val topY = size.height * (1f - smoothFraction)
+                            clipRect(left = 0f, top = topY, right = size.width, bottom = size.height) {
+                                this@drawWithContent.drawContent()
+                            }
                         }
-                        RawPixelMascot(
-                            kind = PixelMascotKind.PHANTOM_BUDDY,
-                            size = 24.dp
+                    )
+                }
+
+                // Telemetry card (.tele) with PHANTOM_BUDDY top-right
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(22.dp))
+                        .background(RawColors.CardSurface)
+                        .border(1.dp, RawColors.Divider, RoundedCornerShape(22.dp))
+                        .padding(16.dp)
+                ) {
+                    RawPixelMascot(
+                        kind = PixelMascotKind.PHANTOM_BUDDY,
+                        size = 34.dp,
+                        modifier = Modifier.align(Alignment.TopEnd)
+                    )
+
+                    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                        Text(
+                            text = state.statusText,
+                            fontFamily = JetBrainsMonoFamily,
+                            fontSize = 12.sp,
+                            color = RawColors.TextMuted
+                        )
+                        Text(
+                            text = "${state.progressPercent}%",
+                            fontFamily = JetBrainsMonoFamily,
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 22.sp,
+                            color = RawColors.TextPrimary
+                        )
+                        val etaText = if (state.progressPercent >= 5 && state.etaSeconds != null && state.stage == RenderStage.DRAWING_FRAMES) {
+                            "  •  About ${FormatHelpers.formatDuration(state.etaSeconds!!.toDouble())} left"
+                        } else ""
+                        Text(
+                            text = "Elapsed: ${FormatHelpers.formatDuration(state.elapsedSeconds.toDouble())}$etaText",
+                            fontFamily = JetBrainsMonoFamily,
+                            fontSize = 12.sp,
+                            color = RawColors.TextMuted
                         )
                     }
                 }
             }
+        }
 
-            if (state.stage == RenderStage.ERROR) {
-                Box(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .clip(RoundedCornerShape(16.dp))
-                        .background(RawColors.ErrorCoral.copy(alpha = 0.14f))
-                        .border(1.dp, RawColors.ErrorCoral.copy(alpha = 0.45f), RoundedCornerShape(16.dp))
-                        .padding(14.dp)
-                ) {
-                    Text(
-                        text = state.errorMessage ?: "Rendering failed. Your project is saved.",
-                        style = RawTypography.bodyMedium,
-                        color = RawColors.ErrorCoral
+        if (!isFailed) {
+            Box(
+                modifier = Modifier
+                    .align(Alignment.BottomCenter)
+                    .fillMaxWidth()
+                    .background(
+                        Brush.verticalGradient(
+                            listOf(Color.Transparent, RawColors.BgPrimary.copy(alpha = 0.94f), RawColors.BgPrimary)
+                        )
                     )
-                }
-            }
-        }
-
-        if (state.stage == RenderStage.ERROR || state.stage == RenderStage.CANCELLED) {
-            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                BigPrimaryButton(
-                    text = "Try again",
-                    leadingIcon = RawIconType.BOLT,
-                    onClick = { RenderService.start(context, projectId) }
-                )
-                RawPressButton(onClick = onCancelledOrBack) {
-                    Box(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .height(54.dp)
-                            .clip(RoundedCornerShape(27.dp))
-                            .background(RawColors.RaisedCard),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Text("Back to steps", style = RawTypography.labelLarge)
-                    }
-                }
-            }
-        } else {
-            RawPressButton(
-                onClick = {
-                    RenderService.cancel(context)
-                    onCancelledOrBack()
-                }
+                    .navigationBarsPadding()
+                    .padding(start = 18.dp, end = 18.dp, top = 20.dp, bottom = 18.dp)
             ) {
-                Box(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(58.dp)
-                        .clip(RoundedCornerShape(29.dp))
-                        .background(RawColors.RaisedCard)
-                        .border(1.dp, RawColors.Divider, RoundedCornerShape(29.dp)),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Text("Cancel", style = RawTypography.labelLarge, color = RawColors.ErrorCoral)
-                }
+                RawSecondaryButton(
+                    text = "Cancel",
+                    height = 52.dp,
+                    onClick = { showCancelConfirm = true }
+                )
             }
         }
+    }
+
+    if (showCancelConfirm) {
+        RawConfirmDialog(
+            title = "Cancel rendering?",
+            body = "Progress will be lost.",
+            confirmLabel = "Cancel render",
+            isDanger = true,
+            onConfirm = {
+                showCancelConfirm = false
+                RenderService.cancel(context)
+                onCancelledOrBack()
+            },
+            onDismiss = { showCancelConfirm = false }
+        )
     }
 }

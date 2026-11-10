@@ -7,8 +7,6 @@ import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.CubicBezierEasing
 import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.RepeatMode
-import androidx.compose.animation.core.Spring
-import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.infiniteRepeatable
@@ -35,7 +33,6 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -48,10 +45,10 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.geometry.CornerRadius
@@ -60,6 +57,7 @@ import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.graphics.lerp
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.onSizeChanged
@@ -67,23 +65,24 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.text.TextStyle
-import androidx.compose.ui.unit.IntOffset
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import com.rawedit.app.ui.icons.RawIcon
 import com.rawedit.app.ui.icons.RawIconType
+import com.rawedit.app.ui.theme.JetBrainsMonoFamily
 import com.rawedit.app.ui.theme.RawColors
 import com.rawedit.app.ui.theme.RawTypography
 import kotlinx.coroutines.delay
-import kotlin.math.PI
-import kotlin.math.cos
+import kotlinx.coroutines.launch
+import kotlin.math.abs
 import kotlin.math.roundToInt
 import kotlin.math.sin
 
 object RawEasings {
-    val Morph = CubicBezierEasing(0.22f, 1.0f, 0.36f, 1.0f)
-    val SnappyOut = CubicBezierEasing(0.16f, 1.0f, 0.3f, 1.0f)
-    val OvershootSettle = CubicBezierEasing(0.22f, 1.32f, 0.36f, 1.0f)
-    val InkSpread = CubicBezierEasing(0.20f, 0.85f, 0.25f, 1.0f)
+    val Morph = CubicBezierEasing(0.22f, 0.90f, 0.24f, 1.0f)
+    val SnappyOut = CubicBezierEasing(0.16f, 1.0f, 0.30f, 1.0f)
+    val OvershootSettle = CubicBezierEasing(0.22f, 1.25f, 0.36f, 1.0f)
 }
 
 @Composable
@@ -98,7 +97,7 @@ fun rememberAnimationsEnabled(): Boolean {
 }
 
 /**
- * Tactile spring press micro-interaction for cards and buttons.
+ * Ultra-lightweight GPU spring press feedback using graphicsLayer only (zero layout work).
  */
 @Composable
 fun RawPressButton(
@@ -111,9 +110,9 @@ fun RawPressButton(
     val interactionSource = remember { MutableInteractionSource() }
     val pressed by interactionSource.collectIsPressedAsState()
     val scale by animateFloatAsState(
-        targetValue = if (pressed && enabled && animEnabled) 0.96f else 1f,
+        targetValue = if (pressed && enabled && animEnabled) 0.968f else 1f,
         animationSpec = if (animEnabled) {
-            spring(dampingRatio = 0.68f, stiffness = 420f)
+            spring(dampingRatio = 0.72f, stiffness = 480f)
         } else {
             tween(0)
         },
@@ -138,7 +137,7 @@ fun RawPressButton(
 }
 
 /**
- * Smooth morphing swap for labels and small icon badges.
+ * Crisp morphing swap for dynamic button captions and status tags.
  */
 @Composable
 fun SplitFlapText(
@@ -153,22 +152,23 @@ fun SplitFlapText(
             if (!animEnabled) {
                 ContentTransform(fadeIn(tween(0)), fadeOut(tween(0)))
             } else {
-                (fadeIn(tween(200, easing = RawEasings.Morph)) +
-                    scaleIn(initialScale = 0.92f, animationSpec = tween(220, easing = RawEasings.Morph)))
+                (fadeIn(tween(180, easing = RawEasings.Morph)) +
+                    scaleIn(initialScale = 0.93f, animationSpec = tween(180, easing = RawEasings.Morph)))
                     .togetherWith(
-                        fadeOut(tween(140)) +
-                            scaleOut(targetScale = 0.92f, animationSpec = tween(140))
+                        fadeOut(tween(120)) +
+                            scaleOut(targetScale = 0.93f, animationSpec = tween(120))
                     )
             }
         },
         label = "morph_text"
     ) { target ->
-        Text(text = target, style = style, color = color)
+        Text(text = target, style = style, color = color, maxLines = 1, softWrap = false)
     }
 }
 
 /**
- * Smooth kinetic display heading (gentle upward slide + opacity settle).
+ * Word-staggered kinetic headline powered by ONE shared Animatable and GPU graphicsLayer
+ * (eliminates N parallel coroutines per heading for lag-free screen opens).
  */
 @Composable
 fun KineticHeading(
@@ -178,32 +178,38 @@ fun KineticHeading(
     triggerKey: Any = words
 ) {
     val animEnabled = rememberAnimationsEnabled()
+    val master = remember(triggerKey) { Animatable(if (animEnabled) 0f else 1f) }
+
+    LaunchedEffect(triggerKey, animEnabled) {
+        if (animEnabled) {
+            master.snapTo(0f)
+            master.animateTo(1f, tween(durationMillis = 480, easing = RawEasings.Morph))
+        } else {
+            master.snapTo(1f)
+        }
+    }
+
+    val total = master.value
+    val count = words.size.coerceAtLeast(1)
+
     Row(
         modifier = modifier,
         horizontalArrangement = Arrangement.spacedBy(8.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
         words.forEachIndexed { idx, word ->
-            val progress = remember(triggerKey, idx) { Animatable(if (animEnabled) 0f else 1f) }
-            LaunchedEffect(triggerKey, animEnabled) {
-                if (animEnabled) {
-                    progress.snapTo(0f)
-                    delay(idx * 40L)
-                    progress.animateTo(1f, tween(durationMillis = 360, easing = RawEasings.Morph))
-                } else {
-                    progress.snapTo(1f)
-                }
-            }
-            val p = progress.value
+            val startAt = (idx.toFloat() / (count + 1.5f)).coerceAtMost(0.45f)
+            val span = (1f - startAt).coerceAtLeast(0.35f)
             Box(modifier = Modifier.clipToBounds()) {
                 Text(
                     text = word,
                     style = style,
+                    maxLines = 1,
+                    softWrap = false,
                     modifier = Modifier.graphicsLayer {
-                        translationY = (1f - p) * 26f
-                        scaleX = 0.94f + 0.06f * p
-                        scaleY = 0.94f + 0.06f * p
-                        alpha = p.coerceIn(0f, 1f)
+                        val p = ((total - startAt) / span).coerceIn(0f, 1f)
+                        translationY = (1f - p) * 24f
+                        alpha = p
                     }
                 )
             }
@@ -212,7 +218,7 @@ fun KineticHeading(
 }
 
 /**
- * Smooth vertical reveal card for workspace / step lists.
+ * Lightweight GPU entrance wrapper for card groups.
  */
 @Composable
 fun CascadeSkewCard(
@@ -221,23 +227,19 @@ fun CascadeSkewCard(
     content: @Composable () -> Unit
 ) {
     val animEnabled = rememberAnimationsEnabled()
-    val progress = remember(index) { Animatable(if (animEnabled) 0f else 1f) }
+    val progress = remember { Animatable(if (animEnabled && index < 6) 0f else 1f) }
 
-    LaunchedEffect(index, animEnabled) {
-        if (animEnabled) {
-            progress.snapTo(0f)
-            delay((index.coerceAtMost(6)) * 35L)
-            progress.animateTo(1f, tween(340, easing = RawEasings.Morph))
-        } else {
-            progress.snapTo(1f)
+    LaunchedEffect(Unit) {
+        if (animEnabled && index < 6 && progress.value < 1f) {
+            if (index > 0) delay(index * 36L)
+            progress.animateTo(1f, tween(320, easing = RawEasings.Morph))
         }
     }
-    val p = progress.value
+
     Box(
         modifier = modifier.graphicsLayer {
-            translationY = (1f - p) * 24f
-            scaleX = 0.97f + 0.03f * p
-            scaleY = 0.97f + 0.03f * p
+            val p = progress.value
+            translationY = (1f - p) * 20f
             alpha = p.coerceIn(0f, 1f)
         }
     ) {
@@ -246,7 +248,8 @@ fun CascadeSkewCard(
 }
 
 /**
- * Continuous fluid pager dots linked directly to finger drag & page transitions.
+ * Single-Canvas fluid Mint pager dots (7dp -> 24dp expanding Mint pill) linked to finger drag.
+ * Zero per-dot composables or per-dot animation state allocations.
  */
 @Composable
 fun LiquidPagerDots(
@@ -255,165 +258,199 @@ fun LiquidPagerDots(
     pageOffsetFraction: Float = 0f,
     modifier: Modifier = Modifier
 ) {
-    val animEnabled = rememberAnimationsEnabled()
-    Row(
-        modifier = modifier,
-        horizontalArrangement = Arrangement.spacedBy(7.dp),
-        verticalAlignment = Alignment.CenterVertically
-    ) {
-        for (i in 0 until totalCount) {
-            val activePos = (currentIndex + pageOffsetFraction).coerceIn(0f, (totalCount - 1).toFloat())
-            val dist = kotlin.math.abs(activePos - i).coerceIn(0f, 1f)
-            val closeness = 1f - dist
+    val count = totalCount.coerceAtLeast(1)
+    val dotHeightDp = 7.dp
+    val maxPillDp = 24.dp
+    val gapDp = 7.dp
+    val totalWidthDp = (dotHeightDp * (count - 1)) + maxPillDp + (gapDp * (count - 1)) + 2.dp
 
-            val width by animateDpAsState(
-                targetValue = (7f + 19f * closeness).dp,
-                animationSpec = if (animEnabled && pageOffsetFraction == 0f) {
-                    spring(dampingRatio = 0.72f, stiffness = 380f)
-                } else {
-                    tween(0)
-                },
-                label = "dot_w_$i"
+    Canvas(modifier = modifier.width(totalWidthDp).height(dotHeightDp)) {
+        val h = size.height
+        val minW = dotHeightDp.toPx()
+        val maxW = maxPillDp.toPx()
+        val gap = gapDp.toPx()
+        val radius = h * 0.5f
+        val activePos = (currentIndex + pageOffsetFraction).coerceIn(0f, (count - 1).toFloat())
+
+        var curX = 0f
+        for (i in 0 until count) {
+            val closeness = (1f - abs(activePos - i)).coerceIn(0f, 1f)
+            val w = minW + (maxW - minW) * closeness
+            val col = lerp(RawColors.PillGrey, RawColors.Mint, closeness)
+            drawRoundRect(
+                color = col,
+                topLeft = Offset(curX, 0f),
+                size = Size(w, h),
+                cornerRadius = CornerRadius(radius, radius)
             )
-            Box(
-                modifier = Modifier
-                    .height(7.dp)
-                    .width(width)
-                    .clip(CircleShape)
-                    .background(
-                        RawColors.TextPrimary.copy(alpha = 0.25f + 0.75f * closeness)
-                    )
-            )
+            curX += w + gap
         }
     }
 }
 
 /**
- * Minimal capsule Swipe-to-create control matching the clean bottom unlock bar aesthetic.
+ * Signature Mint Swipe-to-create control (#sl2 in mockup):
+ * Track fill, pulsing >>> chevrons, and knob travel all run inside draw/layer phases so dragging
+ * produces zero recompositions even on older Android 9 GPUs.
  */
 @Composable
 fun SwipeToCreateSlider(
     unlocked: Boolean,
     rightTag: String = "1080p",
     onTriggered: (tapCenter: Offset) -> Unit,
+    onLockedTap: (() -> Unit)? = null,
     modifier: Modifier = Modifier
 ) {
     val haptic = LocalHapticFeedback.current
+    val scope = rememberCoroutineScope()
     val animEnabled = rememberAnimationsEnabled()
+
     var widthPx by remember { mutableFloatStateOf(1f) }
-    val knobSizeDp = 50.dp
+    val knobSizeDp = 48.dp
     val density = LocalDensity.current
+    val padPx = with(density) { 4.dp.toPx() }
     val knobPx = with(density) { knobSizeDp.toPx() }
-    val maxTravelPx = (widthPx - knobPx - with(density) { 12.dp.toPx() }).coerceAtLeast(1f)
+    val maxTravelPx = (widthPx - knobPx - padPx * 2f).coerceAtLeast(1f)
+
     var dragRatio by remember { mutableFloatStateOf(0f) }
     var triggered by remember { mutableStateOf(false) }
+    val shakeOffset = remember { Animatable(0f) }
 
     val animatedRatio by animateFloatAsState(
         targetValue = dragRatio,
-        animationSpec = if (animEnabled) spring(dampingRatio = 0.75f, stiffness = 360f) else tween(0),
+        animationSpec = if (animEnabled) spring(dampingRatio = 0.78f, stiffness = 360f) else tween(0),
         label = "swipe_ratio"
     )
     val effectiveRatio = if (dragRatio > 0f) dragRatio else animatedRatio
 
-    val infTransition = rememberInfiniteTransition(label = "chevrons")
-    val chevronPhase by infTransition.animateFloat(
-        initialValue = 0f,
-        targetValue = 1f,
-        animationSpec = infiniteRepeatable(tween(1200, easing = LinearEasing), RepeatMode.Restart),
-        label = "chevron_wave"
-    )
+    val chevronPhase = if (unlocked && animEnabled) {
+        val infTransition = rememberInfiniteTransition(label = "chevrons")
+        val p by infTransition.animateFloat(
+            initialValue = 0f,
+            targetValue = 1f,
+            animationSpec = infiniteRepeatable(tween(1200, easing = LinearEasing), RepeatMode.Restart),
+            label = "chevron_wave"
+        )
+        p
+    } else {
+        0f
+    }
+
+    fun triggerLockedBump() {
+        onLockedTap?.invoke()
+        if (!animEnabled) return
+        scope.launch {
+            val hops = listOf(-14f, 14f, -8f, 6f, 0f)
+            for (h in hops) {
+                shakeOffset.animateTo(h, tween(55))
+            }
+        }
+    }
 
     Box(
         modifier = modifier
             .fillMaxWidth()
-            .height(62.dp)
-            .clip(RoundedCornerShape(31.dp))
-            .background(if (unlocked) RawColors.HeroSurface else RawColors.CardSurface)
-            .border(
-                1.dp,
-                if (unlocked) RawColors.PillGrey.copy(alpha = 0.85f) else RawColors.Divider,
-                RoundedCornerShape(31.dp)
-            )
+            .height(58.dp)
+            .graphicsLayer { translationX = shakeOffset.value }
+            .clip(RoundedCornerShape(29.dp))
+            .background(RawColors.RaisedCard)
+            .border(1.dp, RawColors.Divider, RoundedCornerShape(29.dp))
             .onSizeChanged { widthPx = it.width.toFloat() }
-            .padding(horizontal = 6.dp),
+            .then(
+                if (!unlocked) {
+                    Modifier.clickable(
+                        interactionSource = remember { MutableInteractionSource() },
+                        indication = null
+                    ) { triggerLockedBump() }
+                } else Modifier
+            )
+            .padding(horizontal = 4.dp),
         contentAlignment = Alignment.CenterStart
     ) {
-        // Fill trail & pulsing chevron tracks
+        // GPU Draw-phase trail & chevrons
         Canvas(modifier = Modifier.fillMaxSize()) {
-            val fillWidth = (knobPx * 0.5f + maxTravelPx * effectiveRatio).coerceIn(0f, size.width)
-            if (unlocked && effectiveRatio > 0.02f) {
+            val fillWidth = (knobPx + padPx + maxTravelPx * effectiveRatio).coerceIn(knobPx, size.width)
+            if (unlocked && effectiveRatio > 0.01f) {
                 drawRoundRect(
-                    color = RawColors.TextPrimary.copy(alpha = 0.94f),
-                    topLeft = Offset(0f, 4.dp.toPx()),
-                    size = Size(fillWidth, size.height - 8.dp.toPx()),
+                    color = RawColors.Mint,
+                    topLeft = Offset(0f, 2.dp.toPx()),
+                    size = Size(fillWidth, size.height - 4.dp.toPx()),
                     cornerRadius = CornerRadius(27.dp.toPx())
                 )
             }
-            if (unlocked && effectiveRatio < 0.45f) {
-                val chevStart = size.width * 0.65f
-                val chevStep = 10.dp.toPx()
-                for (c in 0..2) {
-                    val wave = ((chevronPhase * 3f - c + 3f) % 3f)
-                    val a = (1f - (wave / 2f)).coerceIn(0.18f, 0.85f)
-                    val cx = chevStart + c * chevStep
+        }
+
+        // Centered label + Mint >>> chevrons + right duration pill
+        Row(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(start = 58.dp, end = 14.dp),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                Canvas(modifier = Modifier.width(24.dp).height(14.dp)) {
                     val cy = size.height * 0.5f
-                    val arm = 4.dp.toPx()
-                    drawLine(
-                        color = RawColors.TextMuted.copy(alpha = a),
-                        start = Offset(cx - arm, cy - arm),
-                        end = Offset(cx, cy),
-                        strokeWidth = 2.dp.toPx(),
-                        cap = StrokeCap.Round
-                    )
-                    drawLine(
-                        color = RawColors.TextMuted.copy(alpha = a),
-                        start = Offset(cx, cy),
-                        end = Offset(cx - arm, cy + arm),
-                        strokeWidth = 2.dp.toPx(),
-                        cap = StrokeCap.Round
+                    val arm = 3.6.dp.toPx()
+                    val step = 7.dp.toPx()
+                    val baseCol = if (unlocked) {
+                        if (effectiveRatio > 0.35f) RawColors.PrimaryBtnText else RawColors.Mint
+                    } else {
+                        Color(0xFF6E746E)
+                    }
+                    for (c in 0..2) {
+                        val wave = ((chevronPhase * 3f - c + 3f) % 3f)
+                        val a = if (unlocked) (1f - wave / 2f).coerceIn(0.28f, 1f) else 0.5f
+                        val cx = 4.dp.toPx() + c * step
+                        drawLine(baseCol.copy(alpha = a), Offset(cx - arm, cy - arm), Offset(cx, cy), 1.8.dp.toPx(), StrokeCap.Square)
+                        drawLine(baseCol.copy(alpha = a), Offset(cx, cy), Offset(cx - arm, cy + arm), 1.8.dp.toPx(), StrokeCap.Square)
+                    }
+                }
+
+                val labelText = when {
+                    !unlocked -> "Swipe to create"
+                    effectiveRatio > 0.78f -> "Release to create"
+                    else -> "Swipe to create"
+                }
+                Text(
+                    text = labelText,
+                    style = RawTypography.labelLarge.copy(fontSize = 13.5.sp, fontWeight = FontWeight.SemiBold),
+                    color = when {
+                        !unlocked -> Color(0xFF6E746E)
+                        effectiveRatio > 0.35f -> RawColors.PrimaryBtnText
+                        else -> RawColors.TextMuted
+                    }
+                )
+            }
+
+            if (unlocked && effectiveRatio < 0.55f) {
+                Box(
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(99.dp))
+                        .background(RawColors.PillGrey)
+                        .padding(horizontal = 9.dp, vertical = 4.dp)
+                ) {
+                    Text(
+                        text = rightTag,
+                        fontFamily = JetBrainsMonoFamily,
+                        fontWeight = FontWeight.SemiBold,
+                        fontSize = 10.sp,
+                        color = RawColors.TextPrimary
                     )
                 }
             }
         }
 
-        Row(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(start = 60.dp, end = 16.dp),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            val labelText = when {
-                !unlocked -> "Complete steps 1 & 3"
-                effectiveRatio > 0.72f -> "Release to render"
-                else -> "Swipe to create"
-            }
-            Text(
-                text = labelText,
-                style = RawTypography.labelLarge,
-                color = when {
-                    !unlocked -> RawColors.TextMuted
-                    effectiveRatio > 0.45f -> RawColors.PrimaryBtnText
-                    else -> RawColors.TextPrimary
-                },
-                modifier = Modifier.alpha(if (unlocked) 1f else 0.75f)
-            )
-            if (unlocked && effectiveRatio < 0.6f) {
-                Text(
-                    text = rightTag,
-                    style = RawTypography.labelMedium,
-                    color = RawColors.TextMuted
-                )
-            }
-        }
-
-        val knobOffsetPx = (effectiveRatio * maxTravelPx).roundToInt()
+        // Circular Draggable Knob moved via GPU graphicsLayer (0 relayout!)
         Box(
             modifier = Modifier
-                .offset { IntOffset(knobOffsetPx, 0) }
+                .graphicsLayer { translationX = effectiveRatio * maxTravelPx }
                 .size(knobSizeDp)
                 .clip(CircleShape)
-                .background(if (unlocked) RawColors.TextPrimary else RawColors.RaisedCard)
+                .background(if (unlocked) RawColors.Mint else RawColors.PillGrey)
                 .pointerInput(unlocked, maxTravelPx) {
                     if (!unlocked) return@pointerInput
                     detectHorizontalDragGestures(
@@ -422,7 +459,7 @@ fun SwipeToCreateSlider(
                             if (!triggered) {
                                 val next = (dragRatio + dragAmount / maxTravelPx).coerceIn(0f, 1f)
                                 dragRatio = next
-                                if (next >= 0.93f && !triggered) {
+                                if (next >= 0.85f && !triggered) {
                                     triggered = true
                                     haptic.performHapticFeedback(HapticFeedbackType.LongPress)
                                     onTriggered(Offset(widthPx * 0.85f, knobPx))
@@ -449,7 +486,8 @@ fun SwipeToCreateSlider(
 }
 
 /**
- * Silky directional morphing transition for push / pop screens.
+ * Pure GPU screen transition matching raw_edit.html cubic-bezier(.22,.9,.24,1).
+ * Uses ONLY translation + scale + alpha (no Compose blur) for 60/120fps on Android 9+.
  */
 @Composable
 fun <T> RawScreenTransition(
@@ -468,28 +506,26 @@ fun <T> RawScreenTransition(
             } else if (isForward) {
                 ContentTransform(
                     targetContentEnter = slideInHorizontally(
-                        tween(360, easing = RawEasings.Morph)
-                    ) { (it * 0.14f).roundToInt() } +
-                        scaleIn(initialScale = 0.96f, animationSpec = tween(360, easing = RawEasings.Morph)) +
+                        tween(380, easing = RawEasings.Morph)
+                    ) { (it * 0.28f).roundToInt() } +
                         fadeIn(tween(260, easing = RawEasings.Morph)),
                     initialContentExit = slideOutHorizontally(
-                        tween(300, easing = RawEasings.Morph)
-                    ) { -(it * 0.06f).roundToInt() } +
-                        scaleOut(targetScale = 0.965f, animationSpec = tween(300, easing = RawEasings.Morph)) +
-                        fadeOut(tween(200)),
+                        tween(340, easing = RawEasings.Morph)
+                    ) { -(it * 0.14f).roundToInt() } +
+                        scaleOut(targetScale = 0.97f, animationSpec = tween(340, easing = RawEasings.Morph)) +
+                        fadeOut(tween(210)),
                     targetContentZIndex = 1f
                 )
             } else {
                 ContentTransform(
                     targetContentEnter = slideInHorizontally(
-                        tween(340, easing = RawEasings.Morph)
-                    ) { -(it * 0.08f).roundToInt() } +
-                        scaleIn(initialScale = 0.97f, animationSpec = tween(340, easing = RawEasings.Morph)) +
-                        fadeIn(tween(260, easing = RawEasings.Morph)),
+                        tween(360, easing = RawEasings.Morph)
+                    ) { -(it * 0.14f).roundToInt() } +
+                        scaleIn(initialScale = 0.97f, animationSpec = tween(360, easing = RawEasings.Morph)) +
+                        fadeIn(tween(240, easing = RawEasings.Morph)),
                     initialContentExit = slideOutHorizontally(
-                        tween(290, easing = RawEasings.Morph)
-                    ) { (it * 0.16f).roundToInt() } +
-                        scaleOut(targetScale = 0.955f, animationSpec = tween(290, easing = RawEasings.Morph)) +
+                        tween(320, easing = RawEasings.Morph)
+                    ) { (it * 0.28f).roundToInt() } +
                         fadeOut(tween(200)),
                     targetContentZIndex = 0f
                 )
@@ -502,7 +538,7 @@ fun <T> RawScreenTransition(
 }
 
 /**
- * Fluid directional glide + micro-scale morph between main bottom-nav tabs.
+ * Directional glide + micro-scale transition between dock tabs.
  */
 @Composable
 fun <T : Enum<T>> RawTabMorphTransition(
@@ -521,13 +557,13 @@ fun <T : Enum<T>> RawTabMorphTransition(
                 val movingRight = targetState.ordinal >= initialState.ordinal
                 val enterSlideDir = if (movingRight) 1 else -1
                 val exitSlideDir = -enterSlideDir
-                (slideInHorizontally(tween(320, easing = RawEasings.Morph)) { (it * 0.075f * enterSlideDir).roundToInt() } +
-                    scaleIn(initialScale = 0.98f, animationSpec = tween(320, easing = RawEasings.Morph)) +
-                    fadeIn(tween(260, easing = RawEasings.Morph)))
+                (slideInHorizontally(tween(300, easing = RawEasings.Morph)) { (it * 0.08f * enterSlideDir).roundToInt() } +
+                    scaleIn(initialScale = 0.98f, animationSpec = tween(300, easing = RawEasings.Morph)) +
+                    fadeIn(tween(240, easing = RawEasings.Morph)))
                     .togetherWith(
-                        slideOutHorizontally(tween(260, easing = RawEasings.Morph)) { (it * 0.055f * exitSlideDir).roundToInt() } +
-                            scaleOut(targetScale = 0.985f, animationSpec = tween(260, easing = RawEasings.Morph)) +
-                            fadeOut(tween(190))
+                        slideOutHorizontally(tween(250, easing = RawEasings.Morph)) { (it * 0.06f * exitSlideDir).roundToInt() } +
+                            scaleOut(targetScale = 0.98f, animationSpec = tween(250, easing = RawEasings.Morph)) +
+                            fadeOut(tween(180))
                     )
             }
         },
@@ -537,6 +573,19 @@ fun <T : Enum<T>> RawTabMorphTransition(
     }
 }
 
+private data class ConfettiPiece(
+    val xFrac: Float,
+    val startY: Float,
+    val speed: Float,
+    val sizeDp: Float,
+    val alpha: Float,
+    val isMint: Boolean
+)
+
+/**
+ * Crisp retro square pixel confetti matching #cf in raw_edit.html, allocated ONCE and
+ * auto-stopping cleanly after 1.9 seconds so idle Result screen consumes 0% GPU.
+ */
 @Composable
 fun ResultCelebrationOverlay(
     play: Boolean,
@@ -545,45 +594,49 @@ fun ResultCelebrationOverlay(
     val animEnabled = rememberAnimationsEnabled()
     if (!play || !animEnabled) return
 
+    val particles = remember {
+        List(56) { i ->
+            val seed = (i * 9301 + 49297) % 233280
+            val r1 = seed / 233280f
+            val r2 = ((seed * 7 + 13) % 997) / 997f
+            ConfettiPiece(
+                xFrac = ((i + 0.5f) / 56f + (r1 - 0.5f) * 0.06f).coerceIn(0.02f, 0.98f),
+                startY = -r2 * 0.42f,
+                speed = 0.75f + r1 * 0.65f,
+                sizeDp = 4f + (i % 4) * 1.6f,
+                alpha = if (i % 3 == 0) 0.9f else 0.45f,
+                isMint = i % 5 == 0
+            )
+        }
+    }
+
     val progress = remember { Animatable(0f) }
     LaunchedEffect(play) {
         progress.snapTo(0f)
-        progress.animateTo(1f, tween(durationMillis = 900, easing = RawEasings.Morph))
+        progress.animateTo(1f, tween(durationMillis = 1900, easing = LinearEasing))
     }
 
     val p = progress.value
-    if (p >= 0.99f) return
+    if (p >= 0.995f) return
 
     Canvas(modifier = modifier) {
         val w = size.width
         val h = size.height
-        val cx = w * 0.5f
-        val cy = h * 0.36f
-        val alpha = (1f - p).coerceIn(0f, 1f)
+        val fadeOut = (1f - ((p - 0.65f) / 0.35f).coerceIn(0f, 1f))
+        val densityPx = density
 
-        val pieces = 18
-        for (i in 0 until pieces) {
-            val angle = (i.toFloat() / pieces) * (2f * PI.toFloat()) + 0.2f
-            val dist = (40f + (i % 3) * 45f) + p * (190f + (i % 4) * 55f)
-            val px = cx + cos(angle) * dist
-            val py = cy + sin(angle) * dist + p * p * 85f
-            val color = when (i % 3) {
-                0 -> RawColors.TextPrimary.copy(alpha = alpha)
-                1 -> RawColors.SuccessMint.copy(alpha = alpha)
-                else -> RawColors.TextMuted.copy(alpha = alpha)
-            }
-            if (i % 2 == 0) {
-                val len = 14f * (1f - p * 0.4f)
-                drawLine(
-                    color = color,
-                    start = Offset(px - cos(angle) * len, py - sin(angle) * len),
-                    end = Offset(px + cos(angle) * len, py + sin(angle) * len),
-                    strokeWidth = 4f,
-                    cap = StrokeCap.Round
-                )
-            } else {
-                drawCircle(color = color, radius = 4.5f * (1f - p * 0.3f), center = Offset(px, py))
-            }
+        for (pt in particles) {
+            val yNorm = pt.startY + p * pt.speed * 1.35f
+            if (yNorm < -0.05f || yNorm > 1.02f) continue
+            val yPx = yNorm * h
+            val xPx = pt.xFrac * w + sin(yPx / 38f) * 10f
+            val side = pt.sizeDp * densityPx
+            val col = (if (pt.isMint) RawColors.Mint else Color.White).copy(alpha = pt.alpha * fadeOut)
+            drawRect(
+                color = col,
+                topLeft = Offset(xPx, yPx),
+                size = Size(side, side)
+            )
         }
     }
 }

@@ -1,6 +1,5 @@
 package com.rawedit.app.ui.theme
 
-import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxScope
@@ -9,7 +8,6 @@ import androidx.compose.material3.Typography
 import androidx.compose.material3.darkColorScheme
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.Font
@@ -21,19 +19,33 @@ import androidx.compose.ui.unit.sp
 import com.rawedit.app.R
 
 object RawColors {
-    val BgPrimary = Color(0xFF0F0F0F)
-    val HeroSurface = Color(0xFF1C1C1C)
-    val DotGrid = Color(0xFF2C2C2C)
-    val CardSurface = Color(0xFF171717)
-    val RaisedCard = Color(0xFF2A2A2A)
-    val PillGrey = Color(0xFF3A3A3A)
-    val TextPrimary = Color(0xFFFFFFFF)
-    val TextMuted = Color(0xFF9B9B9B)
-    val Divider = Color(0xFF333333)
-    val ErrorCoral = Color(0xFFFF6B6B)
-    val SuccessMint = Color(0xFF7BE0A0)
-    val PrimaryBtnBg = Color(0xFFFFFFFF)
-    val PrimaryBtnText = Color(0xFF111111)
+    val BgPrimary = Color(0xFF0B0C0B)
+    val CardSurface = Color(0xFF141614)
+    val HeroSurface = Color(0xFF141614)
+    val RaisedCard = Color(0xFF1B1E1B)
+    val CodeSurface = Color(0xFF0E100E)
+    val PillGrey = Color(0xFF242824)
+    val DockBg = Color(0xF0161916)
+    val DotGrid = Color(0xFF1F231F)
+
+    val TextPrimary = Color(0xFFEFF3EE)
+    val TextMuted = Color(0xFF98A098)
+
+    val Divider = Color(0x13FFFFFF)       // rgba(255,255,255,0.075)
+    val DividerStrong = Color(0x24FFFFFF) // rgba(255,255,255,0.14)
+
+    val Mint = Color(0xFF8CE3A8)
+    val SuccessMint = Color(0xFF8CE3A8)
+    val MintSoft = Color(0x1A8CE3A8)      // rgba(140,227,168,0.10)
+    val MintBorder = Color(0x388CE3A8)    // rgba(140,227,168,0.22)
+    val MintFocus = Color(0x808CE3A8)
+
+    val PrimaryBtnBg = Color(0xFF8CE3A8)
+    val PrimaryBtnText = Color(0xFF0B0C0B)
+
+    val ErrorCoral = Color(0xFFFF8F80)
+    val ErrorSoft = Color(0x14FF8F80)     // rgba(255,143,128,0.08)
+    val ErrorBorder = Color(0x38FF8F80)   // rgba(255,143,128,0.22)
 }
 
 val InterFontFamily = FontFamily(
@@ -55,79 +67,84 @@ val RawTypography = Typography(
         fontFamily = InterFontFamily,
         fontWeight = FontWeight.ExtraBold,
         fontSize = 36.sp,
-        lineHeight = 42.sp,
-        letterSpacing = (-0.8).sp,
+        lineHeight = 38.sp,
+        letterSpacing = (-1.6).sp,
         color = RawColors.TextPrimary
     ),
     headlineLarge = TextStyle(
         fontFamily = InterFontFamily,
-        fontWeight = FontWeight.Bold,
-        fontSize = 28.sp,
-        lineHeight = 34.sp,
-        letterSpacing = (-0.4).sp,
+        fontWeight = FontWeight.ExtraBold,
+        fontSize = 31.sp,
+        lineHeight = 33.sp,
+        letterSpacing = (-1.3).sp,
         color = RawColors.TextPrimary
     ),
     headlineMedium = TextStyle(
         fontFamily = InterFontFamily,
         fontWeight = FontWeight.Bold,
-        fontSize = 22.sp,
-        lineHeight = 28.sp,
+        fontSize = 21.sp,
+        lineHeight = 26.sp,
+        letterSpacing = (-0.6).sp,
         color = RawColors.TextPrimary
     ),
     titleLarge = TextStyle(
         fontFamily = InterFontFamily,
-        fontWeight = FontWeight.SemiBold,
+        fontWeight = FontWeight.Bold,
         fontSize = 18.sp,
-        lineHeight = 24.sp,
+        lineHeight = 23.sp,
+        letterSpacing = (-0.4).sp,
         color = RawColors.TextPrimary
     ),
     titleMedium = TextStyle(
         fontFamily = InterFontFamily,
         fontWeight = FontWeight.SemiBold,
-        fontSize = 16.sp,
-        lineHeight = 22.sp,
+        fontSize = 15.5.sp,
+        lineHeight = 21.sp,
+        letterSpacing = (-0.2).sp,
         color = RawColors.TextPrimary
     ),
     bodyLarge = TextStyle(
         fontFamily = InterFontFamily,
         fontWeight = FontWeight.Normal,
-        fontSize = 15.sp,
-        lineHeight = 22.sp,
+        fontSize = 14.5.sp,
+        lineHeight = 21.sp,
         color = RawColors.TextPrimary
     ),
     bodyMedium = TextStyle(
         fontFamily = InterFontFamily,
         fontWeight = FontWeight.Normal,
-        fontSize = 13.sp,
+        fontSize = 13.5.sp,
         lineHeight = 19.sp,
         color = RawColors.TextMuted
     ),
     labelLarge = TextStyle(
         fontFamily = InterFontFamily,
-        fontWeight = FontWeight.SemiBold,
-        fontSize = 15.sp,
-        lineHeight = 20.sp,
+        fontWeight = FontWeight.Bold,
+        fontSize = 14.5.sp,
+        lineHeight = 19.sp,
+        letterSpacing = (-0.1).sp,
         color = RawColors.TextPrimary
     ),
     labelMedium = TextStyle(
         fontFamily = JetBrainsMonoFamily,
         fontWeight = FontWeight.Medium,
-        fontSize = 12.sp,
+        fontSize = 11.5.sp,
         lineHeight = 16.sp,
-        letterSpacing = 0.4.sp,
+        letterSpacing = 0.3.sp,
         color = RawColors.TextMuted
     ),
     labelSmall = TextStyle(
         fontFamily = JetBrainsMonoFamily,
-        fontWeight = FontWeight.Normal,
-        fontSize = 11.sp,
-        lineHeight = 15.sp,
+        fontWeight = FontWeight.SemiBold,
+        fontSize = 10.sp,
+        lineHeight = 14.sp,
+        letterSpacing = 0.5.sp,
         color = RawColors.TextMuted
     )
 )
 
 private val DarkScheme = darkColorScheme(
-    primary = RawColors.PrimaryBtnBg,
+    primary = RawColors.Mint,
     onPrimary = RawColors.PrimaryBtnText,
     secondary = RawColors.PillGrey,
     onSecondary = RawColors.TextPrimary,
@@ -151,35 +168,20 @@ fun RawEditTheme(content: @Composable () -> Unit) {
     )
 }
 
+/**
+ * Clean zero-overdraw surface wrapper matching the minimal Obsidian Forest card system.
+ * (Removes heavy per-dot Canvas loops so Android 9+ GPUs remain completely lag-free.)
+ */
 @Composable
 fun DotGridSurface(
     modifier: Modifier = Modifier,
-    backgroundColor: Color = RawColors.HeroSurface,
-    dotColor: Color = RawColors.DotGrid,
-    spacing: Dp = 18.dp,
-    dotRadius: Dp = 1.4.dp,
+    backgroundColor: Color = RawColors.BgPrimary,
+    @Suppress("UNUSED_PARAMETER") dotColor: Color = RawColors.DotGrid,
+    @Suppress("UNUSED_PARAMETER") spacing: Dp = 18.dp,
+    @Suppress("UNUSED_PARAMETER") dotRadius: Dp = 1.4.dp,
     content: @Composable BoxScope.() -> Unit
 ) {
     Box(modifier = modifier.background(backgroundColor)) {
-        Canvas(modifier = Modifier.matchParentSize()) {
-            val stepPx = spacing.toPx()
-            val radiusPx = dotRadius.toPx()
-            if (stepPx > 0f) {
-                var y = stepPx * 0.5f
-                while (y < size.height) {
-                    var x = stepPx * 0.5f
-                    while (x < size.width) {
-                        drawCircle(
-                            color = dotColor,
-                            radius = radiusPx,
-                            center = Offset(x, y)
-                        )
-                        x += stepPx
-                    }
-                    y += stepPx
-                }
-            }
-        }
         content()
     }
 }

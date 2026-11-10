@@ -2,7 +2,6 @@ package com.rawedit.app.ui.screens
 
 import android.content.Intent
 import androidx.compose.animation.AnimatedContent
-import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
@@ -18,6 +17,7 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -26,10 +26,9 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedTextField
@@ -37,7 +36,6 @@ import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.SwipeToDismissBox
 import androidx.compose.material3.SwipeToDismissBoxValue
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.material3.rememberSwipeToDismissBoxState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -50,25 +48,35 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
+import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.DialogProperties
 import androidx.core.content.FileProvider
 import coil.compose.AsyncImage
+import coil.request.ImageRequest
 import com.rawedit.app.data.local.ProjectEntity
 import com.rawedit.app.data.local.VideoEntity
+import com.rawedit.app.ui.components.CircleActionButton
 import com.rawedit.app.ui.components.FormatHelpers
 import com.rawedit.app.ui.components.MorphingFilterChips
+import com.rawedit.app.ui.components.RawConfirmDialog
+import com.rawedit.app.ui.components.RawSecondaryButton
 import com.rawedit.app.ui.icons.PixelMascotKind
-import com.rawedit.app.ui.icons.PixelSparkle
 import com.rawedit.app.ui.icons.RawIcon
 import com.rawedit.app.ui.icons.RawIconType
 import com.rawedit.app.ui.icons.RawPixelMascot
-import com.rawedit.app.ui.motion.CascadeSkewCard
 import com.rawedit.app.ui.motion.KineticHeading
 import com.rawedit.app.ui.motion.RawEasings
+import com.rawedit.app.ui.motion.RawPressButton
 import com.rawedit.app.ui.motion.rememberAnimationsEnabled
+import com.rawedit.app.ui.theme.JetBrainsMonoFamily
 import com.rawedit.app.ui.theme.RawColors
 import com.rawedit.app.ui.theme.RawTypography
 import java.io.File
@@ -110,36 +118,37 @@ fun MyReelsScreen(
             .background(RawColors.BgPrimary)
             .statusBarsPadding()
     ) {
-        // Header with animated pixel mascot buddy
+        // Header matching R.reels
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(horizontal = 20.dp, vertical = 14.dp),
+                .padding(horizontal = 18.dp, vertical = 12.dp),
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically
         ) {
             Column(modifier = Modifier.weight(1f)) {
                 KineticHeading(
                     words = listOf("My", "reels"),
-                    style = RawTypography.displayLarge
+                    style = RawTypography.headlineLarge.copy(fontSize = 30.sp)
                 )
-                Spacer(modifier = Modifier.height(4.dp))
+                Spacer(modifier = Modifier.height(5.dp))
                 Text(
-                    text = "${inProgressProjects.size} drafts  •  ${videos.size} finished videos",
-                    style = RawTypography.bodyMedium
+                    text = "${inProgressProjects.size} DRAFTS  •  ${videos.size} FINISHED VIDEOS",
+                    fontFamily = JetBrainsMonoFamily,
+                    fontWeight = FontWeight.SemiBold,
+                    fontSize = 10.sp,
+                    letterSpacing = 1.0.sp,
+                    color = RawColors.TextMuted
                 )
             }
-            Box(contentAlignment = Alignment.TopEnd) {
-                RawPixelMascot(
-                    kind = PixelMascotKind.PHANTOM_BUDDY,
-                    size = 52.dp
-                )
-                PixelSparkle(size = 11.dp, phaseOffsetMs = 180)
-            }
+            RawPixelMascot(
+                kind = PixelMascotKind.PHANTOM_BUDDY,
+                size = 44.dp
+            )
         }
 
-        // All / Drafts / Finished morphing filter chips (all workspace & reels organized here!)
-        Box(modifier = Modifier.padding(horizontal = 20.dp, vertical = 4.dp)) {
+        // All / Drafts / Finished Mint filter pills
+        Box(modifier = Modifier.padding(horizontal = 18.dp, vertical = 4.dp)) {
             MorphingFilterChips(
                 options = listOf("All", "Drafts", "Finished"),
                 selectedIndex = filterIndex,
@@ -161,35 +170,33 @@ fun MyReelsScreen(
                     targetState = filterIndex,
                     transitionSpec = {
                         if (!animEnabled) fadeIn(tween(0)) togetherWith fadeOut(tween(0))
-                        else fadeIn(tween(220, easing = RawEasings.Morph)) togetherWith fadeOut(tween(140))
+                        else fadeIn(tween(200, easing = RawEasings.Morph)) togetherWith fadeOut(tween(130))
                     },
-                    label = "empty_reels_morph"
+                    label = "empty_reels"
                 ) { tabIdx ->
                     Column(
                         horizontalAlignment = Alignment.CenterHorizontally,
-                        modifier = Modifier.padding(32.dp)
+                        modifier = Modifier.padding(horizontal = 32.dp)
                     ) {
-                        Row(
-                            horizontalArrangement = Arrangement.spacedBy(12.dp),
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            PixelSparkle(size = 14.dp, phaseOffsetMs = 100)
-                            RawPixelMascot(kind = PixelMascotKind.PEEKING_CAT, size = 92.dp)
-                            PixelSparkle(size = 14.dp, phaseOffsetMs = 500)
-                        }
-                        Spacer(modifier = Modifier.height(16.dp))
+                        RawPixelMascot(
+                            kind = PixelMascotKind.PEEKING_CAT,
+                            size = 96.dp,
+                            noBlink = true
+                        )
+                        Spacer(modifier = Modifier.height(14.dp))
                         Text(
                             text = when (tabIdx) {
                                 1 -> "No drafts yet"
                                 2 -> "No finished reels yet"
-                                else -> "Nothing in your library yet"
+                                else -> "Nothing here yet"
                             },
-                            style = RawTypography.headlineMedium
+                            style = RawTypography.titleLarge.copy(fontSize = 19.sp, fontWeight = FontWeight.Bold)
                         )
                         Spacer(modifier = Modifier.height(6.dp))
                         Text(
-                            text = "Tap Start creating on Home or the + tab. All drafts and 1080p MP4 reels live here.",
-                            style = RawTypography.bodyMedium
+                            text = "Tap Create to make your first reel. Drafts and finished videos will live here.",
+                            style = RawTypography.bodyMedium,
+                            textAlign = TextAlign.Center
                         )
                     }
                 }
@@ -197,100 +204,93 @@ fun MyReelsScreen(
         } else {
             LazyColumn(
                 modifier = Modifier.fillMaxSize(),
-                contentPadding = PaddingValues(start = 20.dp, end = 20.dp, bottom = 114.dp),
-                verticalArrangement = Arrangement.spacedBy(12.dp)
+                contentPadding = PaddingValues(start = 18.dp, end = 18.dp, bottom = 110.dp),
+                verticalArrangement = Arrangement.spacedBy(10.dp)
             ) {
-                itemsIndexed(
+                items(
                     items = displayItems,
-                    key = { _, item ->
+                    key = { item ->
                         when (item) {
                             is ProjectEntity -> "proj_${item.id}"
                             is VideoEntity -> "vid_${item.id}"
                             else -> "item_${item.hashCode()}"
                         }
                     }
-                ) { index, item ->
-                    Box(
-                        modifier = Modifier.animateItem(
-                            fadeInSpec = tween(240, easing = RawEasings.Morph),
-                            fadeOutSpec = tween(180),
-                            placementSpec = spring(dampingRatio = 0.8f, stiffness = 360f)
-                        )
-                    ) {
-                        CascadeSkewCard(index = index) {
-                            when (item) {
-                                is ProjectEntity -> {
-                                    val dismissState = rememberSwipeToDismissBoxState()
-                                    LaunchedEffect(deleteProjectConfirmTarget) {
-                                        if (deleteProjectConfirmTarget == null && dismissState.currentValue != SwipeToDismissBoxValue.Settled) {
-                                            dismissState.reset()
-                                        }
+                ) { item ->
+                    when (item) {
+                        is ProjectEntity -> {
+                            val dismissState = rememberSwipeToDismissBoxState()
+                            LaunchedEffect(deleteProjectConfirmTarget) {
+                                if (deleteProjectConfirmTarget == null && dismissState.currentValue != SwipeToDismissBoxValue.Settled) {
+                                    dismissState.reset()
+                                }
+                            }
+                            SwipeToDismissBox(
+                                state = dismissState,
+                                enableDismissFromStartToEnd = false,
+                                onDismiss = { direction ->
+                                    if (direction == SwipeToDismissBoxValue.EndToStart) {
+                                        deleteProjectConfirmTarget = item
                                     }
-                                    SwipeToDismissBox(
-                                        state = dismissState,
-                                        enableDismissFromStartToEnd = false,
-                                        onDismiss = { direction ->
-                                            if (direction == SwipeToDismissBoxValue.EndToStart) {
-                                                deleteProjectConfirmTarget = item
-                                            }
-                                        },
-                                        backgroundContent = {
-                                            Box(
-                                                modifier = Modifier
-                                                    .fillMaxSize()
-                                                    .clip(RoundedCornerShape(20.dp))
-                                                    .background(RawColors.ErrorCoral.copy(alpha = 0.22f))
-                                                    .padding(end = 22.dp),
-                                                contentAlignment = Alignment.CenterEnd
-                                            ) {
-                                                RawIcon(RawIconType.TRASH, size = 22.dp, tint = RawColors.ErrorCoral)
-                                            }
-                                        }
+                                },
+                                backgroundContent = {
+                                    Box(
+                                        modifier = Modifier
+                                            .fillMaxSize()
+                                            .clip(RoundedCornerShape(22.dp))
+                                            .background(RawColors.ErrorSoft)
+                                            .border(1.dp, RawColors.ErrorBorder, RoundedCornerShape(22.dp))
+                                            .padding(end = 22.dp),
+                                        contentAlignment = Alignment.CenterEnd
                                     ) {
-                                        DraftProjectRow(
-                                            project = item,
-                                            onOpen = { onOpenProject(item.id, Offset(540f, 900f)) },
-                                            onDelete = { deleteProjectConfirmTarget = item }
-                                        )
+                                        RawIcon(RawIconType.TRASH, size = 20.dp, tint = RawColors.ErrorCoral)
                                     }
                                 }
+                            ) {
+                                DraftProjectRow(
+                                    project = item,
+                                    onOpen = { onOpenProject(item.id, Offset(540f, 900f)) },
+                                    onDelete = { deleteProjectConfirmTarget = item }
+                                )
+                            }
+                        }
 
-                                is VideoEntity -> {
-                                    val dismissState = rememberSwipeToDismissBoxState()
-                                    LaunchedEffect(deleteVideoConfirmTarget) {
-                                        if (deleteVideoConfirmTarget == null && dismissState.currentValue != SwipeToDismissBoxValue.Settled) {
-                                            dismissState.reset()
-                                        }
+                        is VideoEntity -> {
+                            val dismissState = rememberSwipeToDismissBoxState()
+                            LaunchedEffect(deleteVideoConfirmTarget) {
+                                if (deleteVideoConfirmTarget == null && dismissState.currentValue != SwipeToDismissBoxValue.Settled) {
+                                    dismissState.reset()
+                                }
+                            }
+                            SwipeToDismissBox(
+                                state = dismissState,
+                                enableDismissFromStartToEnd = false,
+                                onDismiss = { direction ->
+                                    if (direction == SwipeToDismissBoxValue.EndToStart) {
+                                        deleteVideoConfirmTarget = item
                                     }
-                                    SwipeToDismissBox(
-                                        state = dismissState,
-                                        enableDismissFromStartToEnd = false,
-                                        onDismiss = { direction ->
-                                            if (direction == SwipeToDismissBoxValue.EndToStart) {
-                                                deleteVideoConfirmTarget = item
-                                            }
-                                        },
-                                        backgroundContent = {
-                                            Box(
-                                                modifier = Modifier
-                                                    .fillMaxSize()
-                                                    .clip(RoundedCornerShape(20.dp))
-                                                    .background(RawColors.ErrorCoral.copy(alpha = 0.22f))
-                                                    .padding(end = 22.dp),
-                                                contentAlignment = Alignment.CenterEnd
-                                            ) {
-                                                RawIcon(RawIconType.TRASH, size = 22.dp, tint = RawColors.ErrorCoral)
-                                            }
-                                        }
+                                },
+                                backgroundContent = {
+                                    Box(
+                                        modifier = Modifier
+                                            .fillMaxSize()
+                                            .clip(RoundedCornerShape(22.dp))
+                                            .background(RawColors.ErrorSoft)
+                                            .border(1.dp, RawColors.ErrorBorder, RoundedCornerShape(22.dp))
+                                            .padding(end = 22.dp),
+                                        contentAlignment = Alignment.CenterEnd
                                     ) {
-                                        VideoLibraryRow(
-                                            video = item,
-                                            onClick = { onPlayVideo(item.id, Offset(540f, 900f)) },
-                                            onLongClick = { actionTarget = item },
-                                            onDelete = { deleteVideoConfirmTarget = item }
-                                        )
+                                        RawIcon(RawIconType.TRASH, size = 20.dp, tint = RawColors.ErrorCoral)
                                     }
                                 }
+                            ) {
+                                VideoLibraryRow(
+                                    video = item,
+                                    onClick = { onPlayVideo(item.id, Offset(540f, 900f)) },
+                                    onLongClick = { actionTarget = item },
+                                    onMoreClick = { actionTarget = item },
+                                    onDelete = { deleteVideoConfirmTarget = item }
+                                )
                             }
                         }
                     }
@@ -299,19 +299,23 @@ fun MyReelsScreen(
         }
     }
 
+    // Bottom Actions Sheet matching .pn.sheet + .srow
     actionTarget?.let { target ->
         ModalBottomSheet(
             onDismissRequest = { actionTarget = null },
-            containerColor = RawColors.HeroSurface,
+            containerColor = RawColors.CardSurface,
             contentColor = RawColors.TextPrimary
         ) {
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(horizontal = 20.dp, vertical = 8.dp),
-                verticalArrangement = Arrangement.spacedBy(10.dp)
+                    .padding(horizontal = 20.dp, vertical = 6.dp)
             ) {
-                Text(target.title, style = RawTypography.headlineMedium)
+                Text(
+                    text = target.title,
+                    style = RawTypography.titleLarge.copy(fontWeight = FontWeight.ExtraBold)
+                )
+                Spacer(modifier = Modifier.height(10.dp))
                 SheetActionRow(
                     icon = RawIconType.EDIT,
                     label = "Rename reel",
@@ -320,6 +324,7 @@ fun MyReelsScreen(
                         renameTarget = target
                     }
                 )
+                Box(modifier = Modifier.fillMaxWidth().height(1.dp).background(RawColors.Divider))
                 SheetActionRow(
                     icon = RawIconType.SHARE,
                     label = "Share MP4",
@@ -341,6 +346,7 @@ fun MyReelsScreen(
                         }
                     }
                 )
+                Box(modifier = Modifier.fillMaxWidth().height(1.dp).background(RawColors.Divider))
                 SheetActionRow(
                     icon = RawIconType.TRASH,
                     label = "Delete reel",
@@ -350,102 +356,113 @@ fun MyReelsScreen(
                         deleteVideoConfirmTarget = target
                     }
                 )
-                Spacer(modifier = Modifier.height(20.dp))
+                Spacer(modifier = Modifier.height(22.dp))
             }
         }
     }
 
+    // Custom dark obsidian Rename Dialog (.pn.dlg)
     renameTarget?.let { target ->
         var titleDraft by remember(target.id) { mutableStateOf(target.title) }
-        AlertDialog(
+        Dialog(
             onDismissRequest = { renameTarget = null },
-            containerColor = RawColors.HeroSurface,
-            titleContentColor = RawColors.TextPrimary,
-            textContentColor = RawColors.TextPrimary,
-            title = { Text("Rename reel") },
-            text = {
+            properties = DialogProperties(usePlatformDefaultWidth = false)
+        ) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 26.dp)
+                    .clip(RoundedCornerShape(24.dp))
+                    .background(RawColors.CardSurface)
+                    .border(1.dp, RawColors.DividerStrong, RoundedCornerShape(24.dp))
+                    .padding(24.dp)
+            ) {
+                Text(
+                    text = "Rename reel",
+                    style = RawTypography.headlineMedium.copy(fontWeight = FontWeight.ExtraBold)
+                )
+                Spacer(modifier = Modifier.height(14.dp))
                 OutlinedTextField(
                     value = titleDraft,
-                    onValueChange = { if (it.length <= 60) titleDraft = it },
+                    onValueChange = { if (it.length <= 40) titleDraft = it },
                     singleLine = true,
+                    shape = RoundedCornerShape(16.dp),
                     colors = OutlinedTextFieldDefaults.colors(
-                        focusedBorderColor = RawColors.TextPrimary,
+                        focusedBorderColor = RawColors.MintFocus,
                         unfocusedBorderColor = RawColors.Divider,
+                        focusedContainerColor = RawColors.RaisedCard,
+                        unfocusedContainerColor = RawColors.RaisedCard,
                         focusedTextColor = RawColors.TextPrimary,
-                        unfocusedTextColor = RawColors.TextPrimary
+                        unfocusedTextColor = RawColors.TextPrimary,
+                        cursorColor = RawColors.Mint
                     ),
                     modifier = Modifier.fillMaxWidth()
                 )
-            },
-            confirmButton = {
-                TextButton(
-                    onClick = {
-                        if (titleDraft.trim().isNotEmpty()) {
-                            onRenameVideo(target.id, titleDraft.trim())
-                        }
-                        renameTarget = null
-                    }
+                Spacer(modifier = Modifier.height(18.dp))
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(10.dp)
                 ) {
-                    Text("Save", color = RawColors.TextPrimary)
-                }
-            },
-            dismissButton = {
-                TextButton(onClick = { renameTarget = null }) {
-                    Text("Cancel", color = RawColors.TextMuted)
+                    RawSecondaryButton(
+                        text = "Cancel",
+                        height = 42.dp,
+                        onClick = { renameTarget = null },
+                        modifier = Modifier.weight(1f)
+                    )
+                    RawPressButton(
+                        onClick = {
+                            if (titleDraft.trim().isNotEmpty()) {
+                                onRenameVideo(target.id, titleDraft.trim())
+                            }
+                            renameTarget = null
+                        },
+                        modifier = Modifier.weight(1f)
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(42.dp)
+                                .clip(RoundedCornerShape(99.dp))
+                                .background(RawColors.Mint),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Text(
+                                text = "Save",
+                                style = RawTypography.labelLarge.copy(fontSize = 13.sp, fontWeight = FontWeight.SemiBold),
+                                color = RawColors.PrimaryBtnText
+                            )
+                        }
+                    }
                 }
             }
-        )
+        }
     }
 
     deleteVideoConfirmTarget?.let { target ->
-        AlertDialog(
-            onDismissRequest = { deleteVideoConfirmTarget = null },
-            containerColor = RawColors.HeroSurface,
-            titleContentColor = RawColors.TextPrimary,
-            textContentColor = RawColors.TextMuted,
-            title = { Text("Delete this reel?") },
-            text = { Text("Deletes \"${target.title}\" and its local MP4 from raw_edit. Any copy saved to your phone's Movies folder stays untouched.") },
-            confirmButton = {
-                TextButton(
-                    onClick = {
-                        onDeleteVideo(target)
-                        deleteVideoConfirmTarget = null
-                    }
-                ) {
-                    Text("Delete", color = RawColors.ErrorCoral)
-                }
+        RawConfirmDialog(
+            title = "Delete this reel?",
+            body = "The MP4 for \"${target.title}\" will be removed from your phone.",
+            confirmLabel = "Delete",
+            isDanger = true,
+            onConfirm = {
+                onDeleteVideo(target)
+                deleteVideoConfirmTarget = null
             },
-            dismissButton = {
-                TextButton(onClick = { deleteVideoConfirmTarget = null }) {
-                    Text("Cancel", color = RawColors.TextPrimary)
-                }
-            }
+            onDismiss = { deleteVideoConfirmTarget = null }
         )
     }
 
     deleteProjectConfirmTarget?.let { target ->
-        AlertDialog(
-            onDismissRequest = { deleteProjectConfirmTarget = null },
-            containerColor = RawColors.HeroSurface,
-            titleContentColor = RawColors.TextPrimary,
-            textContentColor = RawColors.TextMuted,
-            title = { Text("Delete this draft?") },
-            text = { Text("Deletes project \"${target.title.ifBlank { "Untitled Reel" }}\", its imported audio, subtitles, and HTML code from raw_edit.") },
-            confirmButton = {
-                TextButton(
-                    onClick = {
-                        onDeleteProject(target)
-                        deleteProjectConfirmTarget = null
-                    }
-                ) {
-                    Text("Delete", color = RawColors.ErrorCoral)
-                }
+        RawConfirmDialog(
+            title = "Delete this draft?",
+            body = "This removes \"${target.title.ifBlank { "Untitled Reel" }}\" from your phone.",
+            confirmLabel = "Delete",
+            isDanger = true,
+            onConfirm = {
+                onDeleteProject(target)
+                deleteProjectConfirmTarget = null
             },
-            dismissButton = {
-                TextButton(onClick = { deleteProjectConfirmTarget = null }) {
-                    Text("Cancel", color = RawColors.TextPrimary)
-                }
-            }
+            onDismiss = { deleteProjectConfirmTarget = null }
         )
     }
 }
@@ -459,25 +476,27 @@ private fun DraftProjectRow(
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .clip(RoundedCornerShape(20.dp))
+            .clip(RoundedCornerShape(22.dp))
             .background(RawColors.CardSurface)
-            .border(1.dp, RawColors.Divider.copy(alpha = 0.55f), RoundedCornerShape(20.dp))
+            .border(1.dp, RawColors.Divider, RoundedCornerShape(22.dp))
             .clickable(onClick = onOpen)
-            .padding(14.dp),
+            .padding(12.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(12.dp)
     ) {
         Box(
             modifier = Modifier
-                .size(48.dp)
+                .size(52.dp)
                 .clip(RoundedCornerShape(14.dp))
-                .background(RawColors.HeroSurface),
+                .background(RawColors.RaisedCard),
             contentAlignment = Alignment.Center
         ) {
             RawPixelMascot(
                 kind = PixelMascotKind.CODE_BOT,
                 size = 34.dp,
-                interactive = false
+                interactive = false,
+                noBob = true,
+                noBlink = true
             )
         }
 
@@ -488,25 +507,28 @@ private fun DraftProjectRow(
             ) {
                 Text(
                     text = project.title.ifBlank { "Untitled Reel" },
-                    style = RawTypography.titleMedium,
+                    style = RawTypography.titleMedium.copy(fontSize = 15.sp, fontWeight = FontWeight.Bold),
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
                     modifier = Modifier.weight(1f, fill = false)
                 )
                 Box(
                     modifier = Modifier
-                        .clip(RoundedCornerShape(8.dp))
+                        .clip(RoundedCornerShape(99.dp))
                         .background(RawColors.RaisedCard)
-                        .padding(horizontal = 8.dp, vertical = 2.dp)
+                        .padding(horizontal = 8.dp, vertical = 3.dp)
                 ) {
                     Text(
-                        text = "Draft",
-                        style = RawTypography.labelSmall,
-                        color = RawColors.TextPrimary
+                        text = "DRAFT",
+                        fontFamily = JetBrainsMonoFamily,
+                        fontWeight = FontWeight.SemiBold,
+                        fontSize = 9.sp,
+                        letterSpacing = 0.6.sp,
+                        color = RawColors.TextMuted
                     )
                 }
             }
-            Spacer(modifier = Modifier.height(4.dp))
+            Spacer(modifier = Modifier.height(3.dp))
             val sub = buildString {
                 if (project.audioDurationSec > 0.0) {
                     append(FormatHelpers.formatDuration(project.audioDurationSec))
@@ -516,64 +538,69 @@ private fun DraftProjectRow(
                 append("  •  ")
                 append(if (project.code.isNotBlank()) "Code ready" else "Waiting for code")
             }
-            Text(text = sub, style = RawTypography.bodyMedium)
+            Text(
+                text = sub,
+                fontFamily = JetBrainsMonoFamily,
+                fontSize = 10.5.sp,
+                color = RawColors.TextMuted,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
         }
 
-        Box(
-            modifier = Modifier
-                .size(38.dp)
-                .clip(CircleShape)
-                .background(RawColors.ErrorCoral.copy(alpha = 0.14f))
-                .clickable(onClick = onDelete),
-            contentAlignment = Alignment.Center
-        ) {
-            RawIcon(RawIconType.TRASH, size = 16.dp, tint = RawColors.ErrorCoral)
-        }
-
-        Box(
-            modifier = Modifier
-                .size(38.dp)
-                .clip(CircleShape)
-                .background(RawColors.RaisedCard),
-            contentAlignment = Alignment.Center
-        ) {
-            RawIcon(RawIconType.ARROW_RIGHT, size = 16.dp)
-        }
+        CircleActionButton(
+            icon = RawIconType.TRASH,
+            size = 36.dp,
+            iconTint = RawColors.ErrorCoral,
+            onClick = onDelete
+        )
+        RawIcon(
+            type = RawIconType.CHEVRON_RIGHT,
+            size = 18.dp,
+            tint = RawColors.TextMuted
+        )
     }
 }
 
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 private fun VideoLibraryRow(
     video: VideoEntity,
     onClick: () -> Unit,
     onLongClick: () -> Unit,
+    onMoreClick: () -> Unit,
     onDelete: () -> Unit
 ) {
+    val context = LocalContext.current
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .clip(RoundedCornerShape(20.dp))
+            .clip(RoundedCornerShape(22.dp))
             .background(RawColors.CardSurface)
-            .border(1.dp, RawColors.Divider.copy(alpha = 0.55f), RoundedCornerShape(20.dp))
+            .border(1.dp, RawColors.Divider, RoundedCornerShape(22.dp))
             .combinedClickable(
                 onClick = onClick,
                 onLongClick = onLongClick
             )
-            .padding(14.dp),
+            .padding(12.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(12.dp)
     ) {
+        // 16:9 thumbnail decoded cleanly to 320x180 + centered Mint play circle (.thb .pc)
         Box(
             modifier = Modifier
-                .width(88.dp)
-                .height(52.dp)
-                .clip(RoundedCornerShape(12.dp))
-                .background(RawColors.HeroSurface),
+                .width(112.dp)
+                .aspectRatio(16f / 9f)
+                .clip(RoundedCornerShape(10.dp))
+                .background(Color.Black),
             contentAlignment = Alignment.Center
         ) {
             if (video.thumbnailPath.isNotBlank() && File(video.thumbnailPath).exists()) {
                 AsyncImage(
-                    model = File(video.thumbnailPath),
+                    model = ImageRequest.Builder(context)
+                        .data(File(video.thumbnailPath))
+                        .size(320, 180)
+                        .build(),
                     contentDescription = video.title,
                     contentScale = ContentScale.Crop,
                     modifier = Modifier.fillMaxSize()
@@ -581,46 +608,60 @@ private fun VideoLibraryRow(
             } else {
                 RawIcon(RawIconType.FILM, size = 22.dp, tint = RawColors.TextMuted)
             }
+
+            Box(
+                modifier = Modifier
+                    .size(28.dp)
+                    .clip(CircleShape)
+                    .background(Color.Black.copy(alpha = 0.45f))
+                    .padding(2.dp)
+                    .clip(CircleShape)
+                    .background(RawColors.Mint),
+                contentAlignment = Alignment.Center
+            ) {
+                RawIcon(
+                    type = RawIconType.PLAY,
+                    size = 12.dp,
+                    tint = RawColors.PrimaryBtnText
+                )
+            }
         }
 
         Column(modifier = Modifier.weight(1f)) {
             Text(
                 text = video.title,
-                style = RawTypography.titleMedium,
+                style = RawTypography.titleMedium.copy(fontSize = 15.sp, fontWeight = FontWeight.Bold),
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis
             )
             Spacer(modifier = Modifier.height(3.dp))
             Text(
                 text = "${FormatHelpers.formatDuration(video.durationSec)}  •  ${FormatHelpers.formatFileSize(video.sizeBytes)}",
-                style = RawTypography.labelMedium
+                fontFamily = JetBrainsMonoFamily,
+                fontSize = 10.5.sp,
+                color = RawColors.TextMuted
             )
             Spacer(modifier = Modifier.height(2.dp))
             Text(
                 text = FormatHelpers.formatDate(video.createdAt),
-                style = RawTypography.labelSmall
+                fontFamily = JetBrainsMonoFamily,
+                fontSize = 10.5.sp,
+                color = RawColors.TextMuted
             )
         }
 
-        Box(
-            modifier = Modifier
-                .size(38.dp)
-                .clip(CircleShape)
-                .background(RawColors.ErrorCoral.copy(alpha = 0.14f))
-                .clickable(onClick = onDelete),
-            contentAlignment = Alignment.Center
-        ) {
-            RawIcon(RawIconType.TRASH, size = 16.dp, tint = RawColors.ErrorCoral)
-        }
-
-        Box(
-            modifier = Modifier
-                .size(38.dp)
-                .clip(CircleShape)
-                .background(RawColors.TextPrimary),
-            contentAlignment = Alignment.Center
-        ) {
-            RawIcon(RawIconType.PLAY, size = 15.dp, tint = RawColors.PrimaryBtnText)
+        Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+            CircleActionButton(
+                icon = RawIconType.TRASH,
+                size = 36.dp,
+                iconTint = RawColors.ErrorCoral,
+                onClick = onDelete
+            )
+            CircleActionButton(
+                icon = RawIconType.MORE_VERT,
+                size = 36.dp,
+                onClick = onMoreClick
+            )
         }
     }
 }
@@ -629,21 +670,32 @@ private fun VideoLibraryRow(
 fun SheetActionRow(
     icon: RawIconType,
     label: String,
-    tint: androidx.compose.ui.graphics.Color = RawColors.TextPrimary,
+    tint: Color = RawColors.TextPrimary,
     onClick: () -> Unit
 ) {
+    val isBad = tint == RawColors.ErrorCoral
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .height(54.dp)
-            .clip(RoundedCornerShape(16.dp))
-            .background(RawColors.CardSurface)
-            .combinedClickable(onClick = onClick)
-            .padding(horizontal = 16.dp),
+            .clickable(onClick = onClick)
+            .padding(vertical = 12.dp, horizontal = 4.dp),
         verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(12.dp)
+        horizontalArrangement = Arrangement.spacedBy(14.dp)
     ) {
-        RawIcon(type = icon, size = 20.dp, tint = tint)
-        Text(text = label, style = RawTypography.titleMedium, color = tint)
+        Box(
+            modifier = Modifier
+                .size(36.dp)
+                .clip(RoundedCornerShape(12.dp))
+                .background(if (isBad) RawColors.ErrorSoft else RawColors.RaisedCard)
+                .border(1.dp, if (isBad) RawColors.ErrorBorder else RawColors.Divider, RoundedCornerShape(12.dp)),
+            contentAlignment = Alignment.Center
+        ) {
+            RawIcon(type = icon, size = 17.dp, tint = tint)
+        }
+        Text(
+            text = label,
+            style = RawTypography.titleMedium.copy(fontWeight = FontWeight.SemiBold),
+            color = tint
+        )
     }
 }
