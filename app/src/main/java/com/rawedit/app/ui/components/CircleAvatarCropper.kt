@@ -31,12 +31,12 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
-import androidx.compose.ui.graphics.BlendMode
+import androidx.compose.ui.geometry.Rect as ComposeRect
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.CompositingStrategy
+import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.PathFillType
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.drawscope.Stroke
-import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.unit.IntOffset
@@ -97,9 +97,7 @@ fun CircleAvatarCropperDialog(
                 contentAlignment = Alignment.Center
             ) {
                 Canvas(
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .graphicsLayer { compositingStrategy = CompositingStrategy.Offscreen }
+                    modifier = Modifier.fillMaxSize()
                 ) {
                     val cropDiameter = min(size.width, size.height) * 0.78f
                     val baseScale = maxOf(
@@ -120,18 +118,20 @@ fun CircleAvatarCropperDialog(
                         dstSize = IntSize(drawW.roundToInt(), drawH.roundToInt())
                     )
 
-                    // Dark scrim outside circle
-                    drawRect(Color.Black.copy(alpha = 0.62f))
-                    drawCircle(
-                        color = Color.Transparent,
-                        radius = cropDiameter * 0.5f,
-                        center = Offset(size.width * 0.5f, size.height * 0.5f),
-                        blendMode = BlendMode.Clear
-                    )
+                    // GPU-safe EvenOdd path scrim outside crop circle (no BlendMode.Clear black glitch)
+                    val r = cropDiameter * 0.5f
+                    val centerX = size.width * 0.5f
+                    val centerY = size.height * 0.5f
+                    val scrimPath = Path().apply {
+                        fillType = PathFillType.EvenOdd
+                        addRect(ComposeRect(0f, 0f, size.width, size.height))
+                        addOval(ComposeRect(centerX - r, centerY - r, centerX + r, centerY + r))
+                    }
+                    drawPath(scrimPath, Color.Black.copy(alpha = 0.65f))
                     drawCircle(
                         color = RawColors.TextPrimary,
-                        radius = cropDiameter * 0.5f,
-                        center = Offset(size.width * 0.5f, size.height * 0.5f),
+                        radius = r,
+                        center = Offset(centerX, centerY),
                         style = Stroke(width = 2.dp.toPx())
                     )
                 }

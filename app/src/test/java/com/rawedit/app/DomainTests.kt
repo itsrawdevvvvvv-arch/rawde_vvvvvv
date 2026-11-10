@@ -49,18 +49,26 @@ class DomainTests {
 
         val valid = "<html><div id='stage'></div><script>window.RAW={duration:5,layers:[{id:'a',src:'https://assets.local/AbCd1234.png'}],seek:function(t){}}</script></html>"
         assertTrue(CodeValidator.staticValidate(valid).first)
+
+        val wrappedWithChatter = "Here is your reel code:\n```html\n<!DOCTYPE html><html><body><div id='stage'></div><script>window.RAW={duration:5,seek:function(t){}}</script></body></html>\n```\nLet me know if you want changes!"
+        val unwrapped = CodeValidator.unwrapMarkdownFences(wrappedWithChatter)
+        assertTrue(unwrapped.startsWith("<!DOCTYPE html>"))
+        assertTrue(unwrapped.endsWith("</html>"))
+        assertTrue(CodeValidator.staticValidate(unwrapped).first)
     }
 
     @Test
-    fun layerJsonRoundTripAndHiddenExport() {
+    fun layerJsonRoundTripMaskAndHiddenExport() {
         val layers = listOf(
-            RawLayer(id = "t1", name = "Title", type = "text", opacity = 0.9f, hidden = true)
+            RawLayer(id = "t1", name = "Title", type = "text", opacity = 0.9f, hidden = true, mask = "circle")
         )
         val decoded = LayerJson.decode(LayerJson.encode(layers))
         assertEquals(1, decoded.size)
         assertTrue(decoded.first().hidden)
+        assertEquals("circle", decoded.first().mask)
 
         val stageJson = LayerJson.encodeForStage(decoded)
         assertTrue(stageJson.contains("\"opacity\":0.0"))
+        assertTrue(stageJson.contains("\"mask\":\"circle\""))
     }
 }

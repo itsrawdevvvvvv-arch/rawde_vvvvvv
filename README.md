@@ -4,12 +4,12 @@ Offline Android app that turns a voiceover (and optional SRT subtitles) into a 1
 
 ## Features
 
-- **100% On-Device & Offline**: No server, no login, no ads, no `INTERNET` permission.
+- **100% On-Device & Offline (Android 9.0+ / API 28+)**: No server, no login, no ads, no `INTERNET` permission. Optimized for smooth 60 fps performance even on low-end Android 9+ devices.
 - **Simple Guided Flow**:
   1. **Add voice**: Pick MP3, M4A, WAV, or AAC audio (1s to 20m, up to 100 MB), optional `.srt` subtitle file, and optional topic.
-  2. **Copy prompt**: Generates a tailored prompt for Claude requesting a self-contained `window.RAW` HTML typography composition.
-  3. **Code paste & sandboxed validator**: Checks static safety rules (no external URLs or network APIs) and runs a dry-run inside a network-blocked WebView (`https://raw.local/` and `https://assets.local/`). Includes a built-in **6s sample test** (`assets/sample.html`).
-  4. **Simple layer editor (optional)**: Live 16:9 scrubbable preview, drag-to-move, corner-handle resize (aspect-locked for images), opacity slider, z-order controls, text content edit, add PNG/JPG/WEBP images, timeline strip snapping to 0.1 s, and 50-step undo/redo.
+  2. **Copy prompt**: Generates a detailed, layout-guarded prompt for Claude requesting a self-contained `window.RAW` HTML typography composition with safe horizontal margins, character-count font-size caps, high-contrast palettes, and guaranteed visible inline SVG icons.
+  3. **Code paste & sandboxed validator**: Automatically strips conversational text and markdown fences around `<!DOCTYPE html>...</html>`, checks static safety rules (no external URLs or network APIs), and runs a dry-run inside a network-blocked WebView (`https://raw.local/` and `https://assets.local/`). Includes a built-in **6s sample test** (`assets/sample.html`).
+  4. **Multi-track timeline & layer editor (before & after render)**: Live 16:9 scrubbable preview, stacked above/below tracks (z-order), drag-to-move with center-X snap, corner-handle resize + scale slider (aspect-locked for images), opacity slider, shape/crop masking (`None`, `Rounded`, `Circle`, `Pill`, `Cinema`, `Half Crop`), text content edit, add PNG/JPG/WEBP images, draggable/trimmable timeline clips snapping to 0.1 s, 50-step undo/redo, and one-tap **Re-render** from the result screen.
   5. **On-device render & result**: Foreground service renders 1920x1080 @ 30 fps H.264 + 128 kbps AAC MP4, saves to `Movies/raw_edit` via MediaStore, and shares via `FileProvider`.
 
 ## Architecture

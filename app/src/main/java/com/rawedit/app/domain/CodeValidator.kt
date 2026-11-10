@@ -61,14 +61,26 @@ object CodeValidator {
     }
 
     fun unwrapMarkdownFences(raw: String): String {
-        val trimmed = raw.trim()
-        if (trimmed.startsWith("```") && trimmed.endsWith("```")) {
-            val lines = trimmed.lines()
-            if (lines.size >= 3) {
-                return lines.drop(1).dropLast(1).joinToString("\n").trim()
-            }
+        var text = raw.trim()
+        // If Claude wrapped HTML inside ```html ... ``` or ``` ... ``` with optional preamble/postamble
+        val fenceRegex = Regex("```(?:html|HTML)?\\s*([\\s\\S]*?)```")
+        val fenceMatch = fenceRegex.find(text)
+        if (fenceMatch != null) {
+            text = fenceMatch.groupValues[1].trim()
         }
-        return trimmed
+        // Extract from <!DOCTYPE or <html to </html> if conversational text preceded/followed it
+        val docIdx = text.indexOf("<!DOCTYPE", ignoreCase = true)
+        val htmlIdx = text.indexOf("<html", ignoreCase = true)
+        val startIdx = when {
+            docIdx >= 0 -> docIdx
+            htmlIdx >= 0 -> htmlIdx
+            else -> 0
+        }
+        val endHtmlIdx = text.lastIndexOf("</html>", ignoreCase = true)
+        if (endHtmlIdx > startIdx) {
+            text = text.substring(startIdx, endHtmlIdx + 7).trim()
+        }
+        return text
     }
 
     fun staticValidate(rawInput: String): Pair<Boolean, String> {

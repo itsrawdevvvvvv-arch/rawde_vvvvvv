@@ -27,7 +27,7 @@ import com.rawedit.app.data.local.UserProfile
 import com.rawedit.app.ui.components.MainTab
 import com.rawedit.app.ui.components.RawBottomNavBar
 import com.rawedit.app.ui.motion.GhostWordWipeOverlay
-import com.rawedit.app.ui.motion.InkBloomRevealMask
+import com.rawedit.app.ui.motion.RawScreenTransition
 import com.rawedit.app.ui.screens.AddVoiceScreen
 import com.rawedit.app.ui.screens.CodePasteScreen
 import com.rawedit.app.ui.screens.CopyPromptScreen
@@ -50,7 +50,7 @@ private sealed interface AppRoute {
     data class AddVoice(val projectId: Long) : AppRoute
     data class CopyPrompt(val projectId: Long) : AppRoute
     data class CodePaste(val projectId: Long) : AppRoute
-    data class Editor(val projectId: Long) : AppRoute
+    data class Editor(val projectId: Long, val fromResult: Boolean = false) : AppRoute
     data class Rendering(val projectId: Long) : AppRoute
     data class Result(val videoId: Long, val celebrate: Boolean) : AppRoute
 }
@@ -132,17 +132,11 @@ private fun MainAuthenticatedHost(
     var backStack by remember { mutableStateOf<List<AppRoute>>(listOf(AppRoute.Tabs(MainTab.HOME))) }
     val currentRoute = backStack.last()
 
-    // Ink-bloom transition state for screen pushes
-    var bloomActive by remember { mutableStateOf(false) }
-    var bloomOrigin by remember { mutableStateOf(Offset(540f, 960f)) }
-
     // Ghost-word wipe state for main tab switches
     var ghostWord by remember { mutableStateOf<String?>(null) }
     var ghostTrigger by remember { mutableIntStateOf(0) }
 
-    fun pushRoute(route: AppRoute, tapOrigin: Offset = Offset(540f, 960f)) {
-        bloomOrigin = tapOrigin
-        bloomActive = true
+    fun pushRoute(route: AppRoute, @Suppress("UNUSED_PARAMETER") tapOrigin: Offset = Offset(540f, 960f)) {
         backStack = backStack + route
     }
 
@@ -182,12 +176,8 @@ private fun MainAuthenticatedHost(
             .fillMaxSize()
             .background(RawColors.BgPrimary)
     ) {
-        InkBloomRevealMask(
-            active = bloomActive,
-            origin = bloomOrigin,
-            onFinished = { bloomActive = false }
-        ) {
-            when (val route = currentRoute) {
+        RawScreenTransition(targetState = currentRoute) { route ->
+            when (route) {
                 is AppRoute.Tabs -> {
                     Box(modifier = Modifier.fillMaxSize()) {
                         when (route.tab) {
@@ -326,6 +316,7 @@ private fun MainAuthenticatedHost(
                         EditorScreen(
                             project = proj,
                             cacheManager = container.cacheManager,
+                            openedAfterRender = route.fromResult,
                             onAutoSaveDraft = { updated ->
                                 scope.launch { container.repository.saveProject(updated) }
                             },
@@ -333,6 +324,12 @@ private fun MainAuthenticatedHost(
                                 scope.launch {
                                     container.repository.saveProject(updated)
                                     popRoute()
+                                }
+                            },
+                            onRenderUpdated = { updated ->
+                                scope.launch {
+                                    container.repository.saveProject(updated)
+                                    backStack = backStack.dropLast(1) + AppRoute.Rendering(updated.id)
                                 }
                             },
                             onBack = ::popRoute
@@ -365,6 +362,9 @@ private fun MainAuthenticatedHost(
                                 scope.launch {
                                     container.repository.markVideoSavedToGallery(v.id, galleryUri)
                                 }
+                            },
+                            onEditInTimeline = { projectId ->
+                                pushRoute(AppRoute.Editor(projectId = projectId, fromResult = true))
                             },
                             onMakeAnother = {
                                 scope.launch {

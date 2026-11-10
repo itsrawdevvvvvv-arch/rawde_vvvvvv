@@ -20,6 +20,7 @@ import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.aspectRatio
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -34,10 +35,7 @@ import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Slider
@@ -79,6 +77,7 @@ import androidx.compose.ui.viewinterop.AndroidView
 import com.rawedit.app.data.CacheManager
 import com.rawedit.app.data.local.ProjectEntity
 import com.rawedit.app.data.model.LayerJson
+import com.rawedit.app.data.model.LayerMask
 import com.rawedit.app.data.model.RawLayer
 import com.rawedit.app.render.LocalAssetServer
 import com.rawedit.app.ui.components.BigPrimaryButton
@@ -87,28 +86,35 @@ import com.rawedit.app.ui.components.FormatHelpers
 import com.rawedit.app.ui.icons.RawIcon
 import com.rawedit.app.ui.icons.RawIconType
 import com.rawedit.app.ui.motion.RawPressButton
+import com.rawedit.app.ui.theme.JetBrainsMonoFamily
 import com.rawedit.app.ui.theme.RawColors
 import com.rawedit.app.ui.theme.RawTypography
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import java.util.Locale
 import java.util.UUID
 import kotlin.math.roundToInt
 
-private enum class EditorPanelMode {
-    LAYER_TOOLS,
-    TIMING
+private enum class SimpleToolTab(val label: String, val icon: RawIconType) {
+    POSITION_SCALE("Pos & Scale", RawIconType.EDIT),
+    OPACITY("Opacity", RawIconType.EYE),
+    MASK("Mask", RawIconType.LAYERS)
 }
 
-@OptIn(ExperimentalMaterial3Api::class)
+/**
+ * After Effects / CapCut / Alight Motion style multi-track timeline editor
+ * with simple controls: Position, Scale, Opacity, Add Images, Masking, and Track Ordering (Above/Below).
+ */
 @Composable
 fun EditorScreen(
     project: ProjectEntity,
     cacheManager: CacheManager,
+    openedAfterRender: Boolean = false,
     onAutoSaveDraft: (ProjectEntity) -> Unit,
     onDone: (ProjectEntity) -> Unit,
+    onRenderUpdated: (ProjectEntity) -> Unit = onDone,
     onBack: () -> Unit
 ) {
-    val context = LocalContext.current
     val scope = rememberCoroutineScope()
 
     if (!project.hasEditableLayers) {
@@ -133,21 +139,21 @@ fun EditorScreen(
                     style = RawTypography.titleLarge
                 )
             }
-            BigPrimaryButton(text = "Back to create hub", onClick = onBack)
+            BigPrimaryButton(text = "Back", onClick = onBack)
         }
         return
     }
 
-    val initialLayers = remember(project.id) {
-        LayerJson.decode(project.layersJson)
-    }
+    val initialLayers = remember(project.id) { LayerJson.decode(project.layersJson) }
     var layers by remember(project.id) { mutableStateOf(initialLayers) }
+    val baseDimensions = remember(project.id) {
+        initialLayers.associate { it.id to (it.w.coerceAtLeast(40f) to it.h.coerceAtLeast(40f)) }.toMutableMap()
+    }
     val undoStack = remember { mutableStateListOf<List<RawLayer>>() }
     val redoStack = remember { mutableStateListOf<List<RawLayer>>() }
 
     var selectedLayerId by remember { mutableStateOf(initialLayers.maxByOrNull { it.z }?.id) }
-    var panelMode by remember { mutableStateOf(EditorPanelMode.LAYER_TOOLS) }
-    var showLayersSheet by remember { mutableStateOf(false) }
+    var activeTool by remember { mutableStateOf(SimpleToolTab.POSITION_SCALE) }
     var editingTextLayer by remember { mutableStateOf<RawLayer?>(null) }
     var errorNotice by remember { mutableStateOf<String?>(null) }
 
@@ -187,7 +193,6 @@ fun EditorScreen(
         onAutoSaveDraft(project.copy(layersJson = LayerJson.encode(next)))
     }
 
-    // Playback loop
     LaunchedEffect(isPlaying, durationSec) {
         if (isPlaying) {
             var lastNs = System.nanoTime()
@@ -202,7 +207,6 @@ fun EditorScreen(
         }
     }
 
-    // Sync layers and seek position into WebView
     LaunchedEffect(layers, currentTimeSec, pageReady, previewBoxSize) {
         val wv = webViewRef ?: return@LaunchedEffect
         if (!pageReady) return@LaunchedEffect
@@ -221,6 +225,9 @@ fun EditorScreen(
               if (window.RAW && typeof window.RAW.seek === 'function') {
                 window.RAW.layers = $stageJson;
                 window.RAW.seek($currentTimeSec);
+                if (typeof window.__applyLayerMasks === 'function') {
+                  window.__applyLayerMasks();
+                }
               }
             })();
         """.trimIndent()
@@ -240,10 +247,12 @@ fun EditorScreen(
                 res.onSuccess { asset ->
                     errorNotice = null
                     val maxZ = (layers.maxOfOrNull { it.z } ?: 0) + 1
-                    val imgW = 600f
-                    val imgH = (600f * asset.height / asset.width.coerceAtLeast(1)).coerceIn(80f, 1000f)
+                    val imgW = 560f
+                    val imgH = (560f * asset.height / asset.width.coerceAtLeast(1)).coerceIn(80f, 960f)
+                    val newId = "img_${UUID.randomUUID().toString().take(6)}"
+                    baseDimensions[newId] = imgW to imgH
                     val newLayer = RawLayer(
-                        id = "img_${UUID.randomUUID().toString().take(6)}",
+                        id = newId,
                         name = "Image ${layers.count { it.type == "image" } + 1}",
                         type = "image",
                         x = (1920f - imgW) * 0.5f,
@@ -255,7 +264,8 @@ fun EditorScreen(
                         start = 0.0,
                         end = durationSec,
                         text = null,
-                        src = "https://${LocalAssetServer.ASSETS_HOST}/${asset.fileName}"
+                        src = "https://${LocalAssetServer.ASSETS_HOST}/${asset.fileName}",
+                        mask = LayerMask.NONE.key
                     )
                     pushCommit(layers + newLayer)
                     selectedLayerId = newLayer.id
@@ -267,6 +277,7 @@ fun EditorScreen(
     }
 
     val selectedLayer = layers.firstOrNull { it.id == selectedLayerId }
+    val sortedTracks = remember(layers) { layers.sortedByDescending { it.z } }
 
     Column(
         modifier = Modifier
@@ -275,11 +286,11 @@ fun EditorScreen(
             .statusBarsPadding()
             .navigationBarsPadding()
     ) {
-        // Top action bar
+        // Top header bar
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(horizontal = 16.dp, vertical = 10.dp),
+                .padding(horizontal = 14.dp, vertical = 8.dp),
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically
         ) {
@@ -287,51 +298,81 @@ fun EditorScreen(
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                CircleActionButton(icon = RawIconType.BACK, onClick = onBack, size = 44.dp)
+                CircleActionButton(icon = RawIconType.BACK, onClick = onBack, size = 42.dp)
                 CircleActionButton(
                     icon = RawIconType.UNDO,
                     onClick = ::performUndo,
                     enabled = undoStack.isNotEmpty(),
-                    size = 44.dp,
+                    size = 42.dp,
                     iconTint = if (undoStack.isNotEmpty()) RawColors.TextPrimary else RawColors.TextMuted
                 )
                 CircleActionButton(
                     icon = RawIconType.REDO,
                     onClick = ::performRedo,
                     enabled = redoStack.isNotEmpty(),
-                    size = 44.dp,
+                    size = 42.dp,
                     iconTint = if (redoStack.isNotEmpty()) RawColors.TextPrimary else RawColors.TextMuted
                 )
             }
 
-            RawPressButton(
-                onClick = {
-                    isPlaying = false
-                    onDone(project.copy(layersJson = LayerJson.encode(layers)))
-                }
-            ) {
-                Box(
-                    modifier = Modifier
-                        .height(44.dp)
-                        .clip(RoundedCornerShape(22.dp))
-                        .background(RawColors.PrimaryBtnBg)
-                        .padding(horizontal = 20.dp),
-                    contentAlignment = Alignment.Center
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                RawPressButton(
+                    onClick = {
+                        imagePicker.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly))
+                    }
                 ) {
-                    Text("Done", style = RawTypography.labelLarge, color = RawColors.PrimaryBtnText)
+                    Row(
+                        modifier = Modifier
+                            .height(42.dp)
+                            .clip(RoundedCornerShape(21.dp))
+                            .background(RawColors.RaisedCard)
+                            .padding(horizontal = 14.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        RawIcon(RawIconType.IMAGE, size = 16.dp)
+                        Text("+ Image", style = RawTypography.labelLarge.copy(fontSize = 13.sp))
+                    }
+                }
+
+                RawPressButton(
+                    onClick = {
+                        isPlaying = false
+                        val updated = project.copy(layersJson = LayerJson.encode(layers))
+                        if (openedAfterRender) {
+                            onRenderUpdated(updated)
+                        } else {
+                            onDone(updated)
+                        }
+                    }
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .height(42.dp)
+                            .clip(RoundedCornerShape(21.dp))
+                            .background(RawColors.PrimaryBtnBg)
+                            .padding(horizontal = 18.dp),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Text(
+                            text = if (openedAfterRender) "Re-render" else "Done",
+                            style = RawTypography.labelLarge.copy(fontSize = 13.sp),
+                            color = RawColors.PrimaryBtnText
+                        )
+                    }
                 }
             }
         }
 
-        // 16:9 Live Preview Stage + Direct Manipulation Handles
+        // 16:9 Live Preview Canvas with direct Position drag & Corner Scale handles
         Box(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(horizontal = 16.dp)
+                .padding(horizontal = 14.dp)
                 .aspectRatio(16f / 9f)
-                .clip(RoundedCornerShape(16.dp))
+                .clip(RoundedCornerShape(14.dp))
                 .background(Color.Black)
-                .border(1.dp, RawColors.Divider, RoundedCornerShape(16.dp))
+                .border(1.dp, RawColors.Divider, RoundedCornerShape(14.dp))
                 .onSizeChanged { previewBoxSize = it }
         ) {
             EditorStageWebView(
@@ -343,7 +384,6 @@ fun EditorScreen(
                 }
             )
 
-            // Interactive layer selection & drag/resize handles overlay
             StageGestureOverlay(
                 layers = layers,
                 selectedId = selectedLayerId,
@@ -361,19 +401,25 @@ fun EditorScreen(
             )
         }
 
-        // Play / Pause + Scrub bar
+        // Transport Playhead Bar (CapCut / Alight Motion style)
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(horizontal = 16.dp, vertical = 10.dp),
+                .padding(horizontal = 14.dp, vertical = 6.dp),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(10.dp)
         ) {
             CircleActionButton(
                 icon = if (isPlaying) RawIconType.PAUSE else RawIconType.PLAY,
                 onClick = { isPlaying = !isPlaying },
-                size = 44.dp,
+                size = 40.dp,
                 backgroundColor = RawColors.RaisedCard
+            )
+            Text(
+                text = String.format(Locale.US, "%05.2fs", currentTimeSec),
+                fontFamily = JetBrainsMonoFamily,
+                fontSize = 12.sp,
+                color = RawColors.TextPrimary
             )
             Slider(
                 value = currentTimeSec.toFloat().coerceIn(0f, durationSec.toFloat()),
@@ -390,8 +436,10 @@ fun EditorScreen(
                 modifier = Modifier.weight(1f)
             )
             Text(
-                text = FormatHelpers.formatDuration(currentTimeSec),
-                style = RawTypography.labelMedium
+                text = String.format(Locale.US, "%.1fs", durationSec),
+                fontFamily = JetBrainsMonoFamily,
+                fontSize = 12.sp,
+                color = RawColors.TextMuted
             )
         }
 
@@ -400,227 +448,271 @@ fun EditorScreen(
                 text = msg,
                 style = RawTypography.bodyMedium,
                 color = RawColors.ErrorCoral,
-                modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp)
+                modifier = Modifier.padding(horizontal = 14.dp, vertical = 2.dp)
             )
         }
 
-        // Mode bar: Tools | Layers | Add image | Timing
-        Row(
+        // Simple Property Strip for Selected Layer (Position/Scale, Opacity, Mask, Edit Text)
+        Column(
             modifier = Modifier
                 .fillMaxWidth()
-                .horizontalScroll(rememberScrollState())
-                .padding(horizontal = 16.dp, vertical = 6.dp),
-            horizontalArrangement = Arrangement.spacedBy(8.dp)
-        ) {
-            EditorPillTab(
-                label = "Edit layer",
-                icon = RawIconType.EDIT,
-                selected = panelMode == EditorPanelMode.LAYER_TOOLS,
-                onClick = { panelMode = EditorPanelMode.LAYER_TOOLS }
-            )
-            EditorPillTab(
-                label = "Timing",
-                icon = RawIconType.CLOCK,
-                selected = panelMode == EditorPanelMode.TIMING,
-                onClick = { panelMode = EditorPanelMode.TIMING }
-            )
-            EditorPillTab(
-                label = "Layers (${layers.size})",
-                icon = RawIconType.LAYERS,
-                selected = false,
-                onClick = { showLayersSheet = true }
-            )
-            EditorPillTab(
-                label = "Add image",
-                icon = RawIconType.IMAGE,
-                selected = false,
-                onClick = {
-                    imagePicker.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly))
-                }
-            )
-        }
-
-        // Bottom tools area
-        Box(
-            modifier = Modifier
-                .fillMaxWidth()
-                .weight(1f)
-                .padding(horizontal = 16.dp, vertical = 6.dp)
-                .clip(RoundedCornerShape(22.dp))
+                .padding(horizontal = 14.dp)
+                .clip(RoundedCornerShape(16.dp))
                 .background(RawColors.CardSurface)
-                .border(1.dp, RawColors.Divider, RoundedCornerShape(22.dp))
-                .padding(14.dp)
+                .border(1.dp, RawColors.Divider, RoundedCornerShape(16.dp))
+                .padding(horizontal = 12.dp, vertical = 8.dp),
+            verticalArrangement = Arrangement.spacedBy(6.dp)
         ) {
-            when (panelMode) {
-                EditorPanelMode.LAYER_TOOLS -> {
-                    if (selectedLayer == null) {
-                        Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                            Text("Tap a layer in preview or open Layers to edit.", style = RawTypography.bodyMedium)
-                        }
-                    } else {
-                        LayerToolsPanel(
-                            layer = selectedLayer,
-                            onOpacityPreview = { newOp ->
-                                layers = layers.map {
-                                    if (it.id == selectedLayer.id) it.copy(opacity = newOp) else it
-                                }
-                            },
-                            onOpacityCommit = { newOp ->
-                                pushCommit(
-                                    layers.map { if (it.id == selectedLayer.id) it.copy(opacity = newOp) else it }
-                                )
-                            },
-                            onMoveOrder = { action ->
-                                val updated = reorderLayerZ(layers, selectedLayer.id, action)
-                                pushCommit(updated)
-                            },
-                            onDuplicate = {
-                                val maxZ = (layers.maxOfOrNull { it.z } ?: 0) + 1
-                                val copy = selectedLayer.copy(
-                                    id = "${selectedLayer.id}_${UUID.randomUUID().toString().take(4)}",
-                                    name = "${selectedLayer.name.ifBlank { selectedLayer.id }} copy",
-                                    x = selectedLayer.x + 30f,
-                                    y = selectedLayer.y + 30f,
-                                    z = maxZ
-                                )
-                                pushCommit(layers + copy)
-                                selectedLayerId = copy.id
-                            },
-                            onDelete = {
-                                val updated = layers.filterNot { it.id == selectedLayer.id }
-                                pushCommit(updated)
-                                selectedLayerId = updated.maxByOrNull { it.z }?.id
-                            },
-                            onEditText = {
-                                editingTextLayer = selectedLayer
-                            }
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .horizontalScroll(rememberScrollState()),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                SimpleToolTab.entries.forEach { tab ->
+                    val active = activeTool == tab
+                    Row(
+                        modifier = Modifier
+                            .height(34.dp)
+                            .clip(RoundedCornerShape(17.dp))
+                            .background(if (active) RawColors.PrimaryBtnBg else RawColors.RaisedCard)
+                            .clickable { activeTool = tab }
+                            .padding(horizontal = 12.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(5.dp)
+                    ) {
+                        RawIcon(
+                            type = tab.icon,
+                            size = 14.dp,
+                            tint = if (active) RawColors.PrimaryBtnText else RawColors.TextPrimary
+                        )
+                        Text(
+                            text = tab.label,
+                            style = RawTypography.labelSmall.copy(fontWeight = FontWeight.SemiBold),
+                            color = if (active) RawColors.PrimaryBtnText else RawColors.TextPrimary
                         )
                     }
                 }
-
-                EditorPanelMode.TIMING -> {
-                    TimingStripPanel(
-                        layers = layers.sortedByDescending { it.z },
-                        selectedId = selectedLayerId,
-                        totalDurationSec = durationSec,
-                        onSelect = { selectedLayerId = it },
-                        onPreviewUpdate = { updated -> layers = updated },
-                        onCommitUpdate = { before, updated ->
-                            undoStack.add(before)
-                            if (undoStack.size > 50) undoStack.removeAt(0)
-                            redoStack.clear()
-                            layers = updated
-                            onAutoSaveDraft(project.copy(layersJson = LayerJson.encode(updated)))
-                        }
-                    )
+                if (selectedLayer?.type == "text") {
+                    Row(
+                        modifier = Modifier
+                            .height(34.dp)
+                            .clip(RoundedCornerShape(17.dp))
+                            .background(RawColors.RaisedCard)
+                            .clickable { editingTextLayer = selectedLayer }
+                            .padding(horizontal = 12.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(5.dp)
+                    ) {
+                        RawIcon(RawIconType.EDIT, size = 14.dp)
+                        Text(
+                            text = "Edit text",
+                            style = RawTypography.labelSmall.copy(fontWeight = FontWeight.SemiBold),
+                            color = RawColors.TextPrimary
+                        )
+                    }
                 }
             }
-        }
-    }
 
-    if (showLayersSheet) {
-        ModalBottomSheet(
-            onDismissRequest = { showLayersSheet = false },
-            containerColor = RawColors.HeroSurface,
-            contentColor = RawColors.TextPrimary
-        ) {
-            val sorted = layers.sortedByDescending { it.z }
-            Column(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 20.dp, vertical = 8.dp)
-            ) {
-                Text("Layers (top to bottom)", style = RawTypography.headlineMedium)
-                Spacer(modifier = Modifier.height(12.dp))
-                LazyColumn(
-                    modifier = Modifier.height(340.dp),
-                    verticalArrangement = Arrangement.spacedBy(8.dp),
-                    contentPadding = PaddingValues(bottom = 24.dp)
-                ) {
-                    itemsIndexed(sorted, key = { _, l -> l.id }) { idx, layer ->
-                        val isSelected = layer.id == selectedLayerId
+            if (selectedLayer == null) {
+                Text(
+                    text = "Tap any track below or element on screen to adjust it.",
+                    style = RawTypography.bodyMedium,
+                    modifier = Modifier.padding(vertical = 4.dp)
+                )
+            } else {
+                when (activeTool) {
+                    SimpleToolTab.POSITION_SCALE -> {
+                        val base = baseDimensions.getOrPut(selectedLayer.id) {
+                            selectedLayer.w.coerceAtLeast(40f) to selectedLayer.h.coerceAtLeast(40f)
+                        }
+                        val currentScale = (selectedLayer.w / base.first).coerceIn(0.25f, 2.5f)
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            Text(
+                                text = "Scale ${(currentScale * 100).roundToInt()}%",
+                                style = RawTypography.labelSmall,
+                                modifier = Modifier.width(74.dp)
+                            )
+                            Slider(
+                                value = currentScale,
+                                onValueChange = { sc ->
+                                    val nw = base.first * sc
+                                    val nh = base.second * sc
+                                    val cx = selectedLayer.x + selectedLayer.w * 0.5f
+                                    val cy = selectedLayer.y + selectedLayer.h * 0.5f
+                                    layers = layers.map {
+                                        if (it.id == selectedLayer.id) {
+                                            it.copy(x = cx - nw * 0.5f, y = cy - nh * 0.5f, w = nw, h = nh)
+                                        } else it
+                                    }
+                                },
+                                onValueChangeFinished = { pushCommit(layers) },
+                                valueRange = 0.25f..2.5f,
+                                colors = SliderDefaults.colors(
+                                    thumbColor = RawColors.TextPrimary,
+                                    activeTrackColor = RawColors.TextPrimary,
+                                    inactiveTrackColor = RawColors.PillGrey
+                                ),
+                                modifier = Modifier.weight(1f)
+                            )
+                            // Quick center X button
+                            Box(
+                                modifier = Modifier
+                                    .height(30.dp)
+                                    .clip(RoundedCornerShape(10.dp))
+                                    .background(RawColors.RaisedCard)
+                                    .clickable {
+                                        pushCommit(
+                                            layers.map {
+                                                if (it.id == selectedLayer.id) it.copy(x = (1920f - it.w) * 0.5f) else it
+                                            }
+                                        )
+                                    }
+                                    .padding(horizontal = 10.dp),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Text("Center X", style = RawTypography.labelSmall, color = RawColors.TextPrimary)
+                            }
+                        }
+                    }
+
+                    SimpleToolTab.OPACITY -> {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            Text(
+                                text = "Opacity ${(selectedLayer.opacity * 100).roundToInt()}%",
+                                style = RawTypography.labelSmall,
+                                modifier = Modifier.width(86.dp)
+                            )
+                            Slider(
+                                value = selectedLayer.opacity.coerceIn(0f, 1f),
+                                onValueChange = { op ->
+                                    layers = layers.map {
+                                        if (it.id == selectedLayer.id) it.copy(opacity = op) else it
+                                    }
+                                },
+                                onValueChangeFinished = { pushCommit(layers) },
+                                colors = SliderDefaults.colors(
+                                    thumbColor = RawColors.TextPrimary,
+                                    activeTrackColor = RawColors.TextPrimary,
+                                    inactiveTrackColor = RawColors.PillGrey
+                                ),
+                                modifier = Modifier.weight(1f)
+                            )
+                        }
+                    }
+
+                    SimpleToolTab.MASK -> {
                         Row(
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .clip(RoundedCornerShape(16.dp))
-                                .background(if (isSelected) RawColors.RaisedCard else RawColors.CardSurface)
-                                .border(
-                                    1.dp,
-                                    if (isSelected) RawColors.TextPrimary else RawColors.Divider,
-                                    RoundedCornerShape(16.dp)
-                                )
-                                .clickable {
-                                    selectedLayerId = layer.id
-                                    showLayersSheet = false
-                                }
-                                .padding(horizontal = 14.dp, vertical = 12.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.SpaceBetween
+                                .horizontalScroll(rememberScrollState()),
+                            horizontalArrangement = Arrangement.spacedBy(6.dp)
                         ) {
-                            Column(modifier = Modifier.weight(1f)) {
-                                Text(
-                                    text = layer.name.ifBlank { layer.id },
-                                    style = RawTypography.titleMedium,
-                                    maxLines = 1,
-                                    overflow = TextOverflow.Ellipsis
-                                )
-                                Text(
-                                    text = "${layer.type}  •  z:${layer.z}",
-                                    style = RawTypography.labelSmall
-                                )
-                            }
-
-                            Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                                IconMiniButton(
-                                    icon = RawIconType.FORWARD,
-                                    enabled = idx > 0,
-                                    onClick = {
-                                        val swapped = swapAdjacentZ(sorted, idx, idx - 1)
-                                        pushCommit(swapped)
-                                    }
-                                )
-                                IconMiniButton(
-                                    icon = RawIconType.BACKWARD,
-                                    enabled = idx < sorted.lastIndex,
-                                    onClick = {
-                                        val swapped = swapAdjacentZ(sorted, idx, idx + 1)
-                                        pushCommit(swapped)
-                                    }
-                                )
-                                IconMiniButton(
-                                    icon = if (layer.hidden) RawIconType.EYE_OFF else RawIconType.EYE,
-                                    tint = if (layer.hidden) RawColors.TextMuted else RawColors.TextPrimary,
-                                    onClick = {
-                                        pushCommit(
-                                            layers.map { if (it.id == layer.id) it.copy(hidden = !it.hidden) else it }
-                                        )
-                                    }
-                                )
-                                IconMiniButton(
-                                    icon = if (layer.locked) RawIconType.LOCK else RawIconType.UNLOCK,
-                                    tint = if (layer.locked) RawColors.ErrorCoral else RawColors.TextMuted,
-                                    onClick = {
-                                        pushCommit(
-                                            layers.map { if (it.id == layer.id) it.copy(locked = !it.locked) else it }
-                                        )
-                                    }
-                                )
-                                IconMiniButton(
-                                    icon = RawIconType.TRASH,
-                                    tint = RawColors.ErrorCoral,
-                                    onClick = {
-                                        val next = layers.filterNot { it.id == layer.id }
-                                        pushCommit(next)
-                                        if (selectedLayerId == layer.id) {
-                                            selectedLayerId = next.maxByOrNull { it.z }?.id
+                            LayerMask.entries.forEach { maskOption ->
+                                val isCur = selectedLayer.mask.equals(maskOption.key, ignoreCase = true)
+                                Box(
+                                    modifier = Modifier
+                                        .height(32.dp)
+                                        .clip(RoundedCornerShape(10.dp))
+                                        .background(if (isCur) RawColors.SuccessMint else RawColors.RaisedCard)
+                                        .clickable {
+                                            pushCommit(
+                                                layers.map {
+                                                    if (it.id == selectedLayer.id) it.copy(mask = maskOption.key) else it
+                                                }
+                                            )
                                         }
-                                    }
-                                )
+                                        .padding(horizontal = 12.dp),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    Text(
+                                        text = maskOption.label,
+                                        style = RawTypography.labelSmall.copy(fontWeight = FontWeight.SemiBold),
+                                        color = if (isCur) RawColors.PrimaryBtnText else RawColors.TextPrimary
+                                    )
+                                }
                             }
                         }
                     }
                 }
             }
+        }
+
+        Spacer(modifier = Modifier.height(8.dp))
+
+        // Multi-Track Stacked Timeline (After Effects / CapCut / Alight Motion style: Above & Below tracks)
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .weight(1f)
+                .padding(horizontal = 14.dp)
+                .clip(RoundedCornerShape(topStart = 18.dp, topEnd = 18.dp))
+                .background(RawColors.CardSurface)
+                .border(1.dp, RawColors.Divider, RoundedCornerShape(topStart = 18.dp, topEnd = 18.dp))
+        ) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .background(RawColors.HeroSurface)
+                    .padding(horizontal = 12.dp, vertical = 7.dp),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    text = "TIMELINE TRACKS (TOP = ABOVE)",
+                    fontFamily = JetBrainsMonoFamily,
+                    fontSize = 11.sp,
+                    color = RawColors.TextMuted
+                )
+                Text(
+                    text = "${sortedTracks.size} layers",
+                    fontFamily = JetBrainsMonoFamily,
+                    fontSize = 11.sp,
+                    color = RawColors.TextPrimary
+                )
+            }
+
+            MultiTrackTimelineList(
+                tracksTopFirst = sortedTracks,
+                selectedId = selectedLayerId,
+                currentTimeSec = currentTimeSec,
+                totalDurationSec = durationSec,
+                onSelect = { selectedLayerId = it },
+                onMoveAbove = { idx ->
+                    if (idx > 0) pushCommit(swapAdjacentZ(sortedTracks, idx, idx - 1))
+                },
+                onMoveBelow = { idx ->
+                    if (idx < sortedTracks.lastIndex) pushCommit(swapAdjacentZ(sortedTracks, idx, idx + 1))
+                },
+                onToggleHidden = { layer ->
+                    pushCommit(layers.map { if (it.id == layer.id) it.copy(hidden = !it.hidden) else it })
+                },
+                onDelete = { layer ->
+                    val next = layers.filterNot { it.id == layer.id }
+                    pushCommit(next)
+                    if (selectedLayerId == layer.id) {
+                        selectedLayerId = next.maxByOrNull { it.z }?.id
+                    }
+                },
+                onPreviewUpdate = { updated -> layers = updated },
+                onCommitUpdate = { before, updated ->
+                    undoStack.add(before)
+                    if (undoStack.size > 50) undoStack.removeAt(0)
+                    redoStack.clear()
+                    layers = updated
+                    onAutoSaveDraft(project.copy(layersJson = LayerJson.encode(updated)))
+                },
+                modifier = Modifier.weight(1f)
+            )
         }
     }
 
@@ -662,6 +754,251 @@ fun EditorScreen(
                     Text("Cancel", color = RawColors.TextMuted)
                 }
             }
+        )
+    }
+}
+
+@Composable
+private fun MultiTrackTimelineList(
+    tracksTopFirst: List<RawLayer>,
+    selectedId: String?,
+    currentTimeSec: Double,
+    totalDurationSec: Double,
+    onSelect: (String) -> Unit,
+    onMoveAbove: (Int) -> Unit,
+    onMoveBelow: (Int) -> Unit,
+    onToggleHidden: (RawLayer) -> Unit,
+    onDelete: (RawLayer) -> Unit,
+    onPreviewUpdate: (List<RawLayer>) -> Unit,
+    onCommitUpdate: (before: List<RawLayer>, after: List<RawLayer>) -> Unit,
+    modifier: Modifier = Modifier
+) {
+    val latestLayers by rememberUpdatedState(tracksTopFirst)
+    val density = LocalDensity.current
+    var laneWidthPx by remember { mutableFloatStateOf(1f) }
+    var beforeSnap by remember { mutableStateOf<List<RawLayer>?>(null) }
+
+    fun snap01(v: Double): Double = (v * 10.0).roundToInt() / 10.0
+
+    LazyColumn(
+        modifier = modifier.fillMaxWidth(),
+        contentPadding = PaddingValues(vertical = 6.dp, horizontal = 8.dp),
+        verticalArrangement = Arrangement.spacedBy(6.dp)
+    ) {
+        itemsIndexed(tracksTopFirst, key = { _, l -> l.id }) { index, layer ->
+            val selected = layer.id == selectedId
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(46.dp)
+                    .clip(RoundedCornerShape(12.dp))
+                    .background(if (selected) RawColors.HeroSurface else RawColors.BgPrimary.copy(alpha = 0.65f))
+                    .border(
+                        1.dp,
+                        if (selected) RawColors.TextPrimary else RawColors.Divider.copy(alpha = 0.6f),
+                        RoundedCornerShape(12.dp)
+                    )
+                    .clickable { onSelect(layer.id) }
+                    .padding(horizontal = 6.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(6.dp)
+            ) {
+                // Left track header: Above/Below ordering + Eye + Delete
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(2.dp)
+                ) {
+                    TinyTrackBtn(
+                        icon = RawIconType.FORWARD,
+                        enabled = index > 0,
+                        onClick = { onMoveAbove(index) }
+                    )
+                    TinyTrackBtn(
+                        icon = RawIconType.BACKWARD,
+                        enabled = index < tracksTopFirst.lastIndex,
+                        onClick = { onMoveBelow(index) }
+                    )
+                    TinyTrackBtn(
+                        icon = if (layer.hidden) RawIconType.EYE_OFF else RawIconType.EYE,
+                        tint = if (layer.hidden) RawColors.TextMuted else RawColors.TextPrimary,
+                        onClick = { onToggleHidden(layer) }
+                    )
+                    TinyTrackBtn(
+                        icon = RawIconType.TRASH,
+                        tint = RawColors.ErrorCoral,
+                        onClick = { onDelete(layer) }
+                    )
+                }
+
+                // Right clip lane with Playhead line and draggable/trimmable clip bar
+                Box(
+                    modifier = Modifier
+                        .weight(1f)
+                        .fillMaxHeight()
+                        .padding(vertical = 5.dp)
+                        .clip(RoundedCornerShape(8.dp))
+                        .background(RawColors.BgPrimary)
+                        .onSizeChanged { laneWidthPx = it.width.toFloat().coerceAtLeast(1f) }
+                ) {
+                    val startFrac = (layer.start / totalDurationSec).toFloat().coerceIn(0f, 1f)
+                    val endFrac = (layer.end / totalDurationSec).toFloat().coerceIn(startFrac, 1f)
+                    val barLeftPx = (startFrac * laneWidthPx).roundToInt()
+                    val minBarPx = with(density) { 36.dp.roundToPx() }
+                    val barWidthPx = ((endFrac - startFrac) * laneWidthPx).roundToInt().coerceAtLeast(minBarPx)
+
+                    Box(
+                        modifier = Modifier
+                            .offset { IntOffset(barLeftPx, 0) }
+                            .width(with(density) { barWidthPx.toDp() })
+                            .fillMaxHeight()
+                            .clip(RoundedCornerShape(7.dp))
+                            .background(
+                                when {
+                                    selected -> RawColors.TextPrimary
+                                    layer.type == "image" -> RawColors.SuccessMint.copy(alpha = 0.25f)
+                                    else -> RawColors.RaisedCard
+                                }
+                            )
+                            .pointerInput(layer.id, totalDurationSec, laneWidthPx) {
+                                detectDragGestures(
+                                    onDragStart = { beforeSnap = latestLayers },
+                                    onDrag = { change, drag ->
+                                        change.consume()
+                                        val cur = latestLayers
+                                        val curLayer = cur.firstOrNull { it.id == layer.id } ?: return@detectDragGestures
+                                        val deltaSec = (drag.x / laneWidthPx) * totalDurationSec
+                                        val span = curLayer.end - curLayer.start
+                                        val nextStart = snap01(
+                                            (curLayer.start + deltaSec).coerceIn(0.0, (totalDurationSec - span).coerceAtLeast(0.0))
+                                        )
+                                        val nextEnd = snap01(nextStart + span)
+                                        onPreviewUpdate(
+                                            cur.map { if (it.id == layer.id) it.copy(start = nextStart, end = nextEnd) else it }
+                                        )
+                                    },
+                                    onDragEnd = {
+                                        val b = beforeSnap
+                                        if (b != null) onCommitUpdate(b, latestLayers)
+                                        beforeSnap = null
+                                    },
+                                    onDragCancel = { beforeSnap = null }
+                                )
+                            },
+                        contentAlignment = Alignment.CenterStart
+                    ) {
+                        Text(
+                            text = layer.name.ifBlank { layer.text ?: layer.id },
+                            fontFamily = JetBrainsMonoFamily,
+                            fontSize = 10.sp,
+                            fontWeight = FontWeight.Medium,
+                            color = if (selected) RawColors.PrimaryBtnText else RawColors.TextPrimary,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                            modifier = Modifier.padding(horizontal = 12.dp)
+                        )
+
+                        // Left trim handle
+                        Box(
+                            modifier = Modifier
+                                .align(Alignment.CenterStart)
+                                .width(10.dp)
+                                .fillMaxHeight()
+                                .background(RawColors.PillGrey.copy(alpha = 0.7f))
+                                .pointerInput(layer.id, totalDurationSec, laneWidthPx) {
+                                    detectDragGestures(
+                                        onDragStart = { beforeSnap = latestLayers },
+                                        onDrag = { change, drag ->
+                                            change.consume()
+                                            val cur = latestLayers
+                                            val curLayer = cur.firstOrNull { it.id == layer.id } ?: return@detectDragGestures
+                                            val deltaSec = (drag.x / laneWidthPx) * totalDurationSec
+                                            val nextStart = snap01(
+                                                (curLayer.start + deltaSec).coerceIn(0.0, (curLayer.end - 0.1).coerceAtLeast(0.0))
+                                            )
+                                            onPreviewUpdate(
+                                                cur.map { if (it.id == layer.id) it.copy(start = nextStart) else it }
+                                            )
+                                        },
+                                        onDragEnd = {
+                                            val b = beforeSnap
+                                            if (b != null) onCommitUpdate(b, latestLayers)
+                                            beforeSnap = null
+                                        },
+                                        onDragCancel = { beforeSnap = null }
+                                    )
+                                }
+                        )
+
+                        // Right trim handle
+                        Box(
+                            modifier = Modifier
+                                .align(Alignment.CenterEnd)
+                                .width(10.dp)
+                                .fillMaxHeight()
+                                .background(RawColors.PillGrey.copy(alpha = 0.7f))
+                                .pointerInput(layer.id, totalDurationSec, laneWidthPx) {
+                                    detectDragGestures(
+                                        onDragStart = { beforeSnap = latestLayers },
+                                        onDrag = { change, drag ->
+                                            change.consume()
+                                            val cur = latestLayers
+                                            val curLayer = cur.firstOrNull { it.id == layer.id } ?: return@detectDragGestures
+                                            val deltaSec = (drag.x / laneWidthPx) * totalDurationSec
+                                            val nextEnd = snap01(
+                                                (curLayer.end + deltaSec).coerceIn(
+                                                    (curLayer.start + 0.1).coerceAtMost(totalDurationSec),
+                                                    totalDurationSec
+                                                )
+                                            )
+                                            onPreviewUpdate(
+                                                cur.map { if (it.id == layer.id) it.copy(end = nextEnd) else it }
+                                            )
+                                        },
+                                        onDragEnd = {
+                                            val b = beforeSnap
+                                            if (b != null) onCommitUpdate(b, latestLayers)
+                                            beforeSnap = null
+                                        },
+                                        onDragCancel = { beforeSnap = null }
+                                    )
+                                }
+                        )
+                    }
+
+                    // Playhead marker line
+                    val playheadX = ((currentTimeSec / totalDurationSec).toFloat().coerceIn(0f, 1f) * laneWidthPx).roundToInt()
+                    Box(
+                        modifier = Modifier
+                            .offset { IntOffset(playheadX, 0) }
+                            .width(2.dp)
+                            .fillMaxHeight()
+                            .background(RawColors.ErrorCoral)
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun TinyTrackBtn(
+    icon: RawIconType,
+    enabled: Boolean = true,
+    tint: Color = RawColors.TextPrimary,
+    onClick: () -> Unit
+) {
+    Box(
+        modifier = Modifier
+            .size(26.dp)
+            .clip(CircleShape)
+            .background(RawColors.HeroSurface)
+            .clickable(enabled = enabled, onClick = onClick),
+        contentAlignment = Alignment.Center
+    ) {
+        RawIcon(
+            type = icon,
+            size = 13.dp,
+            tint = if (enabled) tint else RawColors.Divider
         )
     }
 }
@@ -723,7 +1060,7 @@ private fun StageGestureOverlay(
     val selected = layers.firstOrNull { it.id == selectedId }
 
     var beforeSnapshot by remember { mutableStateOf<List<RawLayer>?>(null) }
-    var activeCorner by remember { mutableIntStateOf(-1) } // -1=move, 0=TL,1=TR,2=BL,3=BR
+    var activeCorner by remember { mutableIntStateOf(-1) }
 
     Box(
         modifier = Modifier
@@ -754,7 +1091,7 @@ private fun StageGestureOverlay(
                         beforeSnapshot = cur
                         val sx = start.x / scaleX
                         val sy = start.y / scaleY
-                        val hitRadius = 48f / scaleX
+                        val hitRadius = 56f / scaleX
                         val corners = listOf(
                             Offset(sel.x, sel.y),
                             Offset(sel.x + sel.w, sel.y),
@@ -843,33 +1180,6 @@ private fun StageGestureOverlay(
     }
 }
 
-private enum class ZOrderAction { FORWARD, BACKWARD, TO_FRONT, TO_BACK }
-
-private fun reorderLayerZ(layers: List<RawLayer>, id: String, action: ZOrderAction): List<RawLayer> {
-    val sorted = layers.sortedBy { it.z }.toMutableList()
-    val idx = sorted.indexOfFirst { it.id == id }
-    if (idx < 0) return layers
-    when (action) {
-        ZOrderAction.FORWARD -> if (idx < sorted.lastIndex) {
-            val item = sorted.removeAt(idx)
-            sorted.add(idx + 1, item)
-        }
-        ZOrderAction.BACKWARD -> if (idx > 0) {
-            val item = sorted.removeAt(idx)
-            sorted.add(idx - 1, item)
-        }
-        ZOrderAction.TO_FRONT -> {
-            val item = sorted.removeAt(idx)
-            sorted.add(item)
-        }
-        ZOrderAction.TO_BACK -> {
-            val item = sorted.removeAt(idx)
-            sorted.add(0, item)
-        }
-    }
-    return sorted.mapIndexed { newIdx, layer -> layer.copy(z = newIdx + 1) }
-}
-
 private fun swapAdjacentZ(sortedDesc: List<RawLayer>, a: Int, b: Int): List<RawLayer> {
     val list = sortedDesc.toMutableList()
     val tmp = list[a]
@@ -877,307 +1187,4 @@ private fun swapAdjacentZ(sortedDesc: List<RawLayer>, a: Int, b: Int): List<RawL
     list[b] = tmp
     val count = list.size
     return list.mapIndexed { idx, l -> l.copy(z = count - idx) }
-}
-
-@Composable
-private fun LayerToolsPanel(
-    layer: RawLayer,
-    onOpacityPreview: (Float) -> Unit,
-    onOpacityCommit: (Float) -> Unit,
-    onMoveOrder: (ZOrderAction) -> Unit,
-    onDuplicate: () -> Unit,
-    onDelete: () -> Unit,
-    onEditText: () -> Unit
-) {
-    Column(
-        modifier = Modifier
-            .fillMaxSize()
-            .verticalScroll(rememberScrollState()),
-        verticalArrangement = Arrangement.spacedBy(12.dp)
-    ) {
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Text(
-                text = layer.name.ifBlank { layer.id },
-                style = RawTypography.titleMedium,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-                modifier = Modifier.weight(1f)
-            )
-            Text(
-                text = "${(layer.opacity * 100).roundToInt()}%",
-                style = RawTypography.labelMedium
-            )
-        }
-
-        // Opacity slider
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Text("Opacity", style = RawTypography.bodyMedium, modifier = Modifier.width(64.dp))
-            Slider(
-                value = layer.opacity.coerceIn(0f, 1f),
-                onValueChange = onOpacityPreview,
-                onValueChangeFinished = { onOpacityCommit(layer.opacity) },
-                colors = SliderDefaults.colors(
-                    thumbColor = RawColors.TextPrimary,
-                    activeTrackColor = RawColors.TextPrimary,
-                    inactiveTrackColor = RawColors.PillGrey
-                ),
-                modifier = Modifier.weight(1f)
-            )
-        }
-
-        // Actions row
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .horizontalScroll(rememberScrollState()),
-            horizontalArrangement = Arrangement.spacedBy(8.dp)
-        ) {
-            if (layer.type == "text") {
-                ToolChipButton("Edit text", RawIconType.EDIT, onClick = onEditText)
-            }
-            ToolChipButton("Forward", RawIconType.FORWARD) { onMoveOrder(ZOrderAction.FORWARD) }
-            ToolChipButton("Back", RawIconType.BACKWARD) { onMoveOrder(ZOrderAction.BACKWARD) }
-            ToolChipButton("To front", RawIconType.TO_FRONT) { onMoveOrder(ZOrderAction.TO_FRONT) }
-            ToolChipButton("To back", RawIconType.TO_BACK) { onMoveOrder(ZOrderAction.TO_BACK) }
-            ToolChipButton("Duplicate", RawIconType.DUPLICATE, onClick = onDuplicate)
-            ToolChipButton("Delete", RawIconType.TRASH, tint = RawColors.ErrorCoral, onClick = onDelete)
-        }
-    }
-}
-
-@Composable
-private fun TimingStripPanel(
-    layers: List<RawLayer>,
-    selectedId: String?,
-    totalDurationSec: Double,
-    onSelect: (String) -> Unit,
-    onPreviewUpdate: (List<RawLayer>) -> Unit,
-    onCommitUpdate: (before: List<RawLayer>, after: List<RawLayer>) -> Unit
-) {
-    val latestLayers by rememberUpdatedState(layers)
-    val density = LocalDensity.current
-    var trackWidthPx by remember { mutableFloatStateOf(1f) }
-    var beforeSnap by remember { mutableStateOf<List<RawLayer>?>(null) }
-
-    fun snap01(v: Double): Double = (v * 10.0).roundToInt() / 10.0
-
-    LazyColumn(
-        modifier = Modifier.fillMaxSize(),
-        verticalArrangement = Arrangement.spacedBy(8.dp)
-    ) {
-        itemsIndexed(layers, key = { _, l -> l.id }) { _, layer ->
-            val selected = layer.id == selectedId
-            Column(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .clip(RoundedCornerShape(12.dp))
-                    .background(if (selected) RawColors.HeroSurface else Color.Transparent)
-                    .clickable { onSelect(layer.id) }
-                    .padding(horizontal = 8.dp, vertical = 6.dp)
-            ) {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween
-                ) {
-                    Text(
-                        text = layer.name.ifBlank { layer.id },
-                        style = RawTypography.labelMedium,
-                        color = if (selected) RawColors.TextPrimary else RawColors.TextMuted,
-                        maxLines = 1
-                    )
-                    Text(
-                        text = "${String.format(java.util.Locale.US, "%.1f", layer.start)}s - ${String.format(java.util.Locale.US, "%.1f", layer.end)}s",
-                        style = RawTypography.labelSmall
-                    )
-                }
-                Spacer(modifier = Modifier.height(6.dp))
-                Box(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(30.dp)
-                        .clip(RoundedCornerShape(10.dp))
-                        .background(RawColors.BgPrimary)
-                        .onSizeChanged { trackWidthPx = it.width.toFloat().coerceAtLeast(1f) }
-                ) {
-                    val startFrac = (layer.start / totalDurationSec).toFloat().coerceIn(0f, 1f)
-                    val endFrac = (layer.end / totalDurationSec).toFloat().coerceIn(startFrac, 1f)
-                    val barLeftPx = (startFrac * trackWidthPx).roundToInt()
-                    val barWidthPx = ((endFrac - startFrac) * trackWidthPx).roundToInt().coerceAtLeast(with(density) { 28.dp.roundToPx() })
-
-                    Box(
-                        modifier = Modifier
-                            .offset { IntOffset(barLeftPx, 0) }
-                            .width(with(density) { barWidthPx.toDp() })
-                            .height(30.dp)
-                            .clip(RoundedCornerShape(8.dp))
-                            .background(if (selected) RawColors.TextPrimary else RawColors.RaisedCard)
-                            .pointerInput(layer.id, totalDurationSec, trackWidthPx) {
-                                detectDragGestures(
-                                    onDragStart = { beforeSnap = latestLayers },
-                                    onDrag = { change, drag ->
-                                        change.consume()
-                                        val cur = latestLayers
-                                        val curLayer = cur.firstOrNull { it.id == layer.id } ?: return@detectDragGestures
-                                        val deltaSec = (drag.x / trackWidthPx) * totalDurationSec
-                                        val span = curLayer.end - curLayer.start
-                                        val nextStart = snap01((curLayer.start + deltaSec).coerceIn(0.0, (totalDurationSec - span).coerceAtLeast(0.0)))
-                                        val nextEnd = snap01(nextStart + span)
-                                        onPreviewUpdate(
-                                            cur.map {
-                                                if (it.id == layer.id) it.copy(start = nextStart, end = nextEnd) else it
-                                            }
-                                        )
-                                    },
-                                    onDragEnd = {
-                                        val b = beforeSnap
-                                        if (b != null) onCommitUpdate(b, latestLayers)
-                                        beforeSnap = null
-                                    },
-                                    onDragCancel = { beforeSnap = null }
-                                )
-                            }
-                    ) {
-                        // Left trim handle
-                        Box(
-                            modifier = Modifier
-                                .align(Alignment.CenterStart)
-                                .width(12.dp)
-                                .height(30.dp)
-                                .background(RawColors.PillGrey.copy(alpha = 0.6f))
-                                .pointerInput(layer.id, totalDurationSec, trackWidthPx) {
-                                    detectDragGestures(
-                                        onDragStart = { beforeSnap = latestLayers },
-                                        onDrag = { change, drag ->
-                                            change.consume()
-                                            val cur = latestLayers
-                                            val curLayer = cur.firstOrNull { it.id == layer.id } ?: return@detectDragGestures
-                                            val deltaSec = (drag.x / trackWidthPx) * totalDurationSec
-                                            val nextStart = snap01((curLayer.start + deltaSec).coerceIn(0.0, (curLayer.end - 0.1).coerceAtLeast(0.0)))
-                                            onPreviewUpdate(
-                                                cur.map { if (it.id == layer.id) it.copy(start = nextStart) else it }
-                                            )
-                                        },
-                                        onDragEnd = {
-                                            val b = beforeSnap
-                                            if (b != null) onCommitUpdate(b, latestLayers)
-                                            beforeSnap = null
-                                        },
-                                        onDragCancel = { beforeSnap = null }
-                                    )
-                                }
-                        )
-                        // Right trim handle
-                        Box(
-                            modifier = Modifier
-                                .align(Alignment.CenterEnd)
-                                .width(12.dp)
-                                .height(30.dp)
-                                .background(RawColors.PillGrey.copy(alpha = 0.6f))
-                                .pointerInput(layer.id, totalDurationSec, trackWidthPx) {
-                                    detectDragGestures(
-                                        onDragStart = { beforeSnap = latestLayers },
-                                        onDrag = { change, drag ->
-                                            change.consume()
-                                            val cur = latestLayers
-                                            val curLayer = cur.firstOrNull { it.id == layer.id } ?: return@detectDragGestures
-                                            val deltaSec = (drag.x / trackWidthPx) * totalDurationSec
-                                            val nextEnd = snap01((curLayer.end + deltaSec).coerceIn((curLayer.start + 0.1).coerceAtMost(totalDurationSec), totalDurationSec))
-                                            onPreviewUpdate(
-                                                cur.map { if (it.id == layer.id) it.copy(end = nextEnd) else it }
-                                            )
-                                        },
-                                        onDragEnd = {
-                                            val b = beforeSnap
-                                            if (b != null) onCommitUpdate(b, latestLayers)
-                                            beforeSnap = null
-                                        },
-                                        onDragCancel = { beforeSnap = null }
-                                    )
-                                }
-                        )
-                    }
-                }
-            }
-        }
-    }
-}
-
-@Composable
-private fun EditorPillTab(
-    label: String,
-    icon: RawIconType,
-    selected: Boolean,
-    onClick: () -> Unit
-) {
-    Row(
-        modifier = Modifier
-            .height(38.dp)
-            .clip(RoundedCornerShape(19.dp))
-            .background(if (selected) RawColors.PrimaryBtnBg else RawColors.RaisedCard)
-            .clickable(onClick = onClick)
-            .padding(horizontal = 14.dp),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(6.dp)
-    ) {
-        RawIcon(
-            type = icon,
-            size = 15.dp,
-            tint = if (selected) RawColors.PrimaryBtnText else RawColors.TextPrimary
-        )
-        Text(
-            text = label,
-            style = RawTypography.bodyMedium.copy(fontWeight = FontWeight.SemiBold),
-            color = if (selected) RawColors.PrimaryBtnText else RawColors.TextPrimary
-        )
-    }
-}
-
-@Composable
-private fun ToolChipButton(
-    label: String,
-    icon: RawIconType,
-    tint: Color = RawColors.TextPrimary,
-    onClick: () -> Unit
-) {
-    RawPressButton(onClick = onClick) {
-        Row(
-            modifier = Modifier
-                .height(42.dp)
-                .clip(RoundedCornerShape(21.dp))
-                .background(RawColors.RaisedCard)
-                .padding(horizontal = 14.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(6.dp)
-        ) {
-            RawIcon(type = icon, size = 16.dp, tint = tint)
-            Text(text = label, style = RawTypography.bodyMedium, color = tint)
-        }
-    }
-}
-
-@Composable
-private fun IconMiniButton(
-    icon: RawIconType,
-    enabled: Boolean = true,
-    tint: Color = RawColors.TextPrimary,
-    onClick: () -> Unit
-) {
-    Box(
-        modifier = Modifier
-            .size(34.dp)
-            .clip(CircleShape)
-            .background(RawColors.HeroSurface)
-            .clickable(enabled = enabled, onClick = onClick),
-        contentAlignment = Alignment.Center
-    ) {
-        RawIcon(
-            type = icon,
-            size = 16.dp,
-            tint = if (enabled) tint else RawColors.Divider
-        )
-    }
 }

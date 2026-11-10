@@ -4,6 +4,20 @@ import kotlinx.serialization.Serializable
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 
+enum class LayerMask(val key: String, val label: String) {
+    NONE("none", "None"),
+    ROUNDED("rounded", "Rounded"),
+    CIRCLE("circle", "Circle"),
+    PILL("pill", "Pill"),
+    CINEMA("cinema", "Cinema"),
+    WIPE_LEFT("wipe_left", "Half Crop");
+
+    companion object {
+        fun fromKey(key: String?): LayerMask =
+            entries.firstOrNull { it.key.equals(key, ignoreCase = true) } ?: NONE
+    }
+}
+
 @Serializable
 data class RawLayer(
     val id: String,
@@ -19,6 +33,7 @@ data class RawLayer(
     val end: Double = 5.0,
     val text: String? = null,
     val src: String? = null,
+    val mask: String = "none",
     val locked: Boolean = false,
     val hidden: Boolean = false
 ) {
@@ -35,7 +50,8 @@ data class RawLayer(
         start = start,
         end = end,
         text = text,
-        src = src
+        src = src,
+        mask = mask
     )
 }
 
@@ -53,7 +69,8 @@ data class RawLayerExport(
     val start: Double,
     val end: Double,
     val text: String? = null,
-    val src: String? = null
+    val src: String? = null,
+    val mask: String = "none"
 )
 
 object LayerJson {

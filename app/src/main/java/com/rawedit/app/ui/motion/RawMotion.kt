@@ -1,6 +1,8 @@
 package com.rawedit.app.ui.motion
 
 import android.provider.Settings
+import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.ContentTransform
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.CubicBezierEasing
 import androidx.compose.animation.core.Spring
@@ -8,6 +10,10 @@ import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.scaleIn
+import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -478,62 +484,34 @@ fun GhostWordWipeOverlay(
 }
 
 /**
- * Ink-bloom circular reveal overlay with rippled edge expanding from tap origin.
+ * Smooth, zero-flash screen transition tuned for 60fps on Android 9+ low-end devices.
+ * Avoids black-screen flashes and heavy per-frame path clipping.
  */
 @Composable
-fun InkBloomRevealMask(
-    active: Boolean,
-    origin: Offset,
-    onFinished: () -> Unit,
-    content: @Composable () -> Unit
+fun <T> RawScreenTransition(
+    targetState: T,
+    modifier: Modifier = Modifier,
+    content: @Composable (T) -> Unit
 ) {
     val animEnabled = rememberAnimationsEnabled()
-    val progress = remember(active, origin) { Animatable(if (active && animEnabled) 0.05f else 1f) }
-
-    LaunchedEffect(active, origin, animEnabled) {
-        if (active && animEnabled) {
-            progress.snapTo(0.05f)
-            progress.animateTo(1f, tween(durationMillis = 420, easing = RawEasings.InkSpread))
-            onFinished()
-        } else {
-            onFinished()
-        }
-    }
-
-    val p = progress.value
-    Box(
-        modifier = Modifier
-            .fillMaxSize()
-            .graphicsLayer {
-                alpha = if (p < 0.1f) p * 10f else 1f
+    AnimatedContent(
+        targetState = targetState,
+        modifier = modifier.fillMaxSize(),
+        transitionSpec = {
+            if (!animEnabled) {
+                ContentTransform(
+                    targetContentEnter = fadeIn(tween(0)),
+                    initialContentExit = fadeOut(tween(0))
+                )
+            } else {
+                (fadeIn(tween(220, easing = RawEasings.SnappyOut)) +
+                    scaleIn(initialScale = 0.965f, animationSpec = tween(240, easing = RawEasings.SnappyOut)))
+                    .togetherWith(fadeOut(tween(160)))
             }
-    ) {
-        if (!animEnabled || p >= 0.995f) {
-            content()
-        } else {
-            val clipModifier = Modifier.fillMaxSize()
-            Box(modifier = clipModifier) {
-                content()
-                // Inverse soft vignette ring at bloom edge
-                Canvas(modifier = Modifier.fillMaxSize()) {
-                    val maxR = hypot(size.width.toDouble(), size.height.toDouble()).toFloat() * 1.1f
-                    val r = maxR * p
-                    val path = Path()
-                    val segments = 36
-                    for (s in 0..segments) {
-                        val angle = (s.toFloat() / segments) * (2f * PI.toFloat())
-                        val ripple = sin(angle * 7f + p * 6f) * (12f * (1f - p))
-                        val rx = origin.x + cos(angle) * (r + ripple)
-                        val ry = origin.y + sin(angle) * (r + ripple)
-                        if (s == 0) path.moveTo(rx, ry) else path.lineTo(rx, ry)
-                    }
-                    path.close()
-                    clipPath(path, clipOp = androidx.compose.ui.graphics.ClipOp.Difference) {
-                        drawRect(RawColors.BgPrimary.copy(alpha = (1f - p).coerceIn(0f, 0.92f)))
-                    }
-                }
-            }
-        }
+        },
+        label = "raw_screen_transition"
+    ) { state ->
+        content(state)
     }
 }
 

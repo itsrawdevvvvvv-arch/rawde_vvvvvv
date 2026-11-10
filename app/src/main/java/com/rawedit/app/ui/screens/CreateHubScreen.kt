@@ -291,7 +291,10 @@ private fun StepActionRow(step: StepRowModel) {
                 Text(
                     text = "${step.number}. ${step.title}",
                     style = RawTypography.titleMedium.copy(fontWeight = FontWeight.Bold),
-                    color = if (step.enabled) RawColors.TextPrimary else RawColors.TextMuted
+                    color = if (step.enabled) RawColors.TextPrimary else RawColors.TextMuted,
+                    maxLines = 1,
+                    overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
+                    modifier = Modifier.weight(1f, fill = false)
                 )
                 Box(
                     modifier = Modifier
@@ -304,7 +307,9 @@ private fun StepActionRow(step: StepRowModel) {
                     Text(
                         text = step.statusText,
                         style = RawTypography.labelSmall,
-                        color = if (step.statusDone) RawColors.SuccessMint else RawColors.TextMuted
+                        color = if (step.statusDone) RawColors.SuccessMint else RawColors.TextMuted,
+                        maxLines = 1,
+                        softWrap = false
                     )
                 }
             }

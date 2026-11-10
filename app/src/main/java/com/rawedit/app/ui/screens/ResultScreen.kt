@@ -73,6 +73,7 @@ fun ResultScreen(
     cacheManager: CacheManager,
     playCelebration: Boolean,
     onSavedToGallery: (galleryUri: String) -> Unit,
+    onEditInTimeline: (projectId: Long) -> Unit,
     onMakeAnother: () -> Unit,
     onBack: () -> Unit
 ) {
@@ -294,6 +295,35 @@ fun ResultScreen(
                         RawIcon(RawIconType.SHARE, size = 20.dp)
                         Spacer(modifier = Modifier.width(8.dp))
                         Text("Share", style = RawTypography.labelLarge)
+                    }
+                }
+            }
+
+            // Edit in multi-track timeline button (right after render)
+            if (video.projectId > 0L) {
+                RawPressButton(
+                    onClick = {
+                        player.pause()
+                        onEditInTimeline(video.projectId)
+                    }
+                ) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(58.dp)
+                            .clip(RoundedCornerShape(29.dp))
+                            .background(RawColors.HeroSurface)
+                            .border(1.dp, RawColors.PillGrey, RoundedCornerShape(29.dp))
+                            .padding(horizontal = 20.dp),
+                        horizontalArrangement = Arrangement.Center,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        RawIcon(RawIconType.LAYERS, size = 20.dp, tint = RawColors.TextPrimary)
+                        Spacer(modifier = Modifier.width(10.dp))
+                        Text(
+                            text = "Edit in timeline (position, images, mask)",
+                            style = RawTypography.labelLarge
+                        )
                     }
                 }
             }

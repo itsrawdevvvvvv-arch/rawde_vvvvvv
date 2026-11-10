@@ -7,6 +7,8 @@ import android.os.Build
 import android.view.WindowManager
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -33,9 +35,10 @@ import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.draw.clipToBounds
+import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.graphics.drawscope.clipRect
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
@@ -145,8 +148,13 @@ fun RenderingScreen(
                 }
             }
 
-            // Giant ghost word filling bottom-to-top with real progress
-            val fraction = (state.progressPercent / 100f).coerceIn(0f, 1f)
+            // Giant ghost word filling bottom-to-top in exact pixel alignment with real progress
+            val targetFraction = (state.progressPercent / 100f).coerceIn(0f, 1f)
+            val smoothFraction by animateFloatAsState(
+                targetValue = targetFraction,
+                animationSpec = tween(durationMillis = 220),
+                label = "render_word_fill"
+            )
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -156,7 +164,7 @@ fun RenderingScreen(
                     .border(1.dp, RawColors.Divider, RoundedCornerShape(22.dp)),
                 contentAlignment = Alignment.Center
             ) {
-                // Faded ghost word
+                // Base faded ghost word
                 Text(
                     text = "RENDERING",
                     fontFamily = InterFontFamily,
@@ -164,34 +172,26 @@ fun RenderingScreen(
                     fontSize = 48.sp,
                     letterSpacing = (-1.5).sp,
                     color = RawColors.TextPrimary.copy(alpha = 0.14f),
-                    maxLines = 1
+                    maxLines = 1,
+                    softWrap = false
                 )
-                // White filled portion rising bottom-to-top
-                Box(
-                    modifier = Modifier
-                        .align(Alignment.BottomCenter)
-                        .fillMaxWidth()
-                        .height(110.dp * fraction)
-                        .clipToBounds(),
-                    contentAlignment = Alignment.BottomCenter
-                ) {
-                    Box(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .height(110.dp),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Text(
-                            text = "RENDERING",
-                            fontFamily = InterFontFamily,
-                            fontWeight = FontWeight.ExtraBold,
-                            fontSize = 48.sp,
-                            letterSpacing = (-1.5).sp,
-                            color = RawColors.TextPrimary,
-                            maxLines = 1
-                        )
+                // Identical white word clipped smoothly from bottom to top
+                Text(
+                    text = "RENDERING",
+                    fontFamily = InterFontFamily,
+                    fontWeight = FontWeight.ExtraBold,
+                    fontSize = 48.sp,
+                    letterSpacing = (-1.5).sp,
+                    color = RawColors.TextPrimary,
+                    maxLines = 1,
+                    softWrap = false,
+                    modifier = Modifier.drawWithContent {
+                        val topY = size.height * (1f - smoothFraction)
+                        clipRect(left = 0f, top = topY, right = size.width, bottom = size.height) {
+                            this@drawWithContent.drawContent()
+                        }
                     }
-                }
+                )
             }
 
             // Mono status line + elapsed / ETA (after 5%)
