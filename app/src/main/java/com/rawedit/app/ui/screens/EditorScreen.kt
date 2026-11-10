@@ -796,7 +796,7 @@ fun EditorScreen(
             )
             if (selectedLayer?.type == "text") {
                 DockToolButton(
-                    icon = RawIconType.CODE,
+                    icon = RawIconType.EDIT,
                     label = "Edit Text",
                     enabled = true,
                     highlighted = false,
