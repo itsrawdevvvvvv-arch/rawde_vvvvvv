@@ -455,7 +455,7 @@ fun HomeScreen(
                     )
                 }
 
-                AnimatedVisibility(
+                androidx.compose.animation.AnimatedVisibility(
                     visible = catAwake,
                     enter = fadeIn(tween(180)),
                     exit = fadeOut(tween(180)),
