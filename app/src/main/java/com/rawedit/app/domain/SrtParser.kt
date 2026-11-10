@@ -17,9 +17,9 @@ data class SrtParseResult(
 
 object SrtParser {
 
-    private const val MAX_INPUT_BYTES = 256 * 1024
-    private const val MAX_PROMPT_BYTES = 60 * 1024
-    private const val MAX_CUES = 5000
+    private const val MAX_INPUT_BYTES = 4 * 1024 * 1024
+    private const val MAX_PROMPT_BYTES = 2 * 1024 * 1024
+    private const val MAX_CUES = 20_000
 
     private val TIME_LINE_REGEX = Regex(
         """(\d{1,2}):(\d{2}):(\d{2})[,.](\d{3})\s*-->\s*(\d{1,2}):(\d{2}):(\d{2})[,.](\d{3})"""

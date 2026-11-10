@@ -52,9 +52,12 @@ class CacheManager(private val context: Context) {
     val codeStoreDir: File
         get() = File(context.filesDir, "raw_code").apply { mkdirs() }
 
+    val sharedPacksDir: File
+        get() = File(context.filesDir, "shared_packs").apply { mkdirs() }
+
     fun persistHtmlCode(projectId: Long, html: String): String {
         // Keep Room rows safely under Android 9 CursorWindow limits even for multi-MB unlimited HTML
-        if (html.length <= 512_000) return html
+        if (html.length <= 120_000) return html
         val outFile = File(codeStoreDir, "project_${projectId}.html")
         outFile.writeText(html, Charsets.UTF_8)
         return "$CODE_FILE_PREFIX${outFile.name}"
@@ -65,6 +68,95 @@ class CacheManager(private val context: Context) {
         val fileName = stored.removePrefix(CODE_FILE_PREFIX)
         val file = File(codeStoreDir, fileName)
         return if (file.exists()) runCatching { file.readText(Charsets.UTF_8) }.getOrDefault("") else ""
+    }
+
+    fun persistTopicText(projectId: Long, topic: String): String {
+        val trimmed = topic.trim()
+        if (trimmed.length <= 60_000) return trimmed
+        val outFile = File(codeStoreDir, "topic_${projectId}.txt")
+        outFile.writeText(trimmed, Charsets.UTF_8)
+        return "$TOPIC_FILE_PREFIX${outFile.name}"
+    }
+
+    fun resolveTopicText(stored: String): String {
+        if (!stored.startsWith(TOPIC_FILE_PREFIX)) return stored
+        val fileName = stored.removePrefix(TOPIC_FILE_PREFIX)
+        val file = File(codeStoreDir, fileName)
+        return if (file.exists()) runCatching { file.readText(Charsets.UTF_8) }.getOrDefault("") else ""
+    }
+
+    fun persistSrtText(projectId: Long, srt: String): String {
+        if (srt.length <= 120_000) return srt
+        val outFile = File(codeStoreDir, "srt_${projectId}.srt")
+        outFile.writeText(srt, Charsets.UTF_8)
+        return "$SRT_FILE_PREFIX${outFile.name}"
+    }
+
+    fun resolveSrtText(stored: String): String {
+        if (!stored.startsWith(SRT_FILE_PREFIX)) return stored
+        val fileName = stored.removePrefix(SRT_FILE_PREFIX)
+        val file = File(codeStoreDir, fileName)
+        return if (file.exists()) runCatching { file.readText(Charsets.UTF_8) }.getOrDefault("") else ""
+    }
+
+    fun deleteOverflowForProject(projectId: Long) {
+        runCatching { File(codeStoreDir, "project_${projectId}.html").delete() }
+        runCatching { File(codeStoreDir, "topic_${projectId}.txt").delete() }
+        runCatching { File(codeStoreDir, "srt_${projectId}.srt").delete() }
+    }
+
+    suspend fun prepareStylePackShareFile(): File = withContext(Dispatchers.IO) {
+        val outFile = File(sharedPacksDir, STYLE_PACK_ASSET_NAME)
+        context.assets.open(STYLE_PACK_ASSET_NAME).use { input ->
+            FileOutputStream(outFile).use { output ->
+                input.copyTo(output)
+            }
+        }
+        outFile
+    }
+
+    suspend fun saveStylePackToUri(destUri: Uri): Result<Unit> = withContext(Dispatchers.IO) {
+        runCatching {
+            context.contentResolver.openOutputStream(destUri)?.use { output ->
+                context.assets.open(STYLE_PACK_ASSET_NAME).use { input ->
+                    input.copyTo(output)
+                }
+            } ?: throw IllegalStateException("Could not open selected location.")
+            Unit
+        }
+    }
+
+    suspend fun saveStylePackToDownloads(): Result<String> = withContext(Dispatchers.IO) {
+        runCatching {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                val values = ContentValues().apply {
+                    put(MediaStore.Downloads.DISPLAY_NAME, STYLE_PACK_ASSET_NAME)
+                    put(MediaStore.Downloads.MIME_TYPE, "application/zip")
+                    put(MediaStore.Downloads.RELATIVE_PATH, "${Environment.DIRECTORY_DOWNLOADS}/raw_edit")
+                    put(MediaStore.Downloads.IS_PENDING, 1)
+                }
+                val resolver = context.contentResolver
+                val uri = resolver.insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI, values)
+                    ?: throw IllegalStateException("Could not create Downloads entry.")
+                try {
+                    resolver.openOutputStream(uri)?.use { out ->
+                        context.assets.open(STYLE_PACK_ASSET_NAME).use { input ->
+                            input.copyTo(out)
+                        }
+                    } ?: throw IllegalStateException("Could not write ZIP to Downloads.")
+                    val done = ContentValues().apply {
+                        put(MediaStore.Downloads.IS_PENDING, 0)
+                    }
+                    resolver.update(uri, done, null, null)
+                } catch (t: Throwable) {
+                    resolver.delete(uri, null, null)
+                    throw t
+                }
+                "Saved to Downloads/raw_edit/$STYLE_PACK_ASSET_NAME"
+            } else {
+                throw UnsupportedOperationException("Picker required on Android 9")
+            }
+        }
     }
 
     fun createCameraTempFile(): File {
@@ -369,5 +461,8 @@ class CacheManager(private val context: Context) {
         private const val MAX_IMAGE_BYTES = 10L * 1024L * 1024L
         private const val MAX_IMAGE_DIM = 2560
         private const val CODE_FILE_PREFIX = "@rawfile:"
+        private const val TOPIC_FILE_PREFIX = "@rawtxt:"
+        private const val SRT_FILE_PREFIX = "@rawsrt:"
+        const val STYLE_PACK_ASSET_NAME = "kinetic-explainer-style.zip"
     }
 }

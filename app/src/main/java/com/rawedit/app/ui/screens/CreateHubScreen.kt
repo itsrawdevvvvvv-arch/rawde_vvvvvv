@@ -100,7 +100,7 @@ fun CreateHubScreen(
         StepRowModel(
             number = 2,
             title = "Copy prompt",
-            subtitle = "Paste into Claude and answer 3 quick questions",
+            subtitle = "Download style pack ZIP + copy prompt into Cloud AI",
             statusText = if (hasAudio) "Ready" else "Step 1 first",
             statusDone = hasAudio,
             enabled = hasAudio,
@@ -112,7 +112,7 @@ fun CreateHubScreen(
             subtitle = if (hasCode) {
                 "Validated • ${FormatHelpers.formatDuration(project.codeDurationSec)}"
             } else {
-                "Paste unlimited HTML code returned by Claude"
+                "Paste unlimited HTML code returned by Cloud AI"
             },
             statusText = if (hasCode) "Ready" else "Needed",
             statusDone = hasCode,

@@ -14,11 +14,12 @@ object PromptGenerator {
         val durationFormatted = String.format(Locale.US, "%.2f", durationSeconds)
         val cleanTopic = topic.trim().ifEmpty { "Not specified" }
         val hasSrt = srtText.isNotBlank()
+        val hasLongScript = cleanTopic.length > 160
 
-        val q1Line = if (hasSrt) {
-            "1. Do you have the SRT subtitle file for this voiceover? [SRT text is already attached below, so DO NOT ask question 1 again.]"
-        } else {
-            "1. Do you have the SRT subtitle file for this voiceover? If yes, paste its text. An SRT gives exact word timing."
+        val q1Line = when {
+            hasSrt -> "1. Script / SRT timing: [SRT subtitles are already attached below — DO NOT ask for SRT or script again.]"
+            hasLongScript -> "1. SRT subtitles: Do you have an `.srt` file with exact word timestamps? (Voiceover script text is attached below — reply \"no SRT\" to distribute scenes evenly across $durationFormatted s, or paste `.srt`.)"
+            else -> "1. Script & timing: Paste your voiceover script or `.srt` subtitle file so every scene matches exact word timing."
         }
 
         val srtBlock = if (hasSrt) {
@@ -28,94 +29,88 @@ object PromptGenerator {
         }
 
         return """
-You are an expert typography motion designer and creative coder. You will build ONE
-self-contained HTML file that renders a 1920x1080 kinetic typography reel synced to a voiceover.
+You are an expert motion designer and creative coder. Using the attached `kinetic-explainer-style.zip` skill pack (which I uploaded with this prompt), build ONE complete, self-contained HTML file rendering a 1920x1080 (16:9, 30 fps) kinetic-typography explainer synced to my voiceover.
+
+FIRST READ THE ATTACHED ZIP (`kinetic-explainer-style.zip`):
+- Read `kinetic-explainer-style/SKILL.md`, `docs/STYLE_BIBLE.md`, `docs/BEAT_SHEETS.md`.
+- Inspect `style/tokens.css`, `style/components.css`, `engine/engine.js`, and `template/scenes.js`.
+- If you can view images, look at `reference/*.jpg` and `reference/reference_fullframe_step01.png` to match the exact visual proportions, margins, cards, viewfinder brackets, and polish.
 
 ================================================================================
-STEP 1 - ASK QUESTIONS FIRST (do not write HTML code yet)
+STEP 1 - ASK BRIEF QUESTIONS FIRST (DO NOT WRITE HTML CODE YET)
 ================================================================================
-Ask me these in one short message and wait for my reply:
+Send ONE short message asking only what is missing, then WAIT for my reply:
 $q1Line
-2. Which colour palette should I use? Give hex codes (dark background, light background, accent), or say "default" for the Crimson & Warm Cream palette below.
-3. Which fonts do you want? Pick from the bundled font list below, or say "default".
-4. Any hook idea, tone, or specific words to emphasise? (optional)
-If I say "you decide" or "default", use the defaults immediately.
+2. Palette & fonts: Reply "default" to use the signature Kinetic Cream & Crimson palette + Poppins font from the ZIP, OR give custom dark/light/accent hex codes and font names from the bundled font list below.
+3. CTA & language: Confirm language style (English / Hinglish / etc.) and any social handle, keyword, or hook idea (optional — or say "default").
+
+If I reply "default", "you decide", or answer these questions, immediately proceed to STEP 2 without running Python/Playwright tools (`tools/render.py` is NOT needed because the `raw_edit` Android app renders your HTML on-device).
 
 ================================================================================
-STEP 2 - AFTER MY ANSWERS, OUTPUT ONLY VALID RAW HTML (ZERO EXPLANATION, ZERO FENCES)
+STEP 2 - COMPACT SINGLE-FILE HTML OUTPUT (ZERO ERRORS, ZERO TOKEN TRUNCATION)
 ================================================================================
-- Start directly with `<!DOCTYPE html>` and end with `</html>`.
-- Do NOT wrap output in ```html or ``` markdown fences.
-- Do NOT add any commentary before or after the HTML.
+Do NOT split output into separate `.css`/`.js` files. Combine CSS, declarative `window.PROJECT` scene data, and the scene engine into ONE self-contained HTML file:
+- Start directly with `<!DOCTYPE html>` and end cleanly with `</html>`.
+- Output ONLY valid raw HTML (no prose before or after, no unclosed fences).
+- **KEEP IT COMPACT BY USING THE DATA-DRIVEN ENGINE**:
+  Inline the compact `tokens.css` variables + `components.css` styles inside `<style>`, inline the compact deterministic `engine.js` runtime inside `<script>`, and author the entire video declaratively inside `window.PROJECT = { duration: $durationFormatted, progress: [...], scenes: [...] }`.
+  Using compact `PROJECT.scenes` data + the reusable engine guarantees a rich 15-25 scene reel fits comfortably inside a single response without ever hitting output word/token limits!
 
 PROJECT INPUTS:
 - Voiceover file: $cleanFile
-- Exact duration: $durationFormatted seconds (`window.RAW.duration` MUST equal $durationFormatted).
-- Topic / notes: $cleanTopic$srtBlock
+- Voiceover length: $durationFormatted seconds (`window.PROJECT.duration` and `window.RAW.duration` MUST equal $durationFormatted).
+- Script / topic notes: $cleanTopic$srtBlock
 
-BUNDLED OFL FONTS (already loaded locally; use ONLY these exact family names in CSS):
-- `Montserrat` (weights: 700, 800, 900)
+BUNDLED OFL FONTS ALREADY LOADED LOCALLY BY THE APP:
+- `Poppins` (weights: 400, 600, 700, 800, 900)  [ZIP default]
+- `Montserrat` (weights: 600, 700, 800, 900)
 - `Open Sans` (weights: 400, 600)
-- `Poppins` (weights: 600, 800)
-- `Inter` (weights: 400, 500, 600, 700, 800)
-- `Bebas Neue` (weight: 400)
-- `Anton` (weight: 400)
-- `Oswald` (weight: 600)
-- `Playfair Display` (weights: 700, 900)
-- `Space Grotesk` (weight: 700)
-Default pairing: `Montserrat` (800/900) for hero headlines + `Open Sans` (600) for tags/subtitles.
+- `Inter` (weights: 400, 500, 600, 700, 800, 900)
+- `Bebas Neue` (400), `Anton` (400), `Oswald` (600), `Playfair Display` (700, 900), `Space Grotesk` (700), `JetBrains Mono` (400, 500, 700)
 
 ================================================================================
-STRICT LAYOUT, SIZING & CONTRAST RULES (CRITICAL - PREVENT CLIPPING & BLANK BOXES)
+CRITICAL FIXES TO PREVENT VALIDATION & CLIPPING ERRORS ON MOBILE WEBVIEW
 ================================================================================
-1. **Safe Margins (NEVER clip text off screen):**
-   - Stage is 1920x1080 px (`#stage { position:relative; width:1920px; height:1080px; overflow:hidden; }`).
-   - Keep ALL foreground text, cards, and badges inside the safe zone:
-     `x >= 140`, `x + w <= 1780` (max content width `1640px`), `y >= 90`, `y + h <= 940` (reserve bottom `y = 960..1040` for the 3-part progress bar).
-   - Set `box-sizing: border-box; max-width: 1640px; padding: 0 24px;` and ensure NO letter is ever cut off on the left or right edge!
-2. **Automatic Font Size Cap Formula (MANDATORY):**
-   - Before setting `font-size` on any hero headline, compute:
-     `maxFontPx = Math.min(165, Math.floor(1560 / Math.max(charCount * 0.64, 1)))`
-   - Examples:
-     * 4-6 chars (e.g. "OPEN", "FREE") -> max `165px`
-     * 10 chars (e.g. "CONNECTORS") -> max `150px`
-     * 14 chars (e.g. "MAKE YOUR OWN") -> max `118px`
-     * 18+ chars (e.g. "ANDROID APP USING") -> max `92px`
-   - NEVER use `200px+` on words longer than 6 characters! Never let two elements overlap unintentionally.
-3. **High Contrast (NEVER invisible text or blank white cards):**
-   - **Dark / Crimson scenes** (`#8F0010` with radial vignette `#5C000A`):
-     * Giant background ghost word: `420px` tall, `opacity: 0.10`, color `#FFFFFF`, centered (`x: 60, w: 1800`).
-     * Foreground headlines: `#F1E6C8` or `#FFFFFF`. Accent highlight word: `#FFD27D`.
-     * Pill tags: background `#F1E6C8` with dark `#5C000A` bold text (or `#2A0A0A` pill with `#F1E6C8` text).
-   - **Light / Cream scenes** (`#EBDDB5` with subtle radial vignette `#DFCFA0`):
-     * Foreground headlines: `#2A0A0A` (near-black) and `#8F0010` (deep crimson). NEVER use white or light cream text on a cream background!
-     * Pill tags: background `#8F0010` or `#2A0A0A` with `#F1E6C8` cream text.
-4. **Icon Cards (NEVER leave an empty white box!):**
-   - Whenever you create a rounded icon card (`width: 180px; height: 180px; border-radius: 32px`), you MUST put a bold, visible inline `<svg viewBox="0 0 64 64" width="88" height="88">` inside it!
-   - On a `#FFFFFF` or `#F1E6C8` light card, the SVG strokes MUST be dark (`stroke="#8F0010"` or `stroke="#2A0A0A"`, `stroke-width="5"`, `fill="none"`, `stroke-linecap="round"`). NEVER draw white/cream strokes on a white/cream card!
-   - Draw clean geometric icons (phone, link chain, chat bubble, document, play triangle, check mark, bolt, clock, mic) plus 4 crisp corner brackets around the card.
-   - ZERO emoji characters anywhere in HTML, CSS, JS, or text!
+When combining `tokens.css`, `components.css`, and `engine.js` from the ZIP into ONE HTML file, apply ALL of these mandatory fixes:
 
-================================================================================
-VISUAL PACING & MOTION STYLE
-================================================================================
-- Alternate between Dark Crimson and Warm Cream scenes every 2 to 4 seconds.
-- Sync every scene and word reveal directly to the SRT timestamps (or evenly across $durationFormatted s if no SRT).
-- Include the thin 3-part bottom progress bar (`y: 1015`, `x: 160`, `w: 1600`) with 3 short section labels (e.g. `INTRO`, `STEPS`, `CTA`) filling smoothly from `0` to `$durationFormatted` seconds.
-- Vary entrances across scenes: mask clip-reveal, slam-in with overshoot settle, horizontal slide from edge, scale-up from center, typewriter cursor, and full-screen wipe transitions between scenes.
-- Every frame must have subtle life (slow ghost-word horizontal drift, gentle card float, progress bar fill).
+1. **FIX OFF-SCREEN / OVERFLOW SIZING BUGS (VERY IMPORTANT)**:
+   In the ZIP's `components.css`, `.el { white-space: nowrap; }` with `--fs-xl: 230px` causes longer words to clip off the edges or collide with the right-hand card (`x: 1190`). Fix this cleanly:
+   - Never let text exceed its column width or screen margins (`x >= 130`, `x + w <= 1790`, `y >= 80`, `y + h <= 940`, clear of bottom progress bar at `y ~ 1015`).
+   - Left column (`x = 140..150`) beside a right object (`x = 1190..1750`): constrain left-column elements to `max-width: 940px; white-space: normal; overflow-wrap: break-word;`. Leave >= 80px gap between left text and right card/brackets!
+   - Centered scenes (`anchor: 'c'`, `x: 960`): allow `max-width: 1620px; width: max-content; white-space: normal; text-align: center;`.
+   - Choose headline `size` strictly by word length (and override `font-size` downward if needed using `fontPx <= Math.floor(colWidth / (longestWordChars * 0.65))`):
+     * `size: 'xl'` (`190px-220px`) ONLY when every word has `<= 6` chars (`SCRIPT`, `HOOK`, `FREE`, `BAS!`, `CTA`).
+     * `size: 'l'` (`120px-145px`) for `7-11` char words (`PROBLEM`, `FORMULA`, `ANDROID`).
+     * `size: 'm'` (`82px-105px`) for `12+` char words or multi-word headlines so NO word ever clips or wraps awkwardly!
+   - Keep `phone`, `card`, `row`, `comment`, and `buttons` strictly within `x: 120..1800`, `y: 90..930` (note brackets extend `34px` outside `card`, so keep bracketed cards at `x >= 160`, `x + w <= 1756`, `y >= 110`, `y + h <= 910`).
 
-================================================================================
-MANDATORY JAVASCRIPT & DOM CONTRACT (MUST PASS VALIDATION ON FIRST TRY)
-================================================================================
-1. Single self-contained HTML file (no length or character limit — make every scene rich and complete). ZERO external URLs (`http://` or `https://` except `http://www.w3.org/2000/svg` namespace). No `<script src>`, `<link>`, `@import`, `fetch`, `XMLHttpRequest`, or `localStorage`.
-2. `<div id="stage"></div>` styled `position:relative; width:1920px; height:1080px; overflow:hidden;`.
-3. Define `window.RAW = { duration: $durationFormatted, width: 1920, height: 1080, fps: 30, seek: function(t) { ... } }`.
-4. **`RAW.seek(t)` MUST be 100% pure and deterministic:**
+2. **FIX ZERO EXTERNAL REQUESTS & BROKEN FONT URLS**:
+   - Do NOT include `<link rel="stylesheet">`, `<script src="...">`, `@import`, `fetch()`, `XMLHttpRequest`, `WebSocket`, `import()`, or `localStorage`.
+   - Do NOT copy `@font-face { src: url("../fonts/...") }` from `tokens.css` — fonts above are ALREADY injected locally at `100%` reliability.
+   - NEVER use external image URLs in `{ t: 'phone', img: 'https://...' }`. For `phone` elements, render crisp inline HTML/SVG mockups inside `.phone .screen` (zero `http://` or `https://` URLs anywhere except SVG namespace `http://www.w3.org/2000/svg`).
+
+3. **FIX END-OF-VIDEO BLANK FRAME & JS ERRORS**:
+   - In `engine.js`, `t >= s.start && t < s.end` goes blank at `t === duration`. Update the last scene condition to:
+     `const isLast = (idx === P.scenes.length - 1); const on = isLast ? (t >= s.start && t <= s.end) : (t >= s.start && t < s.end);`
+   - Ensure `scenes[0].start === 0` and `scenes[scenes.length - 1].end === $durationFormatted` with NO gaps or overlapping timestamps between consecutive scenes.
+   - Check every single string literal in `window.PROJECT` so quotes/apostrophes are properly escaped (`\'` or double quotes), ZERO raw newlines inside single-line strings, and ZERO emojis anywhere in HTML/CSS/JS.
+   - Ensure every card icon / button icon / round icon uses high-contrast SVG colors (`fill="currentColor"`, `#9A0B12` crimson or `#2A0A0A` ink on cream cards, `#FFFFFF` or `#F2E5B6` cream on red cards — NEVER light icon on light card).
+
+4. **MANDATORY DETERMINISTIC JS CONTRACT**:
+   - Stage container: `<div id="stage"></div>` styled `position:relative; width:1920px; height:1080px; overflow:hidden;`.
    - NO `Date.now()`, NO `performance.now()`, NO `Math.random()`, NO `requestAnimationFrame()`, NO `setTimeout`/`setInterval`, NO CSS `@keyframes` or CSS `transition`.
-   - Compute all animations purely from `t` (clamped to `[0, duration]`).
-   - Guard all DOM lookups (`if (!el) return;`) so `seek(0)`, `seek(duration / 2)`, and `seek(duration)` NEVER throw an exception.
-5. Call `window.RAW.seek(0);` at the end of `<script>`.
+   - Expose BOTH `window.seek(t)` AND:
+     ```js
+     window.RAW = {
+       duration: $durationFormatted,
+       width: 1920,
+       height: 1080,
+       fps: 30,
+       seek: function(t) { window.seek(t); }
+     };
+     window.RAW.seek(0);
+     ```
+   - Guard all DOM queries and math (`clamp`, null checks) so calling `RAW.seek(0)`, `RAW.seek(duration * 0.25)`, `RAW.seek(duration / 2)`, and `RAW.seek(duration)` twice identically produces zero JS errors and identical DOM output.
 """.trimIndent()
     }
 }

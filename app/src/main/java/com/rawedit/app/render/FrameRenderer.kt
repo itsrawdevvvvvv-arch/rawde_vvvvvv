@@ -188,7 +188,8 @@ class FrameRenderer(
                   Promise.resolve(document.fonts && document.fonts.ready).then(function() {
                     var tries = 0;
                     function check() {
-                      if (window.RAW && typeof window.RAW.seek === 'function') {
+                      var raw = (window.__ensureRawContract && window.__ensureRawContract()) || window.RAW;
+                      if (raw && typeof raw.seek === 'function') {
                         window.__rawReady = true;
                         return;
                       }

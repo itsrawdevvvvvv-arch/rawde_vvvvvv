@@ -42,6 +42,7 @@ class RawEditRepository(
         if (project.audioUri.isNotBlank()) {
             runCatching { File(project.audioUri).delete() }
         }
+        cacheManager.deleteOverflowForProject(project.id)
         projectDao.delete(project)
     }
 

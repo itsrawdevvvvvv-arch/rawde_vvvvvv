@@ -63,8 +63,8 @@ private val ONBOARDING_PAGES = listOf(
         illustration = IllustrationKind.ONBOARDING_VOICE
     ),
     OnboardingPageData(
-        titleWords = listOf("Copy", "to", "Claude"),
-        subtitle = "Copy our ready-made prompt, answer 3 quick questions, and grab the code.",
+        titleWords = listOf("Copy", "to", "AI"),
+        subtitle = "Download the bundled style pack ZIP + copy our prompt into Cloud AI, then grab the code.",
         illustration = IllustrationKind.ONBOARDING_PROMPT
     ),
     OnboardingPageData(

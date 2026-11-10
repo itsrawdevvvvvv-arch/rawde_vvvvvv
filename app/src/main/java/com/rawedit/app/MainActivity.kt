@@ -296,6 +296,7 @@ private fun MainAuthenticatedHost(
                     project?.let { proj ->
                         CopyPromptScreen(
                             project = proj,
+                            cacheManager = container.cacheManager,
                             onBack = ::popRoute
                         )
                     }

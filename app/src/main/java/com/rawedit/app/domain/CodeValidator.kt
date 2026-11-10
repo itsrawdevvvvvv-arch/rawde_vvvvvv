@@ -2,6 +2,8 @@ package com.rawedit.app.domain
 
 import android.content.Context
 import android.view.View
+import android.webkit.ConsoleMessage
+import android.webkit.WebChromeClient
 import android.webkit.WebView
 import com.rawedit.app.data.CacheManager
 import com.rawedit.app.render.LocalAssetServer
@@ -31,22 +33,23 @@ private data class DryRunPayload(
 
 object CodeValidator {
 
-    private const val DRY_RUN_TIMEOUT_MS = 15_000L
+    private const val DRY_RUN_TIMEOUT_MS = 20_000L
 
     private val FORBIDDEN_PATTERNS = listOf(
-        Regex("<script\\s+[^>]*src\\s*=", RegexOption.IGNORE_CASE) to "External <script src> tags are not allowed.",
-        Regex("<link\\b", RegexOption.IGNORE_CASE) to "External <link> tags are not allowed.",
-        Regex("@import\\b", RegexOption.IGNORE_CASE) to "CSS @import rules are not allowed.",
-        Regex("\\bfetch\\s*\\(", RegexOption.IGNORE_CASE) to "Network fetch() calls are not allowed.",
-        Regex("\\bXMLHttpRequest\\b", RegexOption.IGNORE_CASE) to "XMLHttpRequest is not allowed.",
-        Regex("\\bWebSocket\\b", RegexOption.IGNORE_CASE) to "WebSocket is not allowed.",
-        Regex("\\bimport\\s*\\(", RegexOption.IGNORE_CASE) to "Dynamic import() is not allowed.",
-        Regex("\\bsendBeacon\\b", RegexOption.IGNORE_CASE) to "navigator.sendBeacon is not allowed.",
-        Regex("\\bEventSource\\b", RegexOption.IGNORE_CASE) to "EventSource is not allowed.",
-        Regex("window\\.open\\s*\\(", RegexOption.IGNORE_CASE) to "window.open() is not allowed."
+        Regex("<script\\s+[^>]*src\\s*=", RegexOption.IGNORE_CASE) to "External <script src> found — ask AI to inline all JS into one single HTML file.",
+        Regex("<link\\b", RegexOption.IGNORE_CASE) to "External <link> tag found — ask AI to inline all CSS inside <style> in one single HTML file.",
+        Regex("@import\\b", RegexOption.IGNORE_CASE) to "CSS @import rules are not allowed — inline all CSS directly.",
+        Regex("\\bfetch\\s*\\(", RegexOption.IGNORE_CASE) to "Network fetch() calls are not allowed offline.",
+        Regex("\\bXMLHttpRequest\\b", RegexOption.IGNORE_CASE) to "XMLHttpRequest is not allowed offline.",
+        Regex("\\bWebSocket\\b", RegexOption.IGNORE_CASE) to "WebSocket is not allowed offline.",
+        Regex("\\bimport\\s*\\(", RegexOption.IGNORE_CASE) to "Dynamic import() is not allowed offline.",
+        Regex("\\bsendBeacon\\b", RegexOption.IGNORE_CASE) to "navigator.sendBeacon is not allowed offline.",
+        Regex("\\bEventSource\\b", RegexOption.IGNORE_CASE) to "EventSource is not allowed offline.",
+        Regex("window\\.open\\s*\\(", RegexOption.IGNORE_CASE) to "window.open() is not allowed offline."
     )
 
     private val URL_REGEX = Regex("""https?://[^\s"'`<>()\\]+""", RegexOption.IGNORE_CASE)
+    private val HTML_COMMENT_REGEX = Regex("""<!--[\s\S]*?-->""")
 
     private val jsonParser = Json {
         ignoreUnknownKeys = true
@@ -55,11 +58,25 @@ object CodeValidator {
 
     fun unwrapMarkdownFences(raw: String): String {
         var text = raw.trim()
-        val fenceRegex = Regex("```(?:html|HTML)?\\s*([\\s\\S]*?)```")
-        val fenceMatch = fenceRegex.find(text)
-        if (fenceMatch != null) {
-            text = fenceMatch.groupValues[1].trim()
+
+        val fenceRegex = Regex("```[a-zA-Z0-9_-]*\\s*\\n([\\s\\S]*?)```")
+        val allMatches = fenceRegex.findAll(text).map { it.groupValues[1].trim() }.toList()
+        if (allMatches.isNotEmpty()) {
+            val bestHtmlMatch = allMatches
+                .filter {
+                    val lower = it.lowercase()
+                    lower.contains("<html") || lower.contains("<!doctype") || lower.contains("window.raw") || lower.contains("seek")
+                }
+                .maxByOrNull { it.length }
+            text = bestHtmlMatch ?: allMatches.maxByOrNull { it.length } ?: text
+        } else if (text.startsWith("```")) {
+            // Handle unclosed opening fence if AI output ended right after </html>
+            text = text.removePrefix("```html").removePrefix("```HTML").removePrefix("```").trim()
+            if (text.endsWith("```")) {
+                text = text.removeSuffix("```").trim()
+            }
         }
+
         val docIdx = text.indexOf("<!DOCTYPE", ignoreCase = true)
         val htmlIdx = text.indexOf("<html", ignoreCase = true)
         val startIdx = when {
@@ -77,25 +94,31 @@ object CodeValidator {
     fun staticValidate(rawInput: String): Pair<Boolean, String> {
         val code = unwrapMarkdownFences(rawInput)
         if (code.isBlank()) {
-            return false to "Paste the HTML code from Claude first."
-        }
-        if (!code.contains("RAW") || !code.contains("seek")) {
-            return false to "Missing window.RAW or RAW.seek(t). Ask Claude to try again and follow the rules."
+            return false to "Paste the HTML code from Cloud AI first."
         }
 
+        val hasContract = (code.contains("RAW") || code.contains("PROJECT") || code.contains("PROJECT_DURATION")) &&
+            code.contains("seek")
+        if (!hasContract) {
+            return false to "Missing window.RAW (or window.PROJECT + window.seek). Ask Cloud AI to follow the self-contained HTML rules."
+        }
+
+        val withoutComments = HTML_COMMENT_REGEX.replace(code, " ")
+
         for ((pattern, message) in FORBIDDEN_PATTERNS) {
-            if (pattern.containsMatchIn(code)) {
-                return false to "$message Ask Claude to try again and follow the rules."
+            if (pattern.containsMatchIn(withoutComments)) {
+                return false to message
             }
         }
 
-        for (match in URL_REGEX.findAll(code)) {
+        for (match in URL_REGEX.findAll(withoutComments)) {
             val url = match.value
             val allowed = url.startsWith("https://assets.local/", ignoreCase = true) ||
                 url.startsWith("http://www.w3.org/", ignoreCase = true) ||
+                url.startsWith("https://www.w3.org/", ignoreCase = true) ||
                 url.startsWith("https://raw.local/", ignoreCase = true)
             if (!allowed) {
-                return false to "External URL found ($url). Everything must run offline. Ask Claude to try again and follow the rules."
+                return false to "External URL found ($url). Everything must run offline without CDN links."
             }
         }
 
@@ -124,7 +147,7 @@ object CodeValidator {
             isValid = false,
             cleanedHtml = cleanHtml,
             durationSec = 0.0,
-            summaryMessage = "Validation timed out while checking window.RAW. Ask Claude to try again and follow the rules."
+            summaryMessage = "Validation timed out while testing the HTML stage. Try splitting long scripts or ask AI to simplify init."
         )
 
         if (!dryRun.ok) {
@@ -133,12 +156,12 @@ object CodeValidator {
                 isValid = false,
                 cleanedHtml = cleanHtml,
                 durationSec = 0.0,
-                summaryMessage = "$msg Ask Claude to try again and follow the rules."
+                summaryMessage = msg
             )
         }
 
         val warning = if (dryRun.nonDeterministic) {
-            "Warning: RAW.seek(1) produced slightly different output on repeat calls; frame output may vary."
+            "Note: repeated seek() calls slightly altered DOM markup; visual frame output may still work fine."
         } else {
             null
         }
@@ -149,7 +172,7 @@ object CodeValidator {
             cleanedHtml = cleanHtml,
             durationSec = dryRun.duration,
             warning = warning,
-            summaryMessage = "Code looks good  •  $durStr s ready to render."
+            summaryMessage = "Code verified  •  $durStr s ready to render."
         )
     }
 
@@ -164,9 +187,18 @@ object CodeValidator {
 
         val webView = WebView(context)
         val pageFinished = CompletableDeferred<Unit>()
+        var consoleError: String? = null
         try {
             server.configureSandboxedWebView(webView) {
                 if (!pageFinished.isCompleted) pageFinished.complete(Unit)
+            }
+            webView.webChromeClient = object : WebChromeClient() {
+                override fun onConsoleMessage(cm: ConsoleMessage?): Boolean {
+                    if (cm != null && cm.messageLevel() == ConsoleMessage.MessageLevel.ERROR && consoleError == null) {
+                        consoleError = "JS Error (line ${cm.lineNumber()}): ${cm.message()}"
+                    }
+                    return true
+                }
             }
             webView.measure(
                 View.MeasureSpec.makeMeasureSpec(1920, View.MeasureSpec.EXACTLY),
@@ -179,39 +211,46 @@ object CodeValidator {
 
             val probeJs = """
                 (function() {
-                  if (!window.RAW) return null;
-                  if (typeof window.RAW.duration !== 'number' || !(window.RAW.duration > 0)) {
-                    return JSON.stringify({ ok:false, error:'RAW.duration must be a number greater than 0.' });
+                  var raw = (window.__ensureRawContract && window.__ensureRawContract()) || window.RAW;
+                  if (!raw) {
+                    if (window.__rawLastError) {
+                      return JSON.stringify({ ok:false, error:'JS Error: ' + window.__rawLastError });
+                    }
+                    return null;
                   }
-                  if (typeof window.RAW.seek !== 'function') {
-                    return JSON.stringify({ ok:false, error:'RAW.seek must be a function.' });
+                  if (typeof raw.duration !== 'number' || !(raw.duration > 0)) {
+                    return JSON.stringify({ ok:false, error:'duration must be a number greater than 0.' });
+                  }
+                  if (typeof raw.seek !== 'function') {
+                    return JSON.stringify({ ok:false, error:'RAW.seek / window.seek must be a function.' });
                   }
                   var stage = document.getElementById('stage');
                   if (!stage) {
                     return JSON.stringify({ ok:false, error:'Missing <div id="stage"> element.' });
                   }
                   try {
-                    window.RAW.seek(0);
-                    window.RAW.seek(window.RAW.duration / 2);
-                    window.RAW.seek(window.RAW.duration);
-                    window.RAW.seek(1);
+                    raw.seek(0);
+                    raw.seek(raw.duration / 2);
+                    raw.seek(Math.max(0, raw.duration - 0.04));
+                    var sampleT = Math.min(1, raw.duration * 0.25);
+                    raw.seek(sampleT);
                     var h1 = stage.innerHTML;
-                    window.RAW.seek(1);
+                    raw.seek(sampleT);
                     var h2 = stage.innerHTML;
                     var hashDiff = (h1 !== h2);
                     return JSON.stringify({
                       ok: true,
-                      duration: window.RAW.duration,
+                      duration: raw.duration,
                       nonDeterministic: hashDiff,
                       error: ''
                     });
                   } catch (err) {
-                    return JSON.stringify({ ok:false, error: 'RAW.seek threw an error: ' + String(err) });
+                    return JSON.stringify({ ok:false, error: 'seek(t) threw: ' + String(err) });
                   }
                 })();
             """.trimIndent()
 
-            repeat(80) {
+            repeat(160) { idx ->
                 val evalResult = CompletableDeferred<String>()
                 webView.evaluateJavascript(probeJs) { result ->
                     evalResult.complete(result ?: "null")
@@ -229,10 +268,17 @@ object CodeValidator {
                         }
                     }
                 }
+                val err = consoleError
+                if (err != null && idx >= 4) {
+                    return@withContext DryRunPayload(ok = false, error = err)
+                }
                 delay(100)
             }
 
-            DryRunPayload(ok = false, error = "window.RAW was not defined within 15 seconds.")
+            DryRunPayload(
+                ok = false,
+                error = consoleError ?: "window.RAW (or window.seek) was not defined within 16 seconds."
+            )
         } finally {
             webView.stopLoading()
             webView.destroy()
