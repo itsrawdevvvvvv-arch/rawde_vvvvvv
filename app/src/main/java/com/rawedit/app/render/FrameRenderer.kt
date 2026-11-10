@@ -51,7 +51,6 @@ class FrameRenderer(
 
     suspend fun renderVideoOnly(
         rawHtml: String,
-        editedLayersJson: String?,
         durationSec: Double,
         outputVideoOnlyMp4: File,
         onProgress: (percent: Int, currentFrame: Int, totalFrames: Int) -> Unit,
@@ -85,7 +84,7 @@ class FrameRenderer(
 
             var servedHtml = ""
             val assetServer = LocalAssetServer(context, cacheManager) { servedHtml }
-            servedHtml = assetServer.buildInjectedHtml(rawHtml, editedLayersJson)
+            servedHtml = assetServer.buildInjectedHtml(rawHtml)
 
             val pageLoaded = CompletableDeferred<Unit>()
             withContext(Dispatchers.Main) {
@@ -190,9 +189,6 @@ class FrameRenderer(
                     var tries = 0;
                     function check() {
                       if (window.RAW && typeof window.RAW.seek === 'function') {
-                        if (typeof window.__applyEditedLayersIfPresent === 'function') {
-                          window.__applyEditedLayersIfPresent();
-                        }
                         window.__rawReady = true;
                         return;
                       }

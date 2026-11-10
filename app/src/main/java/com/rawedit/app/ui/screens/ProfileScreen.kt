@@ -5,8 +5,15 @@ import android.net.Uri
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.animateContentSize
 import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
+import androidx.compose.animation.expandVertically
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.shrinkVertically
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -180,7 +187,14 @@ fun ProfileScreen(
                             .graphicsLayer { rotationZ = -1.6f }
                             .clip(RoundedCornerShape(22.dp))
                             .background(RawColors.RaisedCard)
-                            .border(1.dp, RawColors.PillGrey, RoundedCornerShape(22.dp))
+                            .border(1.dp, RawColors.PillGrey.copy(alpha = 0.7f), RoundedCornerShape(22.dp))
+                            .animateContentSize(
+                                animationSpec = if (animEnabled) {
+                                    spring(dampingRatio = 0.8f, stiffness = 360f)
+                                } else {
+                                    tween(0)
+                                }
+                            )
                     ) {
                         Row(modifier = Modifier.fillMaxWidth()) {
                             Column(
@@ -242,43 +256,51 @@ fun ProfileScreen(
                                     }
                                 }
 
-                                if (editingName) {
-                                    Spacer(modifier = Modifier.height(14.dp))
-                                    Row(
-                                        verticalAlignment = Alignment.CenterVertically,
-                                        horizontalArrangement = Arrangement.spacedBy(8.dp)
-                                    ) {
-                                        OutlinedTextField(
-                                            value = nameDraft,
-                                            onValueChange = {
-                                                if (it.length <= 32) {
-                                                    nameDraft = it
-                                                    if (it.trim().isNotEmpty()) {
-                                                        onUpdateName(it.trim())
+                                AnimatedVisibility(
+                                    visible = editingName,
+                                    enter = fadeIn(tween(220, easing = RawEasings.Morph)) +
+                                        expandVertically(tween(240, easing = RawEasings.Morph)),
+                                    exit = fadeOut(tween(140)) +
+                                        shrinkVertically(tween(180, easing = RawEasings.Morph))
+                                ) {
+                                    Column {
+                                        Spacer(modifier = Modifier.height(14.dp))
+                                        Row(
+                                            verticalAlignment = Alignment.CenterVertically,
+                                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                        ) {
+                                            OutlinedTextField(
+                                                value = nameDraft,
+                                                onValueChange = {
+                                                    if (it.length <= 32) {
+                                                        nameDraft = it
+                                                        if (it.trim().isNotEmpty()) {
+                                                            onUpdateName(it.trim())
+                                                        }
                                                     }
+                                                },
+                                                singleLine = true,
+                                                placeholder = { Text("Your name", color = RawColors.TextMuted) },
+                                                shape = RoundedCornerShape(14.dp),
+                                                colors = OutlinedTextFieldDefaults.colors(
+                                                    focusedBorderColor = RawColors.TextPrimary,
+                                                    unfocusedBorderColor = RawColors.Divider,
+                                                    focusedTextColor = RawColors.TextPrimary,
+                                                    unfocusedTextColor = RawColors.TextPrimary
+                                                ),
+                                                modifier = Modifier.weight(1f)
+                                            )
+                                            RawPressButton(onClick = { editingName = false }) {
+                                                Box(
+                                                    modifier = Modifier
+                                                        .height(48.dp)
+                                                        .clip(RoundedCornerShape(14.dp))
+                                                        .background(RawColors.PrimaryBtnBg)
+                                                        .padding(horizontal = 14.dp),
+                                                    contentAlignment = Alignment.Center
+                                                ) {
+                                                    Text("Done", style = RawTypography.labelLarge, color = RawColors.PrimaryBtnText)
                                                 }
-                                            },
-                                            singleLine = true,
-                                            placeholder = { Text("Your name", color = RawColors.TextMuted) },
-                                            shape = RoundedCornerShape(14.dp),
-                                            colors = OutlinedTextFieldDefaults.colors(
-                                                focusedBorderColor = RawColors.TextPrimary,
-                                                unfocusedBorderColor = RawColors.Divider,
-                                                focusedTextColor = RawColors.TextPrimary,
-                                                unfocusedTextColor = RawColors.TextPrimary
-                                            ),
-                                            modifier = Modifier.weight(1f)
-                                        )
-                                        RawPressButton(onClick = { editingName = false }) {
-                                            Box(
-                                                modifier = Modifier
-                                                    .height(48.dp)
-                                                    .clip(RoundedCornerShape(14.dp))
-                                                    .background(RawColors.PrimaryBtnBg)
-                                                    .padding(horizontal = 14.dp),
-                                                contentAlignment = Alignment.Center
-                                            ) {
-                                                Text("Done", style = RawTypography.labelLarge, color = RawColors.PrimaryBtnText)
                                             }
                                         }
                                     }

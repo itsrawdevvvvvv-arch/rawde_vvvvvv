@@ -6,6 +6,14 @@ import android.content.Context
 import android.content.Intent
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.scaleIn
+import androidx.compose.animation.scaleOut
+import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -52,7 +60,6 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.rawedit.app.data.CacheManager
 import com.rawedit.app.data.local.ProjectEntity
-import com.rawedit.app.data.model.LayerJson
 import com.rawedit.app.domain.CodeValidationResult
 import com.rawedit.app.domain.CodeValidator
 import com.rawedit.app.domain.PromptGenerator
@@ -63,8 +70,10 @@ import com.rawedit.app.ui.components.FormatHelpers
 import com.rawedit.app.ui.icons.RawIcon
 import com.rawedit.app.ui.icons.RawIconType
 import com.rawedit.app.ui.motion.KineticHeading
+import com.rawedit.app.ui.motion.RawEasings
 import com.rawedit.app.ui.motion.RawPressButton
 import com.rawedit.app.ui.motion.SplitFlapText
+import com.rawedit.app.ui.motion.rememberAnimationsEnabled
 import com.rawedit.app.ui.theme.JetBrainsMonoFamily
 import com.rawedit.app.ui.theme.RawColors
 import com.rawedit.app.ui.theme.RawTypography
@@ -179,36 +188,58 @@ fun AddVoiceScreen(
                             cornerRadius = CornerRadius(24.dp.toPx())
                         )
                     }
-                    Column(
-                        modifier = Modifier
-                            .fillMaxSize()
-                            .padding(20.dp),
-                        horizontalAlignment = Alignment.CenterHorizontally,
-                        verticalArrangement = Arrangement.Center
-                    ) {
-                        if (loadingAudio) {
-                            CircularProgressIndicator(
-                                color = RawColors.TextPrimary,
-                                modifier = Modifier.size(30.dp),
-                                strokeWidth = 2.5.dp
-                            )
-                            Spacer(modifier = Modifier.height(10.dp))
-                            Text("Reading voiceover...", style = RawTypography.bodyMedium)
-                        } else if (audioPath.isNotBlank()) {
-                            RawIcon(RawIconType.CHECK, size = 28.dp, tint = RawColors.SuccessMint)
-                            Spacer(modifier = Modifier.height(8.dp))
-                            Text(audioName, style = RawTypography.titleMedium, maxLines = 1)
-                            Spacer(modifier = Modifier.height(4.dp))
-                            Text(
-                                "${FormatHelpers.formatDuration(audioDuration)}  •  ${FormatHelpers.formatFileSize(audioSize)}  •  Tap to change",
-                                style = RawTypography.labelMedium
-                            )
-                        } else {
-                            RawIcon(RawIconType.MIC, size = 28.dp, tint = RawColors.TextPrimary)
-                            Spacer(modifier = Modifier.height(10.dp))
-                            Text("Tap to pick voiceover", style = RawTypography.titleMedium)
-                            Spacer(modifier = Modifier.height(4.dp))
-                            Text("MP3, M4A, WAV, AAC  •  1s to 20m", style = RawTypography.bodyMedium)
+                    val dropState = when {
+                        loadingAudio -> 1
+                        audioPath.isNotBlank() -> 2
+                        else -> 0
+                    }
+                    AnimatedContent(
+                        targetState = dropState,
+                        transitionSpec = {
+                            (fadeIn(tween(220, easing = RawEasings.Morph)) +
+                                scaleIn(initialScale = 0.96f, animationSpec = tween(220, easing = RawEasings.Morph)))
+                                .togetherWith(
+                                    fadeOut(tween(150)) +
+                                        scaleOut(targetScale = 0.96f, animationSpec = tween(150))
+                                )
+                        },
+                        label = "voice_drop_morph"
+                    ) { s ->
+                        Column(
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .padding(20.dp),
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                            verticalArrangement = Arrangement.Center
+                        ) {
+                            when (s) {
+                                1 -> {
+                                    CircularProgressIndicator(
+                                        color = RawColors.TextPrimary,
+                                        modifier = Modifier.size(30.dp),
+                                        strokeWidth = 2.5.dp
+                                    )
+                                    Spacer(modifier = Modifier.height(10.dp))
+                                    Text("Reading voiceover...", style = RawTypography.bodyMedium)
+                                }
+                                2 -> {
+                                    RawIcon(RawIconType.CHECK, size = 28.dp, tint = RawColors.SuccessMint)
+                                    Spacer(modifier = Modifier.height(8.dp))
+                                    Text(audioName, style = RawTypography.titleMedium, maxLines = 1)
+                                    Spacer(modifier = Modifier.height(4.dp))
+                                    Text(
+                                        "${FormatHelpers.formatDuration(audioDuration)}  •  ${FormatHelpers.formatFileSize(audioSize)}  •  Tap to change",
+                                        style = RawTypography.labelMedium
+                                    )
+                                }
+                                else -> {
+                                    RawIcon(RawIconType.MIC, size = 28.dp, tint = RawColors.TextPrimary)
+                                    Spacer(modifier = Modifier.height(10.dp))
+                                    Text("Tap to pick voiceover", style = RawTypography.titleMedium)
+                                    Spacer(modifier = Modifier.height(4.dp))
+                                    Text("MP3, M4A, WAV, AAC  •  1s to 20m", style = RawTypography.bodyMedium)
+                                }
+                            }
                         }
                     }
                 }
@@ -393,6 +424,11 @@ fun CopyPromptScreen(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.spacedBy(12.dp)
         ) {
+            val copyBg by animateColorAsState(
+                targetValue = if (copied) RawColors.SuccessMint else RawColors.PrimaryBtnBg,
+                animationSpec = tween(220, easing = RawEasings.Morph),
+                label = "copy_btn_bg"
+            )
             RawPressButton(
                 onClick = {
                     val cb = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
@@ -411,7 +447,7 @@ fun CopyPromptScreen(
                         .fillMaxWidth()
                         .height(58.dp)
                         .clip(RoundedCornerShape(29.dp))
-                        .background(if (copied) RawColors.SuccessMint else RawColors.PrimaryBtnBg),
+                        .background(copyBg),
                     horizontalArrangement = Arrangement.Center,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
@@ -508,13 +544,12 @@ fun CodePasteScreen(
     }
 
     fun buildUpdatedProject(res: CodeValidationResult): ProjectEntity {
-        val layersEncoded = if (res.hasEditableLayers) LayerJson.encode(res.layers) else ""
         val storedCode = cacheManager.persistHtmlCode(project.id, res.cleanedHtml)
         return project.copy(
             code = storedCode,
-            layersJson = layersEncoded,
+            layersJson = "",
             codeDurationSec = res.durationSec,
-            hasEditableLayers = res.hasEditableLayers
+            hasEditableLayers = false
         )
     }
 
@@ -726,101 +761,142 @@ fun CodePasteScreen(
             )
         }
 
-        // Validation status box
-        if (validating) {
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .clip(RoundedCornerShape(16.dp))
-                    .background(RawColors.HeroSurface)
-                    .padding(14.dp),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(12.dp)
-            ) {
-                CircularProgressIndicator(
-                    color = RawColors.TextPrimary,
-                    modifier = Modifier.size(20.dp),
-                    strokeWidth = 2.dp
-                )
-                Text("Testing code in offline sandbox...", style = RawTypography.bodyMedium)
-            }
-        } else {
-            validationResult?.let { res ->
-                val accent = if (res.isValid) RawColors.SuccessMint else RawColors.ErrorCoral
-                Column(
+        val animEnabled = rememberAnimationsEnabled()
+        val statusState = when {
+            validating -> "validating"
+            validationResult != null -> "result_${validationResult!!.isValid}_${validationResult!!.summaryMessage}"
+            else -> "empty"
+        }
+        AnimatedContent(
+            targetState = statusState,
+            transitionSpec = {
+                if (!animEnabled) {
+                    fadeIn(tween(0)) togetherWith fadeOut(tween(0))
+                } else {
+                    (fadeIn(tween(220, easing = RawEasings.Morph)) +
+                        scaleIn(initialScale = 0.97f, animationSpec = tween(220, easing = RawEasings.Morph)))
+                        .togetherWith(
+                            fadeOut(tween(150)) +
+                                scaleOut(targetScale = 0.97f, animationSpec = tween(150))
+                        )
+                }
+            },
+            label = "code_validation_morph"
+        ) { target ->
+            if (target == "validating") {
+                Row(
                     modifier = Modifier
                         .fillMaxWidth()
                         .clip(RoundedCornerShape(16.dp))
-                        .background(accent.copy(alpha = 0.13f))
-                        .border(1.dp, accent.copy(alpha = 0.45f), RoundedCornerShape(16.dp))
-                        .padding(14.dp)
+                        .background(RawColors.HeroSurface)
+                        .padding(14.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(12.dp)
                 ) {
-                    Text(text = res.summaryMessage, style = RawTypography.bodyMedium, color = accent)
-                    res.warning?.let { warn ->
-                        Spacer(modifier = Modifier.height(4.dp))
-                        Text(text = warn, style = RawTypography.labelSmall, color = RawColors.TextMuted)
+                    CircularProgressIndicator(
+                        color = RawColors.TextPrimary,
+                        modifier = Modifier.size(20.dp),
+                        strokeWidth = 2.dp
+                    )
+                    Text("Testing code in offline sandbox...", style = RawTypography.bodyMedium)
+                }
+            } else {
+                val res = validationResult
+                if (res != null && target != "empty") {
+                    val accent = if (res.isValid) RawColors.SuccessMint else RawColors.ErrorCoral
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(16.dp))
+                            .background(accent.copy(alpha = 0.13f))
+                            .border(1.dp, accent.copy(alpha = 0.45f), RoundedCornerShape(16.dp))
+                            .padding(14.dp)
+                    ) {
+                        Text(text = res.summaryMessage, style = RawTypography.bodyMedium, color = accent)
+                        res.warning?.let { warn ->
+                            Spacer(modifier = Modifier.height(4.dp))
+                            Text(text = warn, style = RawTypography.labelSmall, color = RawColors.TextMuted)
+                        }
                     }
                 }
             }
         }
 
         val valid = validationResult?.takeIf { it.isValid }
-        if (valid != null) {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(10.dp)
-            ) {
-                RawPressButton(
-                    onClick = { onValidatedAndSaved(buildUpdatedProject(valid)) },
-                    modifier = Modifier.weight(1f)
-                ) {
-                    Box(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .height(56.dp)
-                            .clip(RoundedCornerShape(28.dp))
-                            .background(RawColors.RaisedCard),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Text("Save", style = RawTypography.labelLarge)
-                    }
-                }
-                RawPressButton(
-                    onClick = {
-                        if (project.audioUri.isNotBlank()) {
-                            onCreateNow(buildUpdatedProject(valid))
-                        } else {
-                            onValidatedAndSaved(buildUpdatedProject(valid))
-                        }
-                    },
-                    modifier = Modifier.weight(1.4f)
-                ) {
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .height(56.dp)
-                            .clip(RoundedCornerShape(28.dp))
-                            .background(RawColors.PrimaryBtnBg),
-                        horizontalArrangement = Arrangement.Center,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        RawIcon(RawIconType.PLAY, size = 18.dp, tint = RawColors.PrimaryBtnText)
-                        Spacer(modifier = Modifier.width(8.dp))
-                        Text(
-                            text = if (project.audioUri.isNotBlank()) "Create video" else "Use code",
-                            style = RawTypography.labelLarge,
-                            color = RawColors.PrimaryBtnText
+        AnimatedContent(
+            targetState = valid != null,
+            transitionSpec = {
+                if (!animEnabled) {
+                    fadeIn(tween(0)) togetherWith fadeOut(tween(0))
+                } else {
+                    (fadeIn(tween(220, easing = RawEasings.Morph)) +
+                        scaleIn(initialScale = 0.96f, animationSpec = tween(220, easing = RawEasings.Morph)))
+                        .togetherWith(
+                            fadeOut(tween(140)) +
+                                scaleOut(targetScale = 0.96f, animationSpec = tween(140))
                         )
+                }
+            },
+            label = "code_cta_morph"
+        ) { isValid ->
+            val currentValid = valid
+            if (isValid && currentValid != null) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    RawPressButton(
+                        onClick = { onValidatedAndSaved(buildUpdatedProject(currentValid)) },
+                        modifier = Modifier.weight(1f)
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(56.dp)
+                                .clip(RoundedCornerShape(28.dp))
+                                .background(RawColors.RaisedCard),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Text("Save", style = RawTypography.labelLarge)
+                        }
+                    }
+                    RawPressButton(
+                        onClick = {
+                            if (project.audioUri.isNotBlank()) {
+                                onCreateNow(buildUpdatedProject(currentValid))
+                            } else {
+                                onValidatedAndSaved(buildUpdatedProject(currentValid))
+                            }
+                        },
+                        modifier = Modifier.weight(1.4f)
+                    ) {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(56.dp)
+                                .clip(RoundedCornerShape(28.dp))
+                                .background(RawColors.PrimaryBtnBg),
+                            horizontalArrangement = Arrangement.Center,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            RawIcon(RawIconType.PLAY, size = 18.dp, tint = RawColors.PrimaryBtnText)
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text(
+                                text = if (project.audioUri.isNotBlank()) "Create video" else "Use code",
+                                style = RawTypography.labelLarge,
+                                color = RawColors.PrimaryBtnText
+                            )
+                        }
                     }
                 }
+            } else {
+                BigPrimaryButton(
+                    text = "Check code",
+                    enabled = codeText.isNotBlank() && !validating,
+                    leadingIcon = RawIconType.CHECK,
+                    onClick = { runValidation(codeText) }
+                )
             }
-        } else {
-            BigPrimaryButton(
-                text = "Check code",
-                enabled = codeText.isNotBlank() && !validating,
-                leadingIcon = RawIconType.CHECK,
-                onClick = { runValidation(codeText) }
-            )
         }
     }
 }

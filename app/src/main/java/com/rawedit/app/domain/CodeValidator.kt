@@ -4,8 +4,6 @@ import android.content.Context
 import android.view.View
 import android.webkit.WebView
 import com.rawedit.app.data.CacheManager
-import com.rawedit.app.data.model.LayerJson
-import com.rawedit.app.data.model.RawLayer
 import com.rawedit.app.render.LocalAssetServer
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.Dispatchers
@@ -19,8 +17,6 @@ data class CodeValidationResult(
     val isValid: Boolean,
     val cleanedHtml: String,
     val durationSec: Double,
-    val layers: List<RawLayer>,
-    val hasEditableLayers: Boolean,
     val warning: String? = null,
     val summaryMessage: String
 )
@@ -29,8 +25,6 @@ data class CodeValidationResult(
 private data class DryRunPayload(
     val ok: Boolean = false,
     val duration: Double = 0.0,
-    val hasLayers: Boolean = false,
-    val layersJson: String = "[]",
     val nonDeterministic: Boolean = false,
     val error: String = ""
 )
@@ -61,13 +55,11 @@ object CodeValidator {
 
     fun unwrapMarkdownFences(raw: String): String {
         var text = raw.trim()
-        // If Claude wrapped HTML inside ```html ... ``` or ``` ... ``` with optional preamble/postamble
         val fenceRegex = Regex("```(?:html|HTML)?\\s*([\\s\\S]*?)```")
         val fenceMatch = fenceRegex.find(text)
         if (fenceMatch != null) {
             text = fenceMatch.groupValues[1].trim()
         }
-        // Extract from <!DOCTYPE or <html to </html> if conversational text preceded/followed it
         val docIdx = text.indexOf("<!DOCTYPE", ignoreCase = true)
         val htmlIdx = text.indexOf("<html", ignoreCase = true)
         val startIdx = when {
@@ -121,8 +113,6 @@ object CodeValidator {
                 isValid = false,
                 cleanedHtml = "",
                 durationSec = 0.0,
-                layers = emptyList(),
-                hasEditableLayers = false,
                 summaryMessage = staticPayload
             )
         }
@@ -134,9 +124,7 @@ object CodeValidator {
             isValid = false,
             cleanedHtml = cleanHtml,
             durationSec = 0.0,
-            layers = emptyList(),
-            hasEditableLayers = false,
-            summaryMessage = "Validation timed out after 10 seconds while checking window.RAW. Ask Claude to try again and follow the rules."
+            summaryMessage = "Validation timed out while checking window.RAW. Ask Claude to try again and follow the rules."
         )
 
         if (!dryRun.ok) {
@@ -145,16 +133,8 @@ object CodeValidator {
                 isValid = false,
                 cleanedHtml = cleanHtml,
                 durationSec = 0.0,
-                layers = emptyList(),
-                hasEditableLayers = false,
                 summaryMessage = "$msg Ask Claude to try again and follow the rules."
             )
-        }
-
-        val parsedLayers = if (dryRun.hasLayers) {
-            LayerJson.decode(dryRun.layersJson)
-        } else {
-            emptyList()
         }
 
         val warning = if (dryRun.nonDeterministic) {
@@ -164,20 +144,12 @@ object CodeValidator {
         }
 
         val durStr = String.format(java.util.Locale.US, "%.1f", dryRun.duration)
-        val summary = if (dryRun.hasLayers) {
-            "Code looks good. ${parsedLayers.size} layers found, $durStr s."
-        } else {
-            "Code looks good, $durStr s. No editable layers found, but ready to render."
-        }
-
         return CodeValidationResult(
             isValid = true,
             cleanedHtml = cleanHtml,
             durationSec = dryRun.duration,
-            layers = parsedLayers,
-            hasEditableLayers = dryRun.hasLayers,
             warning = warning,
-            summaryMessage = summary
+            summaryMessage = "Code looks good  •  $durStr s ready to render."
         )
     }
 
@@ -227,13 +199,9 @@ object CodeValidator {
                     window.RAW.seek(1);
                     var h2 = stage.innerHTML;
                     var hashDiff = (h1 !== h2);
-                    var hasLayers = Array.isArray(window.RAW.layers);
-                    var layersJson = hasLayers ? JSON.stringify(window.RAW.layers) : '[]';
                     return JSON.stringify({
                       ok: true,
                       duration: window.RAW.duration,
-                      hasLayers: hasLayers,
-                      layersJson: layersJson,
                       nonDeterministic: hashDiff,
                       error: ''
                     });
@@ -243,7 +211,6 @@ object CodeValidator {
                 })();
             """.trimIndent()
 
-            // Poll up to 8 seconds for window.RAW to appear after scripts execute
             repeat(80) {
                 val evalResult = CompletableDeferred<String>()
                 webView.evaluateJavascript(probeJs) { result ->
@@ -265,7 +232,7 @@ object CodeValidator {
                 delay(100)
             }
 
-            DryRunPayload(ok = false, error = "window.RAW was not defined within 10 seconds.")
+            DryRunPayload(ok = false, error = "window.RAW was not defined within 15 seconds.")
         } finally {
             webView.stopLoading()
             webView.destroy()

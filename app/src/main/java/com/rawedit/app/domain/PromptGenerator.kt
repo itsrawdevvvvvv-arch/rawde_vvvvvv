@@ -72,7 +72,7 @@ STRICT LAYOUT, SIZING & CONTRAST RULES (CRITICAL - PREVENT CLIPPING & BLANK BOXE
    - Stage is 1920x1080 px (`#stage { position:relative; width:1920px; height:1080px; overflow:hidden; }`).
    - Keep ALL foreground text, cards, and badges inside the safe zone:
      `x >= 140`, `x + w <= 1780` (max content width `1640px`), `y >= 90`, `y + h <= 940` (reserve bottom `y = 960..1040` for the 3-part progress bar).
-   - Set `box-sizing: border-box; max-width: 1640px; padding: 0 24px; white-space: nowrap;` ONLY for single short words, OR allow clean wrapping with `line-height: 1.05` so NO letter is ever cut off on the left or right edge!
+   - Set `box-sizing: border-box; max-width: 1640px; padding: 0 24px;` and ensure NO letter is ever cut off on the left or right edge!
 2. **Automatic Font Size Cap Formula (MANDATORY):**
    - Before setting `font-size` on any hero headline, compute:
      `maxFontPx = Math.min(165, Math.floor(1560 / Math.max(charCount * 0.64, 1)))`
@@ -108,22 +108,14 @@ VISUAL PACING & MOTION STYLE
 ================================================================================
 MANDATORY JAVASCRIPT & DOM CONTRACT (MUST PASS VALIDATION ON FIRST TRY)
 ================================================================================
-1. Single self-contained HTML file (no character or file size limit — make every scene rich and complete). ZERO external URLs (`http://` or `https://` except `http://www.w3.org/2000/svg` namespace). No `<script src>`, `<link>`, `@import`, `fetch`, `XMLHttpRequest`, or `localStorage`.
+1. Single self-contained HTML file (no length or character limit — make every scene rich and complete). ZERO external URLs (`http://` or `https://` except `http://www.w3.org/2000/svg` namespace). No `<script src>`, `<link>`, `@import`, `fetch`, `XMLHttpRequest`, or `localStorage`.
 2. `<div id="stage"></div>` styled `position:relative; width:1920px; height:1080px; overflow:hidden;`.
-3. Define `window.RAW = { duration: $durationFormatted, width: 1920, height: 1080, fps: 30, layers: [...], anim: {...}, seek: function(t) { ... } }`.
-4. **`RAW.layers` MUST be a clean, non-empty Array (12 to 45 editable elements total — NEVER 150+ tiny particles/dots!):**
-   - Put ONLY meaningful foreground/scene elements in `RAW.layers` so each track in the mobile timeline editor is clear and easy to tap (`12` to `45` layers for the whole video — NOT individual characters, border lines, or background dots).
-   - Background dot-grids, vignettes, and decorative particle loops must stay inside CSS/scene containers instead of bloating `RAW.layers`.
-   - Format:
-     `{ id: "s1_title", name: "S1 Hero Title", type: "text", x: 140, y: 360, w: 1640, h: 180, opacity: 1, z: 10, start: 0.0, end: 3.2, text: "YOUR HOOK", src: null }`
-   - Every visible text block, card, or image MUST have its own object in `RAW.layers` with accurate `x, y, w, h, start, end, text`!
-   - `seek(t)` MUST read `l.x`, `l.y`, `l.w`, `l.h`, `l.opacity`, `l.z`, `l.start`, `l.end`, and `l.text` directly from `this.layers` on EVERY call AND give its DOM element `id="L_" + l.id` so user edits (position, scale, opacity, text, timing, z-order, masking) update immediately!
-   - When `l.type === "image"` and `l.src` is set (from user-added images in the editor), `seek(t)` MUST render an `<img>` element inside `#L_<id>` with `width:100%;height:100%;object-fit:contain`.
-5. **`RAW.seek(t)` MUST be 100% pure and deterministic:**
+3. Define `window.RAW = { duration: $durationFormatted, width: 1920, height: 1080, fps: 30, seek: function(t) { ... } }`.
+4. **`RAW.seek(t)` MUST be 100% pure and deterministic:**
    - NO `Date.now()`, NO `performance.now()`, NO `Math.random()`, NO `requestAnimationFrame()`, NO `setTimeout`/`setInterval`, NO CSS `@keyframes` or CSS `transition`.
    - Compute all animations purely from `t` (clamped to `[0, duration]`).
    - Guard all DOM lookups (`if (!el) return;`) so `seek(0)`, `seek(duration / 2)`, and `seek(duration)` NEVER throw an exception.
-6. Call `window.RAW.seek(0);` at the end of `<script>`.
+5. Call `window.RAW.seek(0);` at the end of `<script>`.
 """.trimIndent()
     }
 }

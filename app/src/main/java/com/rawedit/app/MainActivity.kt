@@ -13,26 +13,23 @@ import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.toArgb
 import com.rawedit.app.data.local.ProjectEntity
 import com.rawedit.app.data.local.UserProfile
 import com.rawedit.app.ui.components.MainTab
 import com.rawedit.app.ui.components.RawBottomNavBar
-import com.rawedit.app.ui.motion.GhostWordWipeOverlay
 import com.rawedit.app.ui.motion.RawScreenTransition
+import com.rawedit.app.ui.motion.RawTabMorphTransition
 import com.rawedit.app.ui.screens.AddVoiceScreen
 import com.rawedit.app.ui.screens.CodePasteScreen
 import com.rawedit.app.ui.screens.CopyPromptScreen
 import com.rawedit.app.ui.screens.CreateHubScreen
-import com.rawedit.app.ui.screens.EditorScreen
 import com.rawedit.app.ui.screens.HomeScreen
 import com.rawedit.app.ui.screens.MyReelsScreen
 import com.rawedit.app.ui.screens.OnboardingScreen
@@ -44,13 +41,18 @@ import com.rawedit.app.ui.theme.RawColors
 import com.rawedit.app.ui.theme.RawEditTheme
 import kotlinx.coroutines.launch
 
+private enum class RootStage {
+    ONBOARDING,
+    PROFILE_SETUP,
+    MAIN
+}
+
 private sealed interface AppRoute {
-    data class Tabs(val tab: MainTab) : AppRoute
+    data object Tabs : AppRoute
     data class CreateHub(val projectId: Long) : AppRoute
     data class AddVoice(val projectId: Long) : AppRoute
     data class CopyPrompt(val projectId: Long) : AppRoute
     data class CodePaste(val projectId: Long) : AppRoute
-    data class Editor(val projectId: Long, val fromResult: Boolean = false) : AppRoute
     data class Rendering(val projectId: Long) : AppRoute
     data class Result(val videoId: Long, val celebrate: Boolean) : AppRoute
 }
@@ -96,13 +98,22 @@ private fun RawEditAppRoot(container: AppContainer) {
         mutableStateOf(profile.onboardingDone)
     }
 
-    if (!profile.onboardingDone) {
-        if (!onboardingPassed) {
-            OnboardingScreen(
+    val rootStage = when {
+        profile.onboardingDone -> RootStage.MAIN
+        !onboardingPassed -> RootStage.ONBOARDING
+        else -> RootStage.PROFILE_SETUP
+    }
+
+    RawScreenTransition(
+        targetState = rootStage,
+        isForward = true
+    ) { stage ->
+        when (stage) {
+            RootStage.ONBOARDING -> OnboardingScreen(
                 onFinished = { onboardingPassed = true }
             )
-        } else {
-            ProfileSetupScreen(
+
+            RootStage.PROFILE_SETUP -> ProfileSetupScreen(
                 cacheManager = container.cacheManager,
                 onComplete = { name, photoPath ->
                     scope.launch {
@@ -110,14 +121,13 @@ private fun RawEditAppRoot(container: AppContainer) {
                     }
                 }
             )
-        }
-        return
-    }
 
-    MainAuthenticatedHost(
-        container = container,
-        userProfile = profile
-    )
+            RootStage.MAIN -> MainAuthenticatedHost(
+                container = container,
+                userProfile = profile
+            )
+        }
+    }
 }
 
 @Composable
@@ -129,19 +139,19 @@ private fun MainAuthenticatedHost(
     val projects by container.repository.allProjects.collectAsState(initial = emptyList())
     val videos by container.repository.allVideos.collectAsState(initial = emptyList())
 
-    var backStack by remember { mutableStateOf<List<AppRoute>>(listOf(AppRoute.Tabs(MainTab.HOME))) }
+    var backStack by remember { mutableStateOf<List<AppRoute>>(listOf(AppRoute.Tabs)) }
+    var currentTab by remember { mutableStateOf(MainTab.HOME) }
+    var isForward by remember { mutableStateOf(true) }
     val currentRoute = backStack.last()
 
-    // Ghost-word wipe state for main tab switches
-    var ghostWord by remember { mutableStateOf<String?>(null) }
-    var ghostTrigger by remember { mutableIntStateOf(0) }
-
-    fun pushRoute(route: AppRoute, @Suppress("UNUSED_PARAMETER") tapOrigin: Offset = Offset(540f, 960f)) {
+    fun pushRoute(route: AppRoute) {
+        isForward = true
         backStack = backStack + route
     }
 
     fun popRoute() {
         if (backStack.size > 1) {
+            isForward = false
             backStack = backStack.dropLast(1)
         }
     }
@@ -151,19 +161,20 @@ private fun MainAuthenticatedHost(
             scope.launch {
                 val activeDraft = projects.firstOrNull { it.state == ProjectEntity.STATE_IN_PROGRESS }
                 val projectId = activeDraft?.id ?: container.repository.createEmptyProject()
-                pushRoute(AppRoute.CreateHub(projectId), Offset(420f, 2000f))
+                pushRoute(AppRoute.CreateHub(projectId))
             }
             return
         }
-        val currentTab = (currentRoute as? AppRoute.Tabs)?.tab
-        if (currentTab != target) {
-            ghostWord = target.ghostWord
-            ghostTrigger++
-            backStack = listOf(AppRoute.Tabs(target))
+        if (currentRoute != AppRoute.Tabs) {
+            isForward = false
+            currentTab = target
+            backStack = listOf(AppRoute.Tabs)
+        } else if (currentTab != target) {
+            currentTab = target
         }
     }
 
-    BackHandler(enabled = backStack.size > 1 || (currentRoute is AppRoute.Tabs && currentRoute.tab != MainTab.HOME)) {
+    BackHandler(enabled = backStack.size > 1 || (currentRoute == AppRoute.Tabs && currentTab != MainTab.HOME)) {
         if (backStack.size > 1) {
             popRoute()
         } else {
@@ -176,62 +187,68 @@ private fun MainAuthenticatedHost(
             .fillMaxSize()
             .background(RawColors.BgPrimary)
     ) {
-        RawScreenTransition(targetState = currentRoute) { route ->
+        RawScreenTransition(
+            targetState = currentRoute,
+            isForward = isForward
+        ) { route ->
             when (route) {
-                is AppRoute.Tabs -> {
+                AppRoute.Tabs -> {
                     Box(modifier = Modifier.fillMaxSize()) {
-                        when (route.tab) {
-                            MainTab.HOME -> HomeScreen(
-                                userProfile = userProfile,
-                                projects = projects,
-                                videos = videos,
-                                onOpenProfile = { switchTab(MainTab.PROFILE) },
-                                onStartNewReel = { origin ->
-                                    scope.launch {
-                                        val id = container.repository.createEmptyProject()
-                                        pushRoute(AppRoute.CreateHub(id), origin)
+                        RawTabMorphTransition(
+                            targetTab = currentTab,
+                            modifier = Modifier.fillMaxSize()
+                        ) { tab ->
+                            when (tab) {
+                                MainTab.HOME -> HomeScreen(
+                                    userProfile = userProfile,
+                                    projects = projects,
+                                    videos = videos,
+                                    onOpenProfile = { switchTab(MainTab.PROFILE) },
+                                    onStartNewReel = { _ ->
+                                        scope.launch {
+                                            val id = container.repository.createEmptyProject()
+                                            pushRoute(AppRoute.CreateHub(id))
+                                        }
+                                    },
+                                    onOpenProject = { id, _ ->
+                                        pushRoute(AppRoute.CreateHub(id))
+                                    },
+                                    onOpenVideoResult = { videoId, _ ->
+                                        pushRoute(AppRoute.Result(videoId, celebrate = false))
                                     }
-                                },
-                                onOpenProject = { id, origin ->
-                                    pushRoute(AppRoute.CreateHub(id), origin)
-                                },
-                                onOpenVideoResult = { videoId, origin ->
-                                    pushRoute(AppRoute.Result(videoId, celebrate = false), origin)
-                                }
-                            )
+                                )
 
-                            MainTab.CREATE -> Unit // Handled by switchTab -> CreateHub
+                                MainTab.CREATE -> Unit
 
-                            MainTab.REELS -> MyReelsScreen(
-                                videos = videos,
-                                onPlayVideo = { vid, origin ->
-                                    pushRoute(AppRoute.Result(vid, celebrate = false), origin)
-                                },
-                                onRenameVideo = { vid, newTitle ->
-                                    scope.launch { container.repository.renameVideo(vid, newTitle) }
-                                },
-                                onDeleteVideo = { video ->
-                                    scope.launch { container.repository.deleteVideo(video) }
-                                }
-                            )
+                                MainTab.REELS -> MyReelsScreen(
+                                    videos = videos,
+                                    onPlayVideo = { vid, _ ->
+                                        pushRoute(AppRoute.Result(vid, celebrate = false))
+                                    },
+                                    onRenameVideo = { vid, newTitle ->
+                                        scope.launch { container.repository.renameVideo(vid, newTitle) }
+                                    },
+                                    onDeleteVideo = { video ->
+                                        scope.launch { container.repository.deleteVideo(video) }
+                                    }
+                                )
 
-                            MainTab.PROFILE -> ProfileScreen(
-                                userProfile = userProfile,
-                                videos = videos,
-                                cacheManager = container.cacheManager,
-                                onUpdateName = { newName ->
-                                    scope.launch { container.userPreferences.updateUserName(newName) }
-                                },
-                                onUpdatePhoto = { newPath ->
-                                    scope.launch { container.userPreferences.updateProfilePhoto(newPath) }
-                                }
-                            )
+                                MainTab.PROFILE -> ProfileScreen(
+                                    userProfile = userProfile,
+                                    videos = videos,
+                                    cacheManager = container.cacheManager,
+                                    onUpdateName = { newName ->
+                                        scope.launch { container.userPreferences.updateUserName(newName) }
+                                    },
+                                    onUpdatePhoto = { newPath ->
+                                        scope.launch { container.userPreferences.updateProfilePhoto(newPath) }
+                                    }
+                                )
+                            }
                         }
 
-                        GhostWordWipeOverlay(word = ghostWord, triggerKey = ghostTrigger)
-
                         RawBottomNavBar(
-                            currentTab = route.tab,
+                            currentTab = currentTab,
                             onSelectTab = ::switchTab,
                             modifier = Modifier.align(Alignment.BottomCenter)
                         )
@@ -248,9 +265,8 @@ private fun MainAuthenticatedHost(
                             onOpenAddVoice = { pushRoute(AppRoute.AddVoice(proj.id)) },
                             onOpenCopyPrompt = { pushRoute(AppRoute.CopyPrompt(proj.id)) },
                             onOpenCodePaste = { pushRoute(AppRoute.CodePaste(proj.id)) },
-                            onOpenEditor = { pushRoute(AppRoute.Editor(proj.id)) },
-                            onSwipeCreate = { origin ->
-                                pushRoute(AppRoute.Rendering(proj.id), origin)
+                            onSwipeCreate = { _ ->
+                                pushRoute(AppRoute.Rendering(proj.id))
                             }
                         )
                     }
@@ -302,37 +318,10 @@ private fun MainAuthenticatedHost(
                             onCreateNow = { updated ->
                                 scope.launch {
                                     container.repository.saveProject(updated)
+                                    isForward = true
                                     backStack = backStack.dropLast(1) + AppRoute.Rendering(updated.id)
                                 }
                             }
-                        )
-                    }
-                }
-
-                is AppRoute.Editor -> {
-                    val project by container.repository.observeProject(route.projectId)
-                        .collectAsState(initial = null)
-                    project?.let { proj ->
-                        EditorScreen(
-                            project = proj,
-                            cacheManager = container.cacheManager,
-                            openedAfterRender = route.fromResult,
-                            onAutoSaveDraft = { updated ->
-                                scope.launch { container.repository.saveProject(updated) }
-                            },
-                            onDone = { updated ->
-                                scope.launch {
-                                    container.repository.saveProject(updated)
-                                    popRoute()
-                                }
-                            },
-                            onRenderUpdated = { updated ->
-                                scope.launch {
-                                    container.repository.saveProject(updated)
-                                    backStack = backStack.dropLast(1) + AppRoute.Rendering(updated.id)
-                                }
-                            },
-                            onBack = ::popRoute
                         )
                     }
                 }
@@ -341,8 +330,9 @@ private fun MainAuthenticatedHost(
                     RenderingScreen(
                         projectId = route.projectId,
                         onCompleted = { videoId ->
+                            isForward = true
                             backStack = listOf(
-                                AppRoute.Tabs(MainTab.HOME),
+                                AppRoute.Tabs,
                                 AppRoute.Result(videoId, celebrate = true)
                             )
                         },
@@ -363,20 +353,24 @@ private fun MainAuthenticatedHost(
                                     container.repository.markVideoSavedToGallery(v.id, galleryUri)
                                 }
                             },
-                            onEditInTimeline = { projectId ->
-                                pushRoute(AppRoute.Editor(projectId = projectId, fromResult = true))
-                            },
                             onMakeAnother = {
                                 scope.launch {
                                     val nextId = container.repository.createEmptyProject()
+                                    isForward = true
                                     backStack = listOf(
-                                        AppRoute.Tabs(MainTab.HOME),
+                                        AppRoute.Tabs,
                                         AppRoute.CreateHub(nextId)
                                     )
                                 }
                             },
                             onBack = {
-                                if (backStack.size > 1) popRoute() else switchTab(MainTab.HOME)
+                                if (backStack.size > 1) {
+                                    popRoute()
+                                } else {
+                                    isForward = false
+                                    currentTab = MainTab.HOME
+                                    backStack = listOf(AppRoute.Tabs)
+                                }
                             }
                         )
                     }

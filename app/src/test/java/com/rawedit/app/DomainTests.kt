@@ -1,7 +1,5 @@
 package com.rawedit.app
 
-import com.rawedit.app.data.model.LayerJson
-import com.rawedit.app.data.model.RawLayer
 import com.rawedit.app.domain.CodeValidator
 import com.rawedit.app.domain.PromptGenerator
 import com.rawedit.app.domain.SrtParser
@@ -35,40 +33,26 @@ class DomainTests {
         assertTrue(withoutSrt.contains("If yes, paste its text"))
 
         val withSrt = PromptGenerator.buildPrompt("voice.mp3", 32.5, "Product launch", "1\n00:00:00,000 --> 00:00:02,000\nHello")
-        assertTrue(withSrt.contains("skip asking this question"))
-        assertTrue(withSrt.contains("Attached SRT subtitles:"))
+        assertTrue(withSrt.contains("skip asking this question") || withSrt.contains("DO NOT ask question 1 again"))
+        assertTrue(withSrt.contains("ATTACHED SRT SUBTITLES:"))
     }
 
     @Test
-    fun codeValidatorBlocksExternalUrlsAndNetworkApis() {
+    fun codeValidatorBlocksExternalUrlsAndAllowsUnlimitedOfflineHtml() {
         val badUrl = "<html><div id='stage'></div><script>window.RAW={duration:5,seek:()=>{}};fetch('https://evil.com')</script></html>"
         assertFalse(CodeValidator.staticValidate(badUrl).first)
 
         val badScriptSrc = "<html><script src='https://cdn.example.com/a.js'></script><script>window.RAW={duration:5,seek:()=>{}}</script></html>"
         assertFalse(CodeValidator.staticValidate(badScriptSrc).first)
 
-        val valid = "<html><div id='stage'></div><script>window.RAW={duration:5,layers:[{id:'a',src:'https://assets.local/AbCd1234.png'}],seek:function(t){}}</script></html>"
-        assertTrue(CodeValidator.staticValidate(valid).first)
+        val padding = "/* " + "x".repeat(60_000) + " */"
+        val validLarge = "<html><div id='stage'></div><script>$padding window.RAW={duration:5,seek:function(t){}}</script></html>"
+        assertTrue(CodeValidator.staticValidate(validLarge).first)
 
         val wrappedWithChatter = "Here is your reel code:\n```html\n<!DOCTYPE html><html><body><div id='stage'></div><script>window.RAW={duration:5,seek:function(t){}}</script></body></html>\n```\nLet me know if you want changes!"
         val unwrapped = CodeValidator.unwrapMarkdownFences(wrappedWithChatter)
         assertTrue(unwrapped.startsWith("<!DOCTYPE html>"))
         assertTrue(unwrapped.endsWith("</html>"))
         assertTrue(CodeValidator.staticValidate(unwrapped).first)
-    }
-
-    @Test
-    fun layerJsonRoundTripMaskAndHiddenExport() {
-        val layers = listOf(
-            RawLayer(id = "t1", name = "Title", type = "text", opacity = 0.9f, hidden = true, mask = "circle")
-        )
-        val decoded = LayerJson.decode(LayerJson.encode(layers))
-        assertEquals(1, decoded.size)
-        assertTrue(decoded.first().hidden)
-        assertEquals("circle", decoded.first().mask)
-
-        val stageJson = LayerJson.encodeForStage(decoded)
-        assertTrue(stageJson.contains("\"opacity\":0.0"))
-        assertTrue(stageJson.contains("\"mask\":\"circle\""))
     }
 }

@@ -4,8 +4,13 @@ import android.content.Intent
 import android.net.Uri
 import android.view.ViewGroup
 import androidx.annotation.OptIn
+import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.tween
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -73,7 +78,6 @@ fun ResultScreen(
     cacheManager: CacheManager,
     playCelebration: Boolean,
     onSavedToGallery: (galleryUri: String) -> Unit,
-    onEditInTimeline: (projectId: Long) -> Unit,
     onMakeAnother: () -> Unit,
     onBack: () -> Unit
 ) {
@@ -218,6 +222,11 @@ fun ResultScreen(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.spacedBy(12.dp)
             ) {
+                val saveBtnBg by animateColorAsState(
+                    targetValue = if (video.savedToGalleryUri != null) RawColors.SuccessMint else RawColors.PrimaryBtnBg,
+                    animationSpec = tween(if (animEnabled) 260 else 0, easing = RawEasings.Morph),
+                    label = "result_save_bg"
+                )
                 RawPressButton(
                     enabled = !saving && video.savedToGalleryUri == null,
                     onClick = {
@@ -240,9 +249,7 @@ fun ResultScreen(
                             .fillMaxWidth()
                             .height(58.dp)
                             .clip(RoundedCornerShape(29.dp))
-                            .background(
-                                if (video.savedToGalleryUri != null) RawColors.SuccessMint else RawColors.PrimaryBtnBg
-                            ),
+                            .background(saveBtnBg),
                         horizontalArrangement = Arrangement.Center,
                         verticalAlignment = Alignment.CenterVertically
                     ) {
@@ -252,15 +259,25 @@ fun ResultScreen(
                             tint = RawColors.PrimaryBtnText
                         )
                         Spacer(modifier = Modifier.width(8.dp))
-                        Text(
-                            text = when {
-                                saving -> "Saving..."
-                                video.savedToGalleryUri != null -> "Saved"
-                                else -> "Save to phone"
+                        val labelStr = when {
+                            saving -> "Saving..."
+                            video.savedToGalleryUri != null -> "Saved"
+                            else -> "Save to phone"
+                        }
+                        AnimatedContent(
+                            targetState = labelStr,
+                            transitionSpec = {
+                                if (!animEnabled) fadeIn(tween(0)) togetherWith fadeOut(tween(0))
+                                else fadeIn(tween(180)) togetherWith fadeOut(tween(140))
                             },
-                            style = RawTypography.labelLarge,
-                            color = RawColors.PrimaryBtnText
-                        )
+                            label = "save_label_morph"
+                        ) { text ->
+                            Text(
+                                text = text,
+                                style = RawTypography.labelLarge,
+                                color = RawColors.PrimaryBtnText
+                            )
+                        }
                     }
                 }
 
@@ -295,35 +312,6 @@ fun ResultScreen(
                         RawIcon(RawIconType.SHARE, size = 20.dp)
                         Spacer(modifier = Modifier.width(8.dp))
                         Text("Share", style = RawTypography.labelLarge)
-                    }
-                }
-            }
-
-            // Edit in multi-track timeline button (right after render)
-            if (video.projectId > 0L) {
-                RawPressButton(
-                    onClick = {
-                        player.pause()
-                        onEditInTimeline(video.projectId)
-                    }
-                ) {
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .height(58.dp)
-                            .clip(RoundedCornerShape(29.dp))
-                            .background(RawColors.HeroSurface)
-                            .border(1.dp, RawColors.PillGrey, RoundedCornerShape(29.dp))
-                            .padding(horizontal = 20.dp),
-                        horizontalArrangement = Arrangement.Center,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        RawIcon(RawIconType.LAYERS, size = 20.dp, tint = RawColors.TextPrimary)
-                        Spacer(modifier = Modifier.width(10.dp))
-                        Text(
-                            text = "Edit in timeline (position, images, mask)",
-                            style = RawTypography.labelLarge
-                        )
                     }
                 }
             }

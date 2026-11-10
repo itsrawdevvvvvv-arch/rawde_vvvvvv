@@ -109,7 +109,6 @@ class RenderService : Service() {
                 val targetDurationUs = (durationSec * 1_000_000.0).toLong()
 
                 val renderer = FrameRenderer(this@RenderService, cache)
-                val layersJson = project.layersJson.takeIf { project.hasEditableLayers && it.isNotBlank() }
 
                 RenderStateHolder.update {
                     it.copy(stage = RenderStage.DRAWING_FRAMES, statusText = "Drawing frames 0%")
@@ -118,7 +117,6 @@ class RenderService : Service() {
                 var lastNotifMs = 0L
                 renderer.renderVideoOnly(
                     rawHtml = resolvedHtml,
-                    editedLayersJson = layersJson,
                     durationSec = durationSec,
                     outputVideoOnlyMp4 = tempVideo,
                     onProgress = { framePct, _, _ ->

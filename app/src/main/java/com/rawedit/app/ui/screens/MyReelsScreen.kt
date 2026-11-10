@@ -1,6 +1,8 @@
 package com.rawedit.app.ui.screens
 
 import android.content.Intent
+import androidx.compose.animation.core.spring
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -56,6 +58,7 @@ import com.rawedit.app.ui.icons.RawIconType
 import com.rawedit.app.ui.icons.RawLineArtIllustration
 import com.rawedit.app.ui.motion.CascadeSkewCard
 import com.rawedit.app.ui.motion.KineticHeading
+import com.rawedit.app.ui.motion.RawEasings
 import com.rawedit.app.ui.theme.RawColors
 import com.rawedit.app.ui.theme.RawTypography
 import java.io.File
@@ -130,89 +133,97 @@ fun MyReelsScreen(
                         }
                     }
 
-                    CascadeSkewCard(index = index) {
-                        SwipeToDismissBox(
-                            state = dismissState,
-                            enableDismissFromStartToEnd = false,
-                            onDismiss = { direction ->
-                                if (direction == SwipeToDismissBoxValue.EndToStart) {
-                                    deleteConfirmTarget = video
-                                }
-                            },
-                            backgroundContent = {
-                                Box(
-                                    modifier = Modifier
-                                        .fillMaxSize()
-                                        .clip(RoundedCornerShape(22.dp))
-                                        .background(RawColors.ErrorCoral.copy(alpha = 0.22f))
-                                        .padding(end = 22.dp),
-                                    contentAlignment = Alignment.CenterEnd
-                                ) {
-                                    RawIcon(RawIconType.TRASH, size = 22.dp, tint = RawColors.ErrorCoral)
-                                }
-                            }
-                        ) {
-                            Row(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .clip(RoundedCornerShape(22.dp))
-                                    .background(RawColors.CardSurface)
-                                    .border(1.dp, RawColors.Divider, RoundedCornerShape(22.dp))
-                                    .combinedClickable(
-                                        onClick = { onPlayVideo(video.id, Offset(540f, 900f)) },
-                                        onLongClick = { actionTarget = video }
-                                    )
-                                    .padding(14.dp),
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.spacedBy(14.dp)
-                            ) {
-                                Box(
-                                    modifier = Modifier
-                                        .width(96.dp)
-                                        .height(56.dp)
-                                        .clip(RoundedCornerShape(12.dp))
-                                        .background(RawColors.HeroSurface),
-                                    contentAlignment = Alignment.Center
-                                ) {
-                                    if (video.thumbnailPath.isNotBlank() && File(video.thumbnailPath).exists()) {
-                                        AsyncImage(
-                                            model = File(video.thumbnailPath),
-                                            contentDescription = video.title,
-                                            contentScale = ContentScale.Crop,
-                                            modifier = Modifier.fillMaxSize()
-                                        )
-                                    } else {
-                                        RawIcon(RawIconType.FILM, size = 24.dp, tint = RawColors.TextMuted)
+                    Box(
+                        modifier = Modifier.animateItem(
+                            fadeInSpec = tween(240, easing = RawEasings.Morph),
+                            fadeOutSpec = tween(180),
+                            placementSpec = spring(dampingRatio = 0.8f, stiffness = 360f)
+                        )
+                    ) {
+                        CascadeSkewCard(index = index) {
+                            SwipeToDismissBox(
+                                state = dismissState,
+                                enableDismissFromStartToEnd = false,
+                                onDismiss = { direction ->
+                                    if (direction == SwipeToDismissBoxValue.EndToStart) {
+                                        deleteConfirmTarget = video
+                                    }
+                                },
+                                backgroundContent = {
+                                    Box(
+                                        modifier = Modifier
+                                            .fillMaxSize()
+                                            .clip(RoundedCornerShape(22.dp))
+                                            .background(RawColors.ErrorCoral.copy(alpha = 0.22f))
+                                            .padding(end = 22.dp),
+                                        contentAlignment = Alignment.CenterEnd
+                                    ) {
+                                        RawIcon(RawIconType.TRASH, size = 22.dp, tint = RawColors.ErrorCoral)
                                     }
                                 }
-
-                                Column(modifier = Modifier.weight(1f)) {
-                                    Text(
-                                        text = video.title,
-                                        style = RawTypography.titleMedium,
-                                        maxLines = 1,
-                                        overflow = TextOverflow.Ellipsis
-                                    )
-                                    Spacer(modifier = Modifier.height(4.dp))
-                                    Text(
-                                        text = "${FormatHelpers.formatDuration(video.durationSec)}  •  ${FormatHelpers.formatFileSize(video.sizeBytes)}",
-                                        style = RawTypography.labelMedium
-                                    )
-                                    Spacer(modifier = Modifier.height(2.dp))
-                                    Text(
-                                        text = FormatHelpers.formatDate(video.createdAt),
-                                        style = RawTypography.labelSmall
-                                    )
-                                }
-
-                                Box(
+                            ) {
+                                Row(
                                     modifier = Modifier
-                                        .size(44.dp)
-                                        .clip(CircleShape)
-                                        .background(RawColors.TextPrimary),
-                                    contentAlignment = Alignment.Center
+                                        .fillMaxWidth()
+                                        .clip(RoundedCornerShape(20.dp))
+                                        .background(RawColors.CardSurface)
+                                        .border(1.dp, RawColors.Divider.copy(alpha = 0.55f), RoundedCornerShape(20.dp))
+                                        .combinedClickable(
+                                            onClick = { onPlayVideo(video.id, Offset(540f, 900f)) },
+                                            onLongClick = { actionTarget = video }
+                                        )
+                                        .padding(14.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(14.dp)
                                 ) {
-                                    RawIcon(RawIconType.PLAY, size = 18.dp, tint = RawColors.PrimaryBtnText)
+                                    Box(
+                                        modifier = Modifier
+                                            .width(96.dp)
+                                            .height(56.dp)
+                                            .clip(RoundedCornerShape(12.dp))
+                                            .background(RawColors.HeroSurface),
+                                        contentAlignment = Alignment.Center
+                                    ) {
+                                        if (video.thumbnailPath.isNotBlank() && File(video.thumbnailPath).exists()) {
+                                            AsyncImage(
+                                                model = File(video.thumbnailPath),
+                                                contentDescription = video.title,
+                                                contentScale = ContentScale.Crop,
+                                                modifier = Modifier.fillMaxSize()
+                                            )
+                                        } else {
+                                            RawIcon(RawIconType.FILM, size = 24.dp, tint = RawColors.TextMuted)
+                                        }
+                                    }
+
+                                    Column(modifier = Modifier.weight(1f)) {
+                                        Text(
+                                            text = video.title,
+                                            style = RawTypography.titleMedium,
+                                            maxLines = 1,
+                                            overflow = TextOverflow.Ellipsis
+                                        )
+                                        Spacer(modifier = Modifier.height(4.dp))
+                                        Text(
+                                            text = "${FormatHelpers.formatDuration(video.durationSec)}  •  ${FormatHelpers.formatFileSize(video.sizeBytes)}",
+                                            style = RawTypography.labelMedium
+                                        )
+                                        Spacer(modifier = Modifier.height(2.dp))
+                                        Text(
+                                            text = FormatHelpers.formatDate(video.createdAt),
+                                            style = RawTypography.labelSmall
+                                        )
+                                    }
+
+                                    Box(
+                                        modifier = Modifier
+                                            .size(40.dp)
+                                            .clip(CircleShape)
+                                            .background(RawColors.TextPrimary),
+                                        contentAlignment = Alignment.Center
+                                    ) {
+                                        RawIcon(RawIconType.PLAY, size = 16.dp, tint = RawColors.PrimaryBtnText)
+                                    }
                                 }
                             }
                         }

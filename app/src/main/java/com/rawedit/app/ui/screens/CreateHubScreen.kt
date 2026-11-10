@@ -1,8 +1,15 @@
 package com.rawedit.app.ui.screens
 
+import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.scaleIn
+import androidx.compose.animation.scaleOut
+import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -23,11 +30,15 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.rawedit.app.data.local.ProjectEntity
@@ -39,7 +50,10 @@ import com.rawedit.app.ui.icons.RawIconType
 import com.rawedit.app.ui.icons.RawLineArtIllustration
 import com.rawedit.app.ui.motion.CascadeSkewCard
 import com.rawedit.app.ui.motion.KineticHeading
+import com.rawedit.app.ui.motion.RawEasings
+import com.rawedit.app.ui.motion.RawPressButton
 import com.rawedit.app.ui.motion.SwipeToCreateSlider
+import com.rawedit.app.ui.motion.rememberAnimationsEnabled
 import com.rawedit.app.ui.theme.DotGridSurface
 import com.rawedit.app.ui.theme.RawColors
 import com.rawedit.app.ui.theme.RawTypography
@@ -61,9 +75,9 @@ fun CreateHubScreen(
     onOpenAddVoice: () -> Unit,
     onOpenCopyPrompt: () -> Unit,
     onOpenCodePaste: () -> Unit,
-    onOpenEditor: () -> Unit,
     onSwipeCreate: (Offset) -> Unit
 ) {
+    val animEnabled = rememberAnimationsEnabled()
     val hasAudio = project.audioUri.isNotBlank() && project.audioDurationSec > 0.0
     val hasCode = project.code.isNotBlank()
     val canCreate = hasAudio && hasCode
@@ -87,36 +101,23 @@ fun CreateHubScreen(
             number = 2,
             title = "Copy prompt",
             subtitle = "Paste into Claude and answer 3 quick questions",
-            statusText = if (hasAudio) "Ready" else "Optional",
+            statusText = if (hasAudio) "Ready" else "Step 1 first",
             statusDone = hasAudio,
             enabled = hasAudio,
             onClick = onOpenCopyPrompt
         ),
         StepRowModel(
             number = 3,
-            title = "Have a code? Click me",
+            title = "Paste code",
             subtitle = if (hasCode) {
                 "Validated • ${FormatHelpers.formatDuration(project.codeDurationSec)}"
             } else {
-                "Paste the HTML code returned by Claude"
+                "Paste unlimited HTML code returned by Claude"
             },
             statusText = if (hasCode) "Ready" else "Needed",
             statusDone = hasCode,
             enabled = true,
             onClick = onOpenCodePaste
-        ),
-        StepRowModel(
-            number = 4,
-            title = "Edit video",
-            subtitle = when {
-                !hasCode -> "Paste valid code first to unlock"
-                !project.hasEditableLayers -> "No editable layers in this code"
-                else -> "Move, resize, reorder, or add images"
-            },
-            statusText = "Optional",
-            statusDone = false,
-            enabled = hasCode,
-            onClick = onOpenEditor
         )
     )
 
@@ -128,32 +129,38 @@ fun CreateHubScreen(
     ) {
         LazyColumn(
             modifier = Modifier.fillMaxSize(),
-            contentPadding = PaddingValues(start = 20.dp, end = 20.dp, top = 12.dp, bottom = 124.dp),
+            contentPadding = PaddingValues(start = 20.dp, end = 20.dp, top = 12.dp, bottom = 126.dp),
             verticalArrangement = Arrangement.spacedBy(16.dp)
         ) {
             item {
                 CircleActionButton(
                     icon = RawIconType.BACK,
                     onClick = onBack,
-                    size = 48.dp
+                    size = 44.dp
                 )
             }
 
             item {
-                KineticHeading(
-                    words = listOf("Typography", "Reel"),
-                    style = RawTypography.displayLarge.copy(fontSize = 32.sp)
-                )
+                Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                    KineticHeading(
+                        words = listOf("Typography"),
+                        style = RawTypography.displayLarge.copy(fontSize = 31.sp, lineHeight = 36.sp)
+                    )
+                    KineticHeading(
+                        words = listOf("Reel"),
+                        style = RawTypography.displayLarge.copy(fontSize = 31.sp, lineHeight = 36.sp)
+                    )
+                }
             }
 
-            // Hero illustration card
+            // Minimal hero banner echoing reference upper card
             item {
                 DotGridSurface(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .height(176.dp)
-                        .clip(RoundedCornerShape(26.dp))
-                        .border(1.dp, RawColors.Divider, RoundedCornerShape(26.dp)),
+                        .height(166.dp)
+                        .clip(RoundedCornerShape(24.dp))
+                        .border(1.dp, RawColors.Divider.copy(alpha = 0.65f), RoundedCornerShape(24.dp)),
                     backgroundColor = RawColors.HeroSurface
                 ) {
                     Box(
@@ -164,75 +171,113 @@ fun CreateHubScreen(
                             kind = IllustrationKind.HERO_TYPOGRAPHY,
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .height(160.dp)
+                                .height(148.dp)
                         )
                     }
                 }
             }
 
-            // Two stat pills: audio length and file size
+            // Two minimal stat pills directly below preview banner
             item {
                 Row(
                     modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(12.dp)
+                    horizontalArrangement = Arrangement.spacedBy(10.dp)
                 ) {
                     StatPillCard(
                         icon = RawIconType.CLOCK,
-                        text = if (hasAudio) FormatHelpers.formatDuration(project.audioDurationSec) else "no audio yet",
+                        text = if (hasAudio) FormatHelpers.formatDuration(project.audioDurationSec) else "No audio yet",
                         modifier = Modifier.weight(1f)
                     )
                     StatPillCard(
                         icon = RawIconType.BOLT,
-                        text = if (hasAudio) FormatHelpers.formatFileSize(project.audioSizeBytes) else "no size yet",
+                        text = if (hasAudio) FormatHelpers.formatFileSize(project.audioSizeBytes) else "1080p MP4",
                         modifier = Modifier.weight(1f)
                     )
                 }
             }
 
             item {
+                val badgeBg by animateColorAsState(
+                    targetValue = if (canCreate) RawColors.SuccessMint.copy(alpha = 0.16f) else RawColors.HeroSurface,
+                    animationSpec = tween(if (animEnabled) 260 else 0, easing = RawEasings.Morph),
+                    label = "hub_badge_bg"
+                )
+                val badgeBorder by animateColorAsState(
+                    targetValue = if (canCreate) RawColors.SuccessMint.copy(alpha = 0.45f) else RawColors.Divider.copy(alpha = 0.7f),
+                    animationSpec = tween(if (animEnabled) 260 else 0, easing = RawEasings.Morph),
+                    label = "hub_badge_border"
+                )
                 Row(
-                    modifier = Modifier.fillMaxWidth(),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(top = 4.dp),
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     Text(
-                        text = "Steps",
+                        text = "Reel Steps",
                         style = RawTypography.titleLarge
                     )
                     Box(
                         modifier = Modifier
-                            .clip(RoundedCornerShape(14.dp))
-                            .background(RawColors.HeroSurface)
-                            .border(1.dp, RawColors.Divider, RoundedCornerShape(14.dp))
+                            .clip(RoundedCornerShape(15.dp))
+                            .background(badgeBg)
+                            .border(1.dp, badgeBorder, RoundedCornerShape(15.dp))
                             .padding(horizontal = 12.dp, vertical = 6.dp)
                     ) {
-                        Text(
-                            text = if (canCreate) "Ready to render" else "Steps 1 & 3 required",
-                            style = RawTypography.labelSmall,
-                            color = if (canCreate) RawColors.SuccessMint else RawColors.TextMuted
-                        )
+                        AnimatedContent(
+                            targetState = canCreate,
+                            transitionSpec = {
+                                if (!animEnabled) {
+                                    fadeIn(tween(0)) togetherWith fadeOut(tween(0))
+                                } else {
+                                    (fadeIn(tween(200, easing = RawEasings.Morph)) +
+                                        scaleIn(initialScale = 0.94f, animationSpec = tween(200)))
+                                        .togetherWith(
+                                            fadeOut(tween(140)) +
+                                                scaleOut(targetScale = 0.94f, animationSpec = tween(140))
+                                        )
+                                }
+                            },
+                            label = "hub_ready_text"
+                        ) { ready ->
+                            Text(
+                                text = if (ready) "Ready to create" else "Steps 1 & 3 needed",
+                                style = RawTypography.labelSmall,
+                                color = if (ready) RawColors.SuccessMint else RawColors.TextMuted
+                            )
+                        }
                     }
                 }
             }
 
-            itemsIndexed(steps) { index, step ->
+            itemsIndexed(steps, key = { _, s -> s.number }) { index, step ->
                 CascadeSkewCard(index = index) {
-                    StepActionRow(step = step)
+                    StepActionRow(step = step, animEnabled = animEnabled)
                 }
             }
         }
 
-        // Bottom Swipe-to-create bar
+        // Bottom Swipe-to-create bar with subtle fade scrim
         Box(
             modifier = Modifier
                 .align(Alignment.BottomCenter)
                 .fillMaxWidth()
-                .background(RawColors.BgPrimary.copy(alpha = 0.94f))
+                .background(
+                    Brush.verticalGradient(
+                        colors = listOf(
+                            Color.Transparent,
+                            RawColors.BgPrimary.copy(alpha = 0.88f),
+                            RawColors.BgPrimary
+                        )
+                    )
+                )
                 .navigationBarsPadding()
                 .padding(horizontal = 20.dp, vertical = 14.dp)
         ) {
             SwipeToCreateSlider(
                 unlocked = canCreate,
+                rightTag = if (hasAudio) FormatHelpers.formatDuration(project.audioDurationSec) else "1080p",
                 onTriggered = onSwipeCreate
             )
         }
@@ -247,92 +292,128 @@ private fun StatPillCard(
 ) {
     Row(
         modifier = modifier
-            .height(48.dp)
-            .clip(RoundedCornerShape(24.dp))
+            .height(44.dp)
+            .clip(RoundedCornerShape(22.dp))
             .background(RawColors.CardSurface)
-            .border(1.dp, RawColors.Divider, RoundedCornerShape(24.dp))
+            .border(1.dp, RawColors.Divider.copy(alpha = 0.6f), RoundedCornerShape(22.dp))
             .padding(horizontal = 14.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.Center
     ) {
-        RawIcon(type = icon, size = 16.dp, tint = RawColors.TextMuted)
+        RawIcon(type = icon, size = 15.dp, tint = RawColors.TextMuted)
         Spacer(modifier = Modifier.width(8.dp))
         Text(
             text = text,
             style = RawTypography.labelMedium,
             color = RawColors.TextPrimary,
-            maxLines = 1
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis
         )
     }
 }
 
 @Composable
-private fun StepActionRow(step: StepRowModel) {
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .clip(RoundedCornerShape(22.dp))
-            .background(RawColors.CardSurface)
-            .border(
-                width = 1.dp,
-                color = if (step.statusDone) RawColors.SuccessMint.copy(alpha = 0.45f) else RawColors.Divider,
-                shape = RoundedCornerShape(22.dp)
-            )
-            .clickable(enabled = step.enabled, onClick = step.onClick)
-            .padding(horizontal = 18.dp, vertical = 16.dp),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(12.dp)
+private fun StepActionRow(
+    step: StepRowModel,
+    animEnabled: Boolean
+) {
+    val borderColor by animateColorAsState(
+        targetValue = if (step.statusDone) RawColors.SuccessMint.copy(alpha = 0.42f) else RawColors.Divider.copy(alpha = 0.6f),
+        animationSpec = tween(if (animEnabled) 260 else 0, easing = RawEasings.Morph),
+        label = "step_border_${step.number}"
+    )
+    val badgeBg by animateColorAsState(
+        targetValue = if (step.statusDone) RawColors.SuccessMint.copy(alpha = 0.16f) else RawColors.RaisedCard,
+        animationSpec = tween(if (animEnabled) 260 else 0, easing = RawEasings.Morph),
+        label = "step_badge_${step.number}"
+    )
+    val circleBg by animateColorAsState(
+        targetValue = if (step.enabled) RawColors.TextPrimary else RawColors.RaisedCard,
+        animationSpec = tween(if (animEnabled) 240 else 0, easing = RawEasings.Morph),
+        label = "step_circle_${step.number}"
+    )
+
+    RawPressButton(
+        onClick = step.onClick,
+        enabled = step.enabled
     ) {
-        Column(modifier = Modifier.weight(1f)) {
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
-                Text(
-                    text = "${step.number}. ${step.title}",
-                    style = RawTypography.titleMedium.copy(fontWeight = FontWeight.Bold),
-                    color = if (step.enabled) RawColors.TextPrimary else RawColors.TextMuted,
-                    maxLines = 1,
-                    overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
-                    modifier = Modifier.weight(1f, fill = false)
-                )
-                Box(
-                    modifier = Modifier
-                        .clip(RoundedCornerShape(8.dp))
-                        .background(
-                            if (step.statusDone) RawColors.SuccessMint.copy(alpha = 0.16f) else RawColors.RaisedCard
-                        )
-                        .padding(horizontal = 8.dp, vertical = 2.dp)
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clip(RoundedCornerShape(20.dp))
+                .background(RawColors.CardSurface)
+                .border(1.dp, borderColor, RoundedCornerShape(20.dp))
+                .padding(horizontal = 18.dp, vertical = 16.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(12.dp)
+        ) {
+            Column(modifier = Modifier.weight(1f)) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
                     Text(
-                        text = step.statusText,
-                        style = RawTypography.labelSmall,
-                        color = if (step.statusDone) RawColors.SuccessMint else RawColors.TextMuted,
+                        text = "${step.number}. ${step.title}",
+                        style = RawTypography.titleMedium.copy(fontWeight = FontWeight.SemiBold),
+                        color = if (step.enabled) RawColors.TextPrimary else RawColors.TextMuted,
                         maxLines = 1,
-                        softWrap = false
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.weight(1f, fill = false)
+                    )
+                    Box(
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(8.dp))
+                            .background(badgeBg)
+                            .padding(horizontal = 8.dp, vertical = 2.dp)
+                    ) {
+                        Text(
+                            text = step.statusText,
+                            style = RawTypography.labelSmall,
+                            color = if (step.statusDone) RawColors.SuccessMint else RawColors.TextMuted,
+                            maxLines = 1,
+                            softWrap = false
+                        )
+                    }
+                }
+                Spacer(modifier = Modifier.height(4.dp))
+                Text(
+                    text = step.subtitle,
+                    style = RawTypography.bodyMedium,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis
+                )
+            }
+
+            Box(
+                modifier = Modifier
+                    .size(40.dp)
+                    .clip(CircleShape)
+                    .background(circleBg),
+                contentAlignment = Alignment.Center
+            ) {
+                AnimatedContent(
+                    targetState = step.statusDone,
+                    transitionSpec = {
+                        if (!animEnabled) {
+                            fadeIn(tween(0)) togetherWith fadeOut(tween(0))
+                        } else {
+                            (scaleIn(initialScale = 0.7f, animationSpec = tween(220, easing = RawEasings.Morph)) +
+                                fadeIn(tween(200)))
+                                .togetherWith(
+                                    scaleOut(targetScale = 0.7f, animationSpec = tween(140)) +
+                                        fadeOut(tween(140))
+                                )
+                        }
+                    },
+                    label = "step_icon_${step.number}"
+                ) { done ->
+                    RawIcon(
+                        type = if (done) RawIconType.CHECK else RawIconType.PLAY,
+                        size = 16.dp,
+                        tint = if (step.enabled) RawColors.PrimaryBtnText else RawColors.TextMuted
                     )
                 }
             }
-            Spacer(modifier = Modifier.height(4.dp))
-            Text(
-                text = step.subtitle,
-                style = RawTypography.bodyMedium,
-                maxLines = 2
-            )
-        }
-
-        Box(
-            modifier = Modifier
-                .size(46.dp)
-                .clip(CircleShape)
-                .background(if (step.enabled) RawColors.TextPrimary else RawColors.RaisedCard),
-            contentAlignment = Alignment.Center
-        ) {
-            RawIcon(
-                type = if (step.statusDone) RawIconType.CHECK else RawIconType.PLAY,
-                size = 18.dp,
-                tint = if (step.enabled) RawColors.PrimaryBtnText else RawColors.TextMuted
-            )
         }
     }
 }
