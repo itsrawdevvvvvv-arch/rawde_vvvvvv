@@ -20,6 +20,20 @@ android {
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
 
+    // One committed keystore signs every build, so a new APK installs as an
+    // update over the previous one instead of failing with a signature mismatch.
+    signingConfigs {
+        create("dev") {
+            storeFile = rootProject.file("keystore/raw_edit_debug.p12")
+            storeType = "PKCS12"
+            storePassword = "rawedit2026"
+            keyAlias = "raw_edit"
+            keyPassword = "rawedit2026"
+            enableV1Signing = true
+            enableV2Signing = true
+        }
+    }
+
     buildTypes {
         release {
             isMinifyEnabled = true
@@ -31,6 +45,7 @@ android {
         }
         debug {
             isMinifyEnabled = false
+            signingConfig = signingConfigs.getByName("dev")
         }
     }
 
