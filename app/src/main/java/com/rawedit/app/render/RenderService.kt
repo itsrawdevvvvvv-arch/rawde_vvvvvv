@@ -96,7 +96,8 @@ class RenderService : Service() {
                 val project = repo.getProject(projectId)
                     ?: throw IllegalStateException("Project not found.")
 
-                if (project.audioUri.isBlank() || project.code.isBlank()) {
+                val resolvedHtml = cache.resolveHtmlCode(project.code)
+                if (project.audioUri.isBlank() || resolvedHtml.isBlank()) {
                     throw IllegalStateException("Audio file or HTML code is missing.")
                 }
                 val audioFile = File(project.audioUri)
@@ -116,7 +117,7 @@ class RenderService : Service() {
 
                 var lastNotifMs = 0L
                 renderer.renderVideoOnly(
-                    rawHtml = project.code,
+                    rawHtml = resolvedHtml,
                     editedLayersJson = layersJson,
                     durationSec = durationSec,
                     outputVideoOnlyMp4 = tempVideo,

@@ -49,6 +49,24 @@ class CacheManager(private val context: Context) {
     val tempDir: File
         get() = File(context.cacheDir, "render_temp").apply { mkdirs() }
 
+    val codeStoreDir: File
+        get() = File(context.filesDir, "raw_code").apply { mkdirs() }
+
+    fun persistHtmlCode(projectId: Long, html: String): String {
+        // Keep Room rows safely under Android 9 CursorWindow limits even for multi-MB unlimited HTML
+        if (html.length <= 512_000) return html
+        val outFile = File(codeStoreDir, "project_${projectId}.html")
+        outFile.writeText(html, Charsets.UTF_8)
+        return "$CODE_FILE_PREFIX${outFile.name}"
+    }
+
+    fun resolveHtmlCode(stored: String): String {
+        if (!stored.startsWith(CODE_FILE_PREFIX)) return stored
+        val fileName = stored.removePrefix(CODE_FILE_PREFIX)
+        val file = File(codeStoreDir, fileName)
+        return if (file.exists()) runCatching { file.readText(Charsets.UTF_8) }.getOrDefault("") else ""
+    }
+
     fun createCameraTempFile(): File {
         val dir = File(context.cacheDir, "camera_temp").apply { mkdirs() }
         return File(dir, "capture_${System.currentTimeMillis()}.jpg")
@@ -350,5 +368,6 @@ class CacheManager(private val context: Context) {
         private const val MAX_AUDIO_SEC = 20.0 * 60.0
         private const val MAX_IMAGE_BYTES = 10L * 1024L * 1024L
         private const val MAX_IMAGE_DIM = 2560
+        private const val CODE_FILE_PREFIX = "@rawfile:"
     }
 }

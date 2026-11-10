@@ -51,7 +51,8 @@ data class RawLayer(
         end = end,
         text = text,
         src = src,
-        mask = mask
+        mask = mask,
+        hidden = hidden
     )
 }
 
@@ -70,7 +71,8 @@ data class RawLayerExport(
     val end: Double,
     val text: String? = null,
     val src: String? = null,
-    val mask: String = "none"
+    val mask: String = "none",
+    val hidden: Boolean = false
 )
 
 object LayerJson {

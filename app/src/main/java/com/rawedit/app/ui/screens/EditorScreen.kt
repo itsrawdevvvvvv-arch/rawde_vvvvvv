@@ -6,7 +6,9 @@ import android.webkit.WebView
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.ScrollState
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -62,6 +64,7 @@ import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.onSizeChanged
@@ -69,6 +72,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
@@ -82,7 +86,6 @@ import com.rawedit.app.data.model.RawLayer
 import com.rawedit.app.render.LocalAssetServer
 import com.rawedit.app.ui.components.BigPrimaryButton
 import com.rawedit.app.ui.components.CircleActionButton
-import com.rawedit.app.ui.components.FormatHelpers
 import com.rawedit.app.ui.icons.RawIcon
 import com.rawedit.app.ui.icons.RawIconType
 import com.rawedit.app.ui.motion.RawPressButton
@@ -93,17 +96,33 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import java.util.Locale
 import java.util.UUID
+import kotlin.math.abs
+import kotlin.math.ceil
 import kotlin.math.roundToInt
 
-private enum class SimpleToolTab(val label: String, val icon: RawIconType) {
-    POSITION_SCALE("Pos & Scale", RawIconType.EDIT),
-    OPACITY("Opacity", RawIconType.EYE),
-    MASK("Mask", RawIconType.LAYERS)
+private enum class EditorAdjuster(val label: String) {
+    NONE("None"),
+    POS_SCALE("Pos & Scale"),
+    OPACITY("Opacity"),
+    MASK("Mask")
 }
 
+private enum class TrackFilter(val label: String) {
+    ALL("All"),
+    ACTIVE_NOW("On Screen"),
+    TEXT("Text"),
+    IMAGE("Images")
+}
+
+private val ClipBlue = Color(0xFF1F7FE8)
+private val ClipTeal = Color(0xFF0E947A)
+private val ClipSlate = Color(0xFF52567A)
+private val PlayheadRed = Color(0xFFFF4D5A)
+
 /**
- * After Effects / CapCut / Alight Motion style multi-track timeline editor
- * with simple controls: Position, Scale, Opacity, Add Images, Masking, and Track Ordering (Above/Below).
+ * CapCut / Alight Motion / After Effects style mobile timeline editor.
+ * Supports synchronized zoomable time ruler, live playhead scrubbing, color-coded readable tracks,
+ * timing trimming (0.1s snap), above/below z-ordering, position/scale, opacity, images, and masking.
  */
 @Composable
 fun EditorScreen(
@@ -116,6 +135,8 @@ fun EditorScreen(
     onBack: () -> Unit
 ) {
     val scope = rememberCoroutineScope()
+    val density = LocalDensity.current
+    val resolvedHtml = remember(project.code) { cacheManager.resolveHtmlCode(project.code) }
 
     if (!project.hasEditableLayers) {
         Column(
@@ -135,7 +156,7 @@ fun EditorScreen(
                 RawIcon(RawIconType.LAYERS, size = 44.dp, tint = RawColors.TextMuted)
                 Spacer(modifier = Modifier.height(16.dp))
                 Text(
-                    text = "This code has no editable layers. You can still create the video.",
+                    text = "This code has no editable layers. You can still render the video.",
                     style = RawTypography.titleLarge
                 )
             }
@@ -152,20 +173,35 @@ fun EditorScreen(
     val undoStack = remember { mutableStateListOf<List<RawLayer>>() }
     val redoStack = remember { mutableStateListOf<List<RawLayer>>() }
 
-    var selectedLayerId by remember { mutableStateOf(initialLayers.maxByOrNull { it.z }?.id) }
-    var activeTool by remember { mutableStateOf(SimpleToolTab.POSITION_SCALE) }
-    var editingTextLayer by remember { mutableStateOf<RawLayer?>(null) }
-    var errorNotice by remember { mutableStateOf<String?>(null) }
-
     val durationSec = remember(project.audioDurationSec, project.codeDurationSec) {
         maxOf(project.audioDurationSec, project.codeDurationSec, 1.0)
     }
     var currentTimeSec by remember { mutableDoubleStateOf(0.0) }
     var isPlaying by remember { mutableStateOf(false) }
 
+    // Default select an element visible at playhead (0s) or top-most z
+    var selectedLayerId by remember(project.id) {
+        mutableStateOf(
+            initialLayers.filter { 0.0 >= it.start && 0.0 <= it.end }.maxByOrNull { it.z }?.id
+                ?: initialLayers.maxByOrNull { it.z }?.id
+        )
+    }
+    var activeAdjuster by remember { mutableStateOf(EditorAdjuster.POS_SCALE) }
+    var trackFilter by remember(project.id) {
+        mutableStateOf(if (initialLayers.size > 60) TrackFilter.ACTIVE_NOW else TrackFilter.ALL)
+    }
+    var dpPerSec by remember { mutableFloatStateOf(78f) }
+    var timelineViewportWidthPx by remember { mutableFloatStateOf(300f) }
+    val timelineScroll = rememberScrollState()
+
+    var editingTextLayer by remember { mutableStateOf<RawLayer?>(null) }
+    var errorNotice by remember { mutableStateOf<String?>(null) }
+
     var webViewRef by remember { mutableStateOf<WebView?>(null) }
     var pageReady by remember { mutableStateOf(false) }
     var previewBoxSize by remember { mutableStateOf(IntSize(1, 1)) }
+
+    fun snap01(v: Double): Double = (v * 10.0).roundToInt() / 10.0
 
     fun pushCommit(newLayers: List<RawLayer>, recordHistory: Boolean = true) {
         if (recordHistory) {
@@ -193,6 +229,7 @@ fun EditorScreen(
         onAutoSaveDraft(project.copy(layersJson = LayerJson.encode(next)))
     }
 
+    // Playback loop (~30fps)
     LaunchedEffect(isPlaying, durationSec) {
         if (isPlaying) {
             var lastNs = System.nanoTime()
@@ -207,31 +244,46 @@ fun EditorScreen(
         }
     }
 
-    LaunchedEffect(layers, currentTimeSec, pageReady, previewBoxSize) {
+    // Push layer JSON to WebView ONLY when layers list changes (avoids 30fps JSON serialization lag on Android 9)
+    val latestStageJson = remember(layers) { LayerJson.encodeForStage(layers) }
+    LaunchedEffect(latestStageJson, pageReady, previewBoxSize) {
         val wv = webViewRef ?: return@LaunchedEffect
         if (!pageReady) return@LaunchedEffect
-        val stageJson = LayerJson.encodeForStage(layers)
+        val fallbackVw = (previewBoxSize.width / density.density).roundToInt().coerceAtLeast(1)
+        val fallbackVh = (previewBoxSize.height / density.density).roundToInt().coerceAtLeast(1)
         val js = """
             (function() {
-              document.documentElement.style.overflow = 'hidden';
-              document.body.style.margin = '0';
-              document.body.style.overflow = 'hidden';
-              var s = document.getElementById('stage');
-              if (s) {
-                var cssScale = window.innerWidth / 1920;
-                s.style.transformOrigin = 'top left';
-                s.style.transform = 'scale(' + cssScale + ')';
-              }
-              if (window.RAW && typeof window.RAW.seek === 'function') {
-                window.RAW.layers = $stageJson;
-                window.RAW.seek($currentTimeSec);
-                if (typeof window.__applyLayerMasks === 'function') {
-                  window.__applyLayerMasks();
-                }
+              window.__RAW_EDITED_LAYERS = $latestStageJson;
+              if (typeof window.__editorSeek === 'function') {
+                window.__editorSeek(window.__RAW_EDITED_LAYERS, $currentTimeSec, $fallbackVw, $fallbackVh);
               }
             })();
         """.trimIndent()
         wv.evaluateJavascript(js, null)
+    }
+
+    // Fast playhead seek (<1ms) whenever currentTimeSec changes
+    LaunchedEffect(currentTimeSec, pageReady, previewBoxSize) {
+        val wv = webViewRef ?: return@LaunchedEffect
+        if (!pageReady) return@LaunchedEffect
+        val fallbackVw = (previewBoxSize.width / density.density).roundToInt().coerceAtLeast(1)
+        val fallbackVh = (previewBoxSize.height / density.density).roundToInt().coerceAtLeast(1)
+        val js = "if(typeof window.__editorSeek==='function'){window.__editorSeek(window.__RAW_EDITED_LAYERS,$currentTimeSec,$fallbackVw,$fallbackVh);}"
+        wv.evaluateJavascript(js, null)
+    }
+
+    // Keep playhead in view when scrubbing/playing across wide zoomed timelines
+    LaunchedEffect(currentTimeSec, dpPerSec, timelineViewportWidthPx) {
+        if (timelineViewportWidthPx <= 10f) return@LaunchedEffect
+        val playheadPx = currentTimeSec.toFloat() * with(density) { dpPerSec.dp.toPx() }
+        val curScroll = timelineScroll.value.toFloat()
+        val pad = timelineViewportWidthPx * 0.08f
+        if (playheadPx < curScroll + pad || playheadPx > curScroll + timelineViewportWidthPx - pad) {
+            val target = (playheadPx - timelineViewportWidthPx * 0.35f)
+                .roundToInt()
+                .coerceIn(0, timelineScroll.maxValue)
+            timelineScroll.scrollTo(target)
+        }
     }
 
     val imagePicker = rememberLauncherForActivityResult(
@@ -247,10 +299,14 @@ fun EditorScreen(
                 res.onSuccess { asset ->
                     errorNotice = null
                     val maxZ = (layers.maxOfOrNull { it.z } ?: 0) + 1
-                    val imgW = 560f
-                    val imgH = (560f * asset.height / asset.width.coerceAtLeast(1)).coerceIn(80f, 960f)
+                    val imgW = 540f
+                    val imgH = (540f * asset.height / asset.width.coerceAtLeast(1)).coerceIn(80f, 920f)
                     val newId = "img_${UUID.randomUUID().toString().take(6)}"
                     baseDimensions[newId] = imgW to imgH
+                    val clipStart = snap01(currentTimeSec.coerceIn(0.0, (durationSec - 0.5).coerceAtLeast(0.0)))
+                    val clipEnd = snap01(minOf(durationSec, clipStart + 4.0).let {
+                        if (it - clipStart < 0.8) durationSec else it
+                    })
                     val newLayer = RawLayer(
                         id = newId,
                         name = "Image ${layers.count { it.type == "image" } + 1}",
@@ -261,14 +317,15 @@ fun EditorScreen(
                         h = imgH,
                         opacity = 1f,
                         z = maxZ,
-                        start = 0.0,
-                        end = durationSec,
+                        start = clipStart,
+                        end = clipEnd,
                         text = null,
                         src = "https://${LocalAssetServer.ASSETS_HOST}/${asset.fileName}",
                         mask = LayerMask.NONE.key
                     )
                     pushCommit(layers + newLayer)
                     selectedLayerId = newLayer.id
+                    activeAdjuster = EditorAdjuster.POS_SCALE
                 }.onFailure { err ->
                     errorNotice = err.message ?: "Could not add image."
                 }
@@ -277,7 +334,17 @@ fun EditorScreen(
     }
 
     val selectedLayer = layers.firstOrNull { it.id == selectedLayerId }
-    val sortedTracks = remember(layers) { layers.sortedByDescending { it.z } }
+    val allSortedDesc = remember(layers) { layers.sortedByDescending { it.z } }
+    val filteredTracks = remember(allSortedDesc, trackFilter, currentTimeSec) {
+        when (trackFilter) {
+            TrackFilter.ALL -> allSortedDesc
+            TrackFilter.ACTIVE_NOW -> allSortedDesc.filter {
+                !it.hidden && currentTimeSec >= (it.start - 0.05) && currentTimeSec <= (it.end + 0.05)
+            }
+            TrackFilter.TEXT -> allSortedDesc.filter { it.type == "text" }
+            TrackFilter.IMAGE -> allSortedDesc.filter { it.type == "image" }
+        }
+    }
 
     Column(
         modifier = Modifier
@@ -286,55 +353,54 @@ fun EditorScreen(
             .statusBarsPadding()
             .navigationBarsPadding()
     ) {
-        // Top header bar
+        // 1. Clean Top Bar (Reference Video Style: Back + Title + Undo/Redo + Export/Re-render)
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(horizontal = 14.dp, vertical = 8.dp),
+                .padding(horizontal = 12.dp, vertical = 6.dp),
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically
         ) {
             Row(
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                modifier = Modifier.weight(1f),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                CircleActionButton(icon = RawIconType.BACK, onClick = onBack, size = 38.dp)
+                Column {
+                    Text(
+                        text = project.title.ifBlank { "Untitled Reel" },
+                        style = RawTypography.titleMedium.copy(fontSize = 15.sp),
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                    Text(
+                        text = String.format(Locale.US, "%05.2fs / %.1fs", currentTimeSec, durationSec),
+                        fontFamily = JetBrainsMonoFamily,
+                        fontSize = 11.sp,
+                        color = RawColors.TextMuted
+                    )
+                }
+            }
+
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                CircleActionButton(icon = RawIconType.BACK, onClick = onBack, size = 42.dp)
                 CircleActionButton(
                     icon = RawIconType.UNDO,
                     onClick = ::performUndo,
                     enabled = undoStack.isNotEmpty(),
-                    size = 42.dp,
+                    size = 38.dp,
                     iconTint = if (undoStack.isNotEmpty()) RawColors.TextPrimary else RawColors.TextMuted
                 )
                 CircleActionButton(
                     icon = RawIconType.REDO,
                     onClick = ::performRedo,
                     enabled = redoStack.isNotEmpty(),
-                    size = 42.dp,
+                    size = 38.dp,
                     iconTint = if (redoStack.isNotEmpty()) RawColors.TextPrimary else RawColors.TextMuted
                 )
-            }
-
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                RawPressButton(
-                    onClick = {
-                        imagePicker.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly))
-                    }
-                ) {
-                    Row(
-                        modifier = Modifier
-                            .height(42.dp)
-                            .clip(RoundedCornerShape(21.dp))
-                            .background(RawColors.RaisedCard)
-                            .padding(horizontal = 14.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(6.dp)
-                    ) {
-                        RawIcon(RawIconType.IMAGE, size = 16.dp)
-                        Text("+ Image", style = RawTypography.labelLarge.copy(fontSize = 13.sp))
-                    }
-                }
-
                 RawPressButton(
                     onClick = {
                         isPlaying = false
@@ -348,14 +414,14 @@ fun EditorScreen(
                 ) {
                     Box(
                         modifier = Modifier
-                            .height(42.dp)
-                            .clip(RoundedCornerShape(21.dp))
+                            .height(38.dp)
+                            .clip(RoundedCornerShape(19.dp))
                             .background(RawColors.PrimaryBtnBg)
-                            .padding(horizontal = 18.dp),
+                            .padding(horizontal = 16.dp),
                         contentAlignment = Alignment.Center
                     ) {
                         Text(
-                            text = if (openedAfterRender) "Re-render" else "Done",
+                            text = if (openedAfterRender) "Re-render" else "Export",
                             style = RawTypography.labelLarge.copy(fontSize = 13.sp),
                             color = RawColors.PrimaryBtnText
                         )
@@ -364,19 +430,19 @@ fun EditorScreen(
             }
         }
 
-        // 16:9 Live Preview Canvas with direct Position drag & Corner Scale handles
+        // 2. 16:9 Live Preview Canvas (Always Dark Background + Guaranteed Fit + Direct Drag/Scale)
         Box(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(horizontal = 14.dp)
+                .padding(horizontal = 12.dp)
                 .aspectRatio(16f / 9f)
                 .clip(RoundedCornerShape(14.dp))
-                .background(Color.Black)
+                .background(RawColors.BgPrimary)
                 .border(1.dp, RawColors.Divider, RoundedCornerShape(14.dp))
                 .onSizeChanged { previewBoxSize = it }
         ) {
             EditorStageWebView(
-                rawHtml = project.code,
+                rawHtml = resolvedHtml,
                 cacheManager = cacheManager,
                 onWebViewReady = { wv ->
                     webViewRef = wv
@@ -389,7 +455,7 @@ fun EditorScreen(
                 selectedId = selectedLayerId,
                 currentTimeSec = currentTimeSec,
                 boxSize = previewBoxSize,
-                onSelect = { selectedLayerId = it },
+                onSelect = { id -> selectedLayerId = id },
                 onPreviewMutate = { updated -> layers = updated },
                 onCommitMutate = { snapshotBefore, updated ->
                     undoStack.add(snapshotBefore)
@@ -401,26 +467,21 @@ fun EditorScreen(
             )
         }
 
-        // Transport Playhead Bar (CapCut / Alight Motion style)
+        // 3. Slim Transport & Filter Strip (Play/Pause + Time Slider + Filter + Zoom)
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(horizontal = 14.dp, vertical = 6.dp),
+                .padding(horizontal = 12.dp, vertical = 4.dp),
             verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(10.dp)
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
         ) {
             CircleActionButton(
                 icon = if (isPlaying) RawIconType.PAUSE else RawIconType.PLAY,
                 onClick = { isPlaying = !isPlaying },
-                size = 40.dp,
+                size = 36.dp,
                 backgroundColor = RawColors.RaisedCard
             )
-            Text(
-                text = String.format(Locale.US, "%05.2fs", currentTimeSec),
-                fontFamily = JetBrainsMonoFamily,
-                fontSize = 12.sp,
-                color = RawColors.TextPrimary
-            )
+
             Slider(
                 value = currentTimeSec.toFloat().coerceIn(0f, durationSec.toFloat()),
                 onValueChange = {
@@ -429,279 +490,118 @@ fun EditorScreen(
                 },
                 valueRange = 0f..durationSec.toFloat(),
                 colors = SliderDefaults.colors(
-                    thumbColor = RawColors.TextPrimary,
+                    thumbColor = PlayheadRed,
                     activeTrackColor = RawColors.TextPrimary,
                     inactiveTrackColor = RawColors.PillGrey
                 ),
                 modifier = Modifier.weight(1f)
             )
-            Text(
-                text = String.format(Locale.US, "%.1fs", durationSec),
-                fontFamily = JetBrainsMonoFamily,
-                fontSize = 12.sp,
-                color = RawColors.TextMuted
-            )
+
+            // Timeline zoom controls (- / Fit / +)
+            Row(
+                modifier = Modifier
+                    .clip(RoundedCornerShape(14.dp))
+                    .background(RawColors.CardSurface)
+                    .border(1.dp, RawColors.Divider, RoundedCornerShape(14.dp))
+                    .padding(horizontal = 4.dp, vertical = 2.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(2.dp)
+            ) {
+                ZoomChip("-") {
+                    dpPerSec = (dpPerSec * 0.72f).coerceIn(14f, 180f)
+                }
+                ZoomChip("Fit") {
+                    val availDp = (timelineViewportWidthPx / density.density).coerceAtLeast(180f)
+                    dpPerSec = (availDp / durationSec.toFloat()).coerceIn(10f, 180f)
+                }
+                ZoomChip("+") {
+                    dpPerSec = (dpPerSec * 1.38f).coerceIn(14f, 180f)
+                }
+            }
         }
 
         errorNotice?.let { msg ->
             Text(
                 text = msg,
-                style = RawTypography.bodyMedium,
+                style = RawTypography.labelSmall,
                 color = RawColors.ErrorCoral,
                 modifier = Modifier.padding(horizontal = 14.dp, vertical = 2.dp)
             )
         }
 
-        // Simple Property Strip for Selected Layer (Position/Scale, Opacity, Mask, Edit Text)
-        Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 14.dp)
-                .clip(RoundedCornerShape(16.dp))
-                .background(RawColors.CardSurface)
-                .border(1.dp, RawColors.Divider, RoundedCornerShape(16.dp))
-                .padding(horizontal = 12.dp, vertical = 8.dp),
-            verticalArrangement = Arrangement.spacedBy(6.dp)
-        ) {
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .horizontalScroll(rememberScrollState()),
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                SimpleToolTab.entries.forEach { tab ->
-                    val active = activeTool == tab
-                    Row(
-                        modifier = Modifier
-                            .height(34.dp)
-                            .clip(RoundedCornerShape(17.dp))
-                            .background(if (active) RawColors.PrimaryBtnBg else RawColors.RaisedCard)
-                            .clickable { activeTool = tab }
-                            .padding(horizontal = 12.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(5.dp)
-                    ) {
-                        RawIcon(
-                            type = tab.icon,
-                            size = 14.dp,
-                            tint = if (active) RawColors.PrimaryBtnText else RawColors.TextPrimary
-                        )
-                        Text(
-                            text = tab.label,
-                            style = RawTypography.labelSmall.copy(fontWeight = FontWeight.SemiBold),
-                            color = if (active) RawColors.PrimaryBtnText else RawColors.TextPrimary
-                        )
-                    }
-                }
-                if (selectedLayer?.type == "text") {
-                    Row(
-                        modifier = Modifier
-                            .height(34.dp)
-                            .clip(RoundedCornerShape(17.dp))
-                            .background(RawColors.RaisedCard)
-                            .clickable { editingTextLayer = selectedLayer }
-                            .padding(horizontal = 12.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(5.dp)
-                    ) {
-                        RawIcon(RawIconType.EDIT, size = 14.dp)
-                        Text(
-                            text = "Edit text",
-                            style = RawTypography.labelSmall.copy(fontWeight = FontWeight.SemiBold),
-                            color = RawColors.TextPrimary
-                        )
-                    }
-                }
-            }
-
-            if (selectedLayer == null) {
-                Text(
-                    text = "Tap any track below or element on screen to adjust it.",
-                    style = RawTypography.bodyMedium,
-                    modifier = Modifier.padding(vertical = 4.dp)
-                )
-            } else {
-                when (activeTool) {
-                    SimpleToolTab.POSITION_SCALE -> {
-                        val base = baseDimensions.getOrPut(selectedLayer.id) {
-                            selectedLayer.w.coerceAtLeast(40f) to selectedLayer.h.coerceAtLeast(40f)
-                        }
-                        val currentScale = (selectedLayer.w / base.first).coerceIn(0.25f, 2.5f)
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(8.dp)
-                        ) {
-                            Text(
-                                text = "Scale ${(currentScale * 100).roundToInt()}%",
-                                style = RawTypography.labelSmall,
-                                modifier = Modifier.width(74.dp)
-                            )
-                            Slider(
-                                value = currentScale,
-                                onValueChange = { sc ->
-                                    val nw = base.first * sc
-                                    val nh = base.second * sc
-                                    val cx = selectedLayer.x + selectedLayer.w * 0.5f
-                                    val cy = selectedLayer.y + selectedLayer.h * 0.5f
-                                    layers = layers.map {
-                                        if (it.id == selectedLayer.id) {
-                                            it.copy(x = cx - nw * 0.5f, y = cy - nh * 0.5f, w = nw, h = nh)
-                                        } else it
-                                    }
-                                },
-                                onValueChangeFinished = { pushCommit(layers) },
-                                valueRange = 0.25f..2.5f,
-                                colors = SliderDefaults.colors(
-                                    thumbColor = RawColors.TextPrimary,
-                                    activeTrackColor = RawColors.TextPrimary,
-                                    inactiveTrackColor = RawColors.PillGrey
-                                ),
-                                modifier = Modifier.weight(1f)
-                            )
-                            // Quick center X button
-                            Box(
-                                modifier = Modifier
-                                    .height(30.dp)
-                                    .clip(RoundedCornerShape(10.dp))
-                                    .background(RawColors.RaisedCard)
-                                    .clickable {
-                                        pushCommit(
-                                            layers.map {
-                                                if (it.id == selectedLayer.id) it.copy(x = (1920f - it.w) * 0.5f) else it
-                                            }
-                                        )
-                                    }
-                                    .padding(horizontal = 10.dp),
-                                contentAlignment = Alignment.Center
-                            ) {
-                                Text("Center X", style = RawTypography.labelSmall, color = RawColors.TextPrimary)
-                            }
-                        }
-                    }
-
-                    SimpleToolTab.OPACITY -> {
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(8.dp)
-                        ) {
-                            Text(
-                                text = "Opacity ${(selectedLayer.opacity * 100).roundToInt()}%",
-                                style = RawTypography.labelSmall,
-                                modifier = Modifier.width(86.dp)
-                            )
-                            Slider(
-                                value = selectedLayer.opacity.coerceIn(0f, 1f),
-                                onValueChange = { op ->
-                                    layers = layers.map {
-                                        if (it.id == selectedLayer.id) it.copy(opacity = op) else it
-                                    }
-                                },
-                                onValueChangeFinished = { pushCommit(layers) },
-                                colors = SliderDefaults.colors(
-                                    thumbColor = RawColors.TextPrimary,
-                                    activeTrackColor = RawColors.TextPrimary,
-                                    inactiveTrackColor = RawColors.PillGrey
-                                ),
-                                modifier = Modifier.weight(1f)
-                            )
-                        }
-                    }
-
-                    SimpleToolTab.MASK -> {
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .horizontalScroll(rememberScrollState()),
-                            horizontalArrangement = Arrangement.spacedBy(6.dp)
-                        ) {
-                            LayerMask.entries.forEach { maskOption ->
-                                val isCur = selectedLayer.mask.equals(maskOption.key, ignoreCase = true)
-                                Box(
-                                    modifier = Modifier
-                                        .height(32.dp)
-                                        .clip(RoundedCornerShape(10.dp))
-                                        .background(if (isCur) RawColors.SuccessMint else RawColors.RaisedCard)
-                                        .clickable {
-                                            pushCommit(
-                                                layers.map {
-                                                    if (it.id == selectedLayer.id) it.copy(mask = maskOption.key) else it
-                                                }
-                                            )
-                                        }
-                                        .padding(horizontal = 12.dp),
-                                    contentAlignment = Alignment.Center
-                                ) {
-                                    Text(
-                                        text = maskOption.label,
-                                        style = RawTypography.labelSmall.copy(fontWeight = FontWeight.SemiBold),
-                                        color = if (isCur) RawColors.PrimaryBtnText else RawColors.TextPrimary
-                                    )
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-        }
-
-        Spacer(modifier = Modifier.height(8.dp))
-
-        // Multi-Track Stacked Timeline (After Effects / CapCut / Alight Motion style: Above & Below tracks)
+        // 4. CapCut / Alight Motion Multi-Track Timeline Section (Takes Main Focus!)
         Column(
             modifier = Modifier
                 .fillMaxWidth()
                 .weight(1f)
-                .padding(horizontal = 14.dp)
-                .clip(RoundedCornerShape(topStart = 18.dp, topEnd = 18.dp))
+                .padding(horizontal = 12.dp)
+                .clip(RoundedCornerShape(16.dp))
                 .background(RawColors.CardSurface)
-                .border(1.dp, RawColors.Divider, RoundedCornerShape(topStart = 18.dp, topEnd = 18.dp))
+                .border(1.dp, RawColors.Divider, RoundedCornerShape(16.dp))
         ) {
+            // Filter bar (All / On Screen / Text / Images)
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
                     .background(RawColors.HeroSurface)
-                    .padding(horizontal = 12.dp, vertical = 7.dp),
-                horizontalArrangement = Arrangement.SpaceBetween,
+                    .padding(horizontal = 8.dp, vertical = 5.dp),
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                Text(
-                    text = "TIMELINE TRACKS (TOP = ABOVE)",
-                    fontFamily = JetBrainsMonoFamily,
-                    fontSize = 11.sp,
-                    color = RawColors.TextMuted
-                )
-                Text(
-                    text = "${sortedTracks.size} layers",
-                    fontFamily = JetBrainsMonoFamily,
-                    fontSize = 11.sp,
-                    color = RawColors.TextPrimary
-                )
+                TrackFilter.entries.forEach { f ->
+                    val active = trackFilter == f
+                    val count = when (f) {
+                        TrackFilter.ALL -> allSortedDesc.size
+                        TrackFilter.ACTIVE_NOW -> allSortedDesc.count {
+                            !it.hidden && currentTimeSec >= (it.start - 0.05) && currentTimeSec <= (it.end + 0.05)
+                        }
+                        TrackFilter.TEXT -> allSortedDesc.count { it.type == "text" }
+                        TrackFilter.IMAGE -> allSortedDesc.count { it.type == "image" }
+                    }
+                    Box(
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(10.dp))
+                            .background(if (active) RawColors.TextPrimary else RawColors.RaisedCard)
+                            .clickable { trackFilter = f }
+                            .padding(horizontal = 9.dp, vertical = 4.dp)
+                    ) {
+                        Text(
+                            text = "${f.label} ($count)",
+                            fontFamily = JetBrainsMonoFamily,
+                            fontSize = 10.sp,
+                            fontWeight = FontWeight.SemiBold,
+                            color = if (active) RawColors.PrimaryBtnText else RawColors.TextMuted,
+                            maxLines = 1,
+                            softWrap = false
+                        )
+                    }
+                }
             }
 
-            MultiTrackTimelineList(
-                tracksTopFirst = sortedTracks,
+            // Synchronized Time Ruler + Multi-Track Stacked Rows
+            ReferenceStyleTimeline(
+                tracksTopFirst = filteredTracks,
+                allLayers = layers,
                 selectedId = selectedLayerId,
                 currentTimeSec = currentTimeSec,
                 totalDurationSec = durationSec,
-                onSelect = { selectedLayerId = it },
-                onMoveAbove = { idx ->
-                    if (idx > 0) pushCommit(swapAdjacentZ(sortedTracks, idx, idx - 1))
+                dpPerSec = dpPerSec,
+                scrollState = timelineScroll,
+                onViewportMeasured = { wPx -> timelineViewportWidthPx = wPx },
+                onSeekTime = { t ->
+                    isPlaying = false
+                    currentTimeSec = t.coerceIn(0.0, durationSec)
                 },
-                onMoveBelow = { idx ->
-                    if (idx < sortedTracks.lastIndex) pushCommit(swapAdjacentZ(sortedTracks, idx, idx + 1))
+                onSelectTrack = { layer ->
+                    selectedLayerId = layer.id
+                    if (currentTimeSec < layer.start || currentTimeSec > layer.end) {
+                        val span = (layer.end - layer.start).coerceAtLeast(0.0)
+                        isPlaying = false
+                        currentTimeSec = (layer.start + minOf(0.25, span * 0.4)).coerceIn(0.0, durationSec)
+                    }
                 },
                 onToggleHidden = { layer ->
                     pushCommit(layers.map { if (it.id == layer.id) it.copy(hidden = !it.hidden) else it })
-                },
-                onDelete = { layer ->
-                    val next = layers.filterNot { it.id == layer.id }
-                    pushCommit(next)
-                    if (selectedLayerId == layer.id) {
-                        selectedLayerId = next.maxByOrNull { it.z }?.id
-                    }
                 },
                 onPreviewUpdate = { updated -> layers = updated },
                 onCommitUpdate = { before, updated ->
@@ -712,6 +612,231 @@ fun EditorScreen(
                     onAutoSaveDraft(project.copy(layersJson = LayerJson.encode(updated)))
                 },
                 modifier = Modifier.weight(1f)
+            )
+        }
+
+        // 5. Contextual Quick-Adjust Bar (Only appears for the selected property!)
+        AnimatedVisibility(visible = selectedLayer != null && activeAdjuster != EditorAdjuster.NONE) {
+            selectedLayer?.let { sel ->
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 12.dp, vertical = 4.dp)
+                        .clip(RoundedCornerShape(14.dp))
+                        .background(RawColors.HeroSurface)
+                        .border(1.dp, RawColors.Divider, RoundedCornerShape(14.dp))
+                        .padding(horizontal = 12.dp, vertical = 6.dp)
+                ) {
+                    when (activeAdjuster) {
+                        EditorAdjuster.POS_SCALE -> {
+                            val base = baseDimensions.getOrPut(sel.id) {
+                                sel.w.coerceAtLeast(40f) to sel.h.coerceAtLeast(40f)
+                            }
+                            val currentScale = (sel.w / base.first).coerceIn(0.25f, 2.5f)
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                Text(
+                                    text = "Scale ${(currentScale * 100).roundToInt()}%",
+                                    fontFamily = JetBrainsMonoFamily,
+                                    fontSize = 11.sp,
+                                    color = RawColors.TextPrimary,
+                                    modifier = Modifier.width(76.dp)
+                                )
+                                Slider(
+                                    value = currentScale,
+                                    onValueChange = { sc ->
+                                        val nw = base.first * sc
+                                        val nh = base.second * sc
+                                        val cx = sel.x + sel.w * 0.5f
+                                        val cy = sel.y + sel.h * 0.5f
+                                        layers = layers.map {
+                                            if (it.id == sel.id) {
+                                                it.copy(x = cx - nw * 0.5f, y = cy - nh * 0.5f, w = nw, h = nh)
+                                            } else it
+                                        }
+                                    },
+                                    onValueChangeFinished = { pushCommit(layers) },
+                                    valueRange = 0.25f..2.5f,
+                                    colors = SliderDefaults.colors(
+                                        thumbColor = RawColors.TextPrimary,
+                                        activeTrackColor = RawColors.TextPrimary,
+                                        inactiveTrackColor = RawColors.PillGrey
+                                    ),
+                                    modifier = Modifier.weight(1f)
+                                )
+                                SmallPillAction("Center X") {
+                                    pushCommit(
+                                        layers.map {
+                                            if (it.id == sel.id) it.copy(x = (1920f - it.w) * 0.5f) else it
+                                        }
+                                    )
+                                }
+                            }
+                        }
+
+                        EditorAdjuster.OPACITY -> {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                Text(
+                                    text = "Opacity ${(sel.opacity * 100).roundToInt()}%",
+                                    fontFamily = JetBrainsMonoFamily,
+                                    fontSize = 11.sp,
+                                    color = RawColors.TextPrimary,
+                                    modifier = Modifier.width(86.dp)
+                                )
+                                Slider(
+                                    value = sel.opacity.coerceIn(0f, 1f),
+                                    onValueChange = { op ->
+                                        layers = layers.map {
+                                            if (it.id == sel.id) it.copy(opacity = op) else it
+                                        }
+                                    },
+                                    onValueChangeFinished = { pushCommit(layers) },
+                                    colors = SliderDefaults.colors(
+                                        thumbColor = RawColors.TextPrimary,
+                                        activeTrackColor = RawColors.TextPrimary,
+                                        inactiveTrackColor = RawColors.PillGrey
+                                    ),
+                                    modifier = Modifier.weight(1f)
+                                )
+                            }
+                        }
+
+                        EditorAdjuster.MASK -> {
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .horizontalScroll(rememberScrollState()),
+                                horizontalArrangement = Arrangement.spacedBy(6.dp)
+                            ) {
+                                LayerMask.entries.forEach { maskOption ->
+                                    val isCur = sel.mask.equals(maskOption.key, ignoreCase = true)
+                                    Box(
+                                        modifier = Modifier
+                                            .height(30.dp)
+                                            .clip(RoundedCornerShape(10.dp))
+                                            .background(if (isCur) RawColors.SuccessMint else RawColors.RaisedCard)
+                                            .clickable {
+                                                pushCommit(
+                                                    layers.map {
+                                                        if (it.id == sel.id) it.copy(mask = maskOption.key) else it
+                                                    }
+                                                )
+                                            }
+                                            .padding(horizontal = 12.dp),
+                                        contentAlignment = Alignment.Center
+                                    ) {
+                                        Text(
+                                            text = maskOption.label,
+                                            style = RawTypography.labelSmall.copy(fontWeight = FontWeight.SemiBold),
+                                            color = if (isCur) RawColors.PrimaryBtnText else RawColors.TextPrimary
+                                        )
+                                    }
+                                }
+                            }
+                        }
+
+                        EditorAdjuster.NONE -> Unit
+                    }
+                }
+            }
+        }
+
+        // 6. CapCut / Alight Motion Bottom Dock (Clean Icon-Above-Label Tool Strip)
+        val selIdxInAll = allSortedDesc.indexOfFirst { it.id == selectedLayerId }
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .background(RawColors.BgPrimary)
+                .horizontalScroll(rememberScrollState())
+                .padding(horizontal = 12.dp, vertical = 6.dp),
+            horizontalArrangement = Arrangement.spacedBy(10.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            DockToolButton(
+                icon = RawIconType.IMAGE,
+                label = "+ Image",
+                highlighted = false,
+                onClick = {
+                    imagePicker.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly))
+                }
+            )
+            DockToolButton(
+                icon = RawIconType.EDIT,
+                label = "Pos/Scale",
+                enabled = selectedLayer != null,
+                highlighted = activeAdjuster == EditorAdjuster.POS_SCALE,
+                onClick = {
+                    activeAdjuster = if (activeAdjuster == EditorAdjuster.POS_SCALE) EditorAdjuster.NONE else EditorAdjuster.POS_SCALE
+                }
+            )
+            DockToolButton(
+                icon = RawIconType.EYE,
+                label = "Opacity",
+                enabled = selectedLayer != null,
+                highlighted = activeAdjuster == EditorAdjuster.OPACITY,
+                onClick = {
+                    activeAdjuster = if (activeAdjuster == EditorAdjuster.OPACITY) EditorAdjuster.NONE else EditorAdjuster.OPACITY
+                }
+            )
+            DockToolButton(
+                icon = RawIconType.LAYERS,
+                label = "Mask",
+                enabled = selectedLayer != null,
+                highlighted = activeAdjuster == EditorAdjuster.MASK,
+                onClick = {
+                    activeAdjuster = if (activeAdjuster == EditorAdjuster.MASK) EditorAdjuster.NONE else EditorAdjuster.MASK
+                }
+            )
+            if (selectedLayer?.type == "text") {
+                DockToolButton(
+                    icon = RawIconType.CODE,
+                    label = "Edit Text",
+                    enabled = true,
+                    highlighted = false,
+                    onClick = { editingTextLayer = selectedLayer }
+                )
+            }
+            DockToolButton(
+                icon = RawIconType.FORWARD,
+                label = "Above",
+                enabled = selIdxInAll > 0,
+                highlighted = false,
+                onClick = {
+                    if (selIdxInAll > 0) pushCommit(swapAdjacentZ(allSortedDesc, selIdxInAll, selIdxInAll - 1))
+                }
+            )
+            DockToolButton(
+                icon = RawIconType.BACKWARD,
+                label = "Below",
+                enabled = selIdxInAll in 0 until allSortedDesc.lastIndex,
+                highlighted = false,
+                onClick = {
+                    if (selIdxInAll in 0 until allSortedDesc.lastIndex) {
+                        pushCommit(swapAdjacentZ(allSortedDesc, selIdxInAll, selIdxInAll + 1))
+                    }
+                }
+            )
+            DockToolButton(
+                icon = RawIconType.TRASH,
+                label = "Delete",
+                enabled = selectedLayer != null,
+                tint = RawColors.ErrorCoral,
+                highlighted = false,
+                onClick = {
+                    selectedLayer?.let { target ->
+                        val next = layers.filterNot { it.id == target.id }
+                        pushCommit(next)
+                        selectedLayerId = next.filter { currentTimeSec >= it.start && currentTimeSec <= it.end }
+                            .maxByOrNull { it.z }?.id ?: next.maxByOrNull { it.z }?.id
+                    }
+                }
             )
         }
     }
@@ -759,247 +884,433 @@ fun EditorScreen(
 }
 
 @Composable
-private fun MultiTrackTimelineList(
-    tracksTopFirst: List<RawLayer>,
-    selectedId: String?,
-    currentTimeSec: Double,
-    totalDurationSec: Double,
-    onSelect: (String) -> Unit,
-    onMoveAbove: (Int) -> Unit,
-    onMoveBelow: (Int) -> Unit,
-    onToggleHidden: (RawLayer) -> Unit,
-    onDelete: (RawLayer) -> Unit,
-    onPreviewUpdate: (List<RawLayer>) -> Unit,
-    onCommitUpdate: (before: List<RawLayer>, after: List<RawLayer>) -> Unit,
-    modifier: Modifier = Modifier
-) {
-    val latestLayers by rememberUpdatedState(tracksTopFirst)
-    val density = LocalDensity.current
-    var laneWidthPx by remember { mutableFloatStateOf(1f) }
-    var beforeSnap by remember { mutableStateOf<List<RawLayer>?>(null) }
-
-    fun snap01(v: Double): Double = (v * 10.0).roundToInt() / 10.0
-
-    LazyColumn(
-        modifier = modifier.fillMaxWidth(),
-        contentPadding = PaddingValues(vertical = 6.dp, horizontal = 8.dp),
-        verticalArrangement = Arrangement.spacedBy(6.dp)
+private fun ZoomChip(label: String, onClick: () -> Unit) {
+    Box(
+        modifier = Modifier
+            .clip(RoundedCornerShape(10.dp))
+            .clickable(onClick = onClick)
+            .padding(horizontal = 8.dp, vertical = 4.dp),
+        contentAlignment = Alignment.Center
     ) {
-        itemsIndexed(tracksTopFirst, key = { _, l -> l.id }) { index, layer ->
-            val selected = layer.id == selectedId
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(46.dp)
-                    .clip(RoundedCornerShape(12.dp))
-                    .background(if (selected) RawColors.HeroSurface else RawColors.BgPrimary.copy(alpha = 0.65f))
-                    .border(
-                        1.dp,
-                        if (selected) RawColors.TextPrimary else RawColors.Divider.copy(alpha = 0.6f),
-                        RoundedCornerShape(12.dp)
-                    )
-                    .clickable { onSelect(layer.id) }
-                    .padding(horizontal = 6.dp),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(6.dp)
-            ) {
-                // Left track header: Above/Below ordering + Eye + Delete
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(2.dp)
-                ) {
-                    TinyTrackBtn(
-                        icon = RawIconType.FORWARD,
-                        enabled = index > 0,
-                        onClick = { onMoveAbove(index) }
-                    )
-                    TinyTrackBtn(
-                        icon = RawIconType.BACKWARD,
-                        enabled = index < tracksTopFirst.lastIndex,
-                        onClick = { onMoveBelow(index) }
-                    )
-                    TinyTrackBtn(
-                        icon = if (layer.hidden) RawIconType.EYE_OFF else RawIconType.EYE,
-                        tint = if (layer.hidden) RawColors.TextMuted else RawColors.TextPrimary,
-                        onClick = { onToggleHidden(layer) }
-                    )
-                    TinyTrackBtn(
-                        icon = RawIconType.TRASH,
-                        tint = RawColors.ErrorCoral,
-                        onClick = { onDelete(layer) }
-                    )
-                }
-
-                // Right clip lane with Playhead line and draggable/trimmable clip bar
-                Box(
-                    modifier = Modifier
-                        .weight(1f)
-                        .fillMaxHeight()
-                        .padding(vertical = 5.dp)
-                        .clip(RoundedCornerShape(8.dp))
-                        .background(RawColors.BgPrimary)
-                        .onSizeChanged { laneWidthPx = it.width.toFloat().coerceAtLeast(1f) }
-                ) {
-                    val startFrac = (layer.start / totalDurationSec).toFloat().coerceIn(0f, 1f)
-                    val endFrac = (layer.end / totalDurationSec).toFloat().coerceIn(startFrac, 1f)
-                    val barLeftPx = (startFrac * laneWidthPx).roundToInt()
-                    val minBarPx = with(density) { 36.dp.roundToPx() }
-                    val barWidthPx = ((endFrac - startFrac) * laneWidthPx).roundToInt().coerceAtLeast(minBarPx)
-
-                    Box(
-                        modifier = Modifier
-                            .offset { IntOffset(barLeftPx, 0) }
-                            .width(with(density) { barWidthPx.toDp() })
-                            .fillMaxHeight()
-                            .clip(RoundedCornerShape(7.dp))
-                            .background(
-                                when {
-                                    selected -> RawColors.TextPrimary
-                                    layer.type == "image" -> RawColors.SuccessMint.copy(alpha = 0.25f)
-                                    else -> RawColors.RaisedCard
-                                }
-                            )
-                            .pointerInput(layer.id, totalDurationSec, laneWidthPx) {
-                                detectDragGestures(
-                                    onDragStart = { beforeSnap = latestLayers },
-                                    onDrag = { change, drag ->
-                                        change.consume()
-                                        val cur = latestLayers
-                                        val curLayer = cur.firstOrNull { it.id == layer.id } ?: return@detectDragGestures
-                                        val deltaSec = (drag.x / laneWidthPx) * totalDurationSec
-                                        val span = curLayer.end - curLayer.start
-                                        val nextStart = snap01(
-                                            (curLayer.start + deltaSec).coerceIn(0.0, (totalDurationSec - span).coerceAtLeast(0.0))
-                                        )
-                                        val nextEnd = snap01(nextStart + span)
-                                        onPreviewUpdate(
-                                            cur.map { if (it.id == layer.id) it.copy(start = nextStart, end = nextEnd) else it }
-                                        )
-                                    },
-                                    onDragEnd = {
-                                        val b = beforeSnap
-                                        if (b != null) onCommitUpdate(b, latestLayers)
-                                        beforeSnap = null
-                                    },
-                                    onDragCancel = { beforeSnap = null }
-                                )
-                            },
-                        contentAlignment = Alignment.CenterStart
-                    ) {
-                        Text(
-                            text = layer.name.ifBlank { layer.text ?: layer.id },
-                            fontFamily = JetBrainsMonoFamily,
-                            fontSize = 10.sp,
-                            fontWeight = FontWeight.Medium,
-                            color = if (selected) RawColors.PrimaryBtnText else RawColors.TextPrimary,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis,
-                            modifier = Modifier.padding(horizontal = 12.dp)
-                        )
-
-                        // Left trim handle
-                        Box(
-                            modifier = Modifier
-                                .align(Alignment.CenterStart)
-                                .width(10.dp)
-                                .fillMaxHeight()
-                                .background(RawColors.PillGrey.copy(alpha = 0.7f))
-                                .pointerInput(layer.id, totalDurationSec, laneWidthPx) {
-                                    detectDragGestures(
-                                        onDragStart = { beforeSnap = latestLayers },
-                                        onDrag = { change, drag ->
-                                            change.consume()
-                                            val cur = latestLayers
-                                            val curLayer = cur.firstOrNull { it.id == layer.id } ?: return@detectDragGestures
-                                            val deltaSec = (drag.x / laneWidthPx) * totalDurationSec
-                                            val nextStart = snap01(
-                                                (curLayer.start + deltaSec).coerceIn(0.0, (curLayer.end - 0.1).coerceAtLeast(0.0))
-                                            )
-                                            onPreviewUpdate(
-                                                cur.map { if (it.id == layer.id) it.copy(start = nextStart) else it }
-                                            )
-                                        },
-                                        onDragEnd = {
-                                            val b = beforeSnap
-                                            if (b != null) onCommitUpdate(b, latestLayers)
-                                            beforeSnap = null
-                                        },
-                                        onDragCancel = { beforeSnap = null }
-                                    )
-                                }
-                        )
-
-                        // Right trim handle
-                        Box(
-                            modifier = Modifier
-                                .align(Alignment.CenterEnd)
-                                .width(10.dp)
-                                .fillMaxHeight()
-                                .background(RawColors.PillGrey.copy(alpha = 0.7f))
-                                .pointerInput(layer.id, totalDurationSec, laneWidthPx) {
-                                    detectDragGestures(
-                                        onDragStart = { beforeSnap = latestLayers },
-                                        onDrag = { change, drag ->
-                                            change.consume()
-                                            val cur = latestLayers
-                                            val curLayer = cur.firstOrNull { it.id == layer.id } ?: return@detectDragGestures
-                                            val deltaSec = (drag.x / laneWidthPx) * totalDurationSec
-                                            val nextEnd = snap01(
-                                                (curLayer.end + deltaSec).coerceIn(
-                                                    (curLayer.start + 0.1).coerceAtMost(totalDurationSec),
-                                                    totalDurationSec
-                                                )
-                                            )
-                                            onPreviewUpdate(
-                                                cur.map { if (it.id == layer.id) it.copy(end = nextEnd) else it }
-                                            )
-                                        },
-                                        onDragEnd = {
-                                            val b = beforeSnap
-                                            if (b != null) onCommitUpdate(b, latestLayers)
-                                            beforeSnap = null
-                                        },
-                                        onDragCancel = { beforeSnap = null }
-                                    )
-                                }
-                        )
-                    }
-
-                    // Playhead marker line
-                    val playheadX = ((currentTimeSec / totalDurationSec).toFloat().coerceIn(0f, 1f) * laneWidthPx).roundToInt()
-                    Box(
-                        modifier = Modifier
-                            .offset { IntOffset(playheadX, 0) }
-                            .width(2.dp)
-                            .fillMaxHeight()
-                            .background(RawColors.ErrorCoral)
-                    )
-                }
-            }
-        }
+        Text(
+            text = label,
+            fontFamily = JetBrainsMonoFamily,
+            fontSize = 11.sp,
+            fontWeight = FontWeight.Bold,
+            color = RawColors.TextPrimary
+        )
     }
 }
 
 @Composable
-private fun TinyTrackBtn(
+private fun SmallPillAction(label: String, onClick: () -> Unit) {
+    Box(
+        modifier = Modifier
+            .height(30.dp)
+            .clip(RoundedCornerShape(10.dp))
+            .background(RawColors.RaisedCard)
+            .clickable(onClick = onClick)
+            .padding(horizontal = 10.dp),
+        contentAlignment = Alignment.Center
+    ) {
+        Text(label, style = RawTypography.labelSmall, color = RawColors.TextPrimary)
+    }
+}
+
+@Composable
+private fun DockToolButton(
     icon: RawIconType,
+    label: String,
     enabled: Boolean = true,
+    highlighted: Boolean = false,
     tint: Color = RawColors.TextPrimary,
     onClick: () -> Unit
 ) {
-    Box(
+    val effectiveTint = when {
+        !enabled -> RawColors.TextMuted.copy(alpha = 0.35f)
+        highlighted -> RawColors.PrimaryBtnText
+        else -> tint
+    }
+    Column(
         modifier = Modifier
-            .size(26.dp)
-            .clip(CircleShape)
-            .background(RawColors.HeroSurface)
-            .clickable(enabled = enabled, onClick = onClick),
-        contentAlignment = Alignment.Center
+            .clip(RoundedCornerShape(12.dp))
+            .background(if (highlighted) RawColors.PrimaryBtnBg else RawColors.CardSurface)
+            .clickable(enabled = enabled, onClick = onClick)
+            .padding(horizontal = 11.dp, vertical = 6.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.spacedBy(3.dp)
     ) {
-        RawIcon(
-            type = icon,
-            size = 13.dp,
-            tint = if (enabled) tint else RawColors.Divider
+        RawIcon(type = icon, size = 16.dp, tint = effectiveTint)
+        Text(
+            text = label,
+            fontSize = 10.sp,
+            fontWeight = FontWeight.SemiBold,
+            color = effectiveTint,
+            maxLines = 1,
+            softWrap = false
         )
+    }
+}
+
+/**
+ * Synchronized horizontal timeline canvas with top Time Ruler, color-coded readable track bars,
+ * slim Eye visibility column, left/right 0.1s trim handles, and full-height Playhead marker.
+ */
+@Composable
+private fun ReferenceStyleTimeline(
+    tracksTopFirst: List<RawLayer>,
+    allLayers: List<RawLayer>,
+    selectedId: String?,
+    currentTimeSec: Double,
+    totalDurationSec: Double,
+    dpPerSec: Float,
+    scrollState: ScrollState,
+    onViewportMeasured: (Float) -> Unit,
+    onSeekTime: (Double) -> Unit,
+    onSelectTrack: (RawLayer) -> Unit,
+    onToggleHidden: (RawLayer) -> Unit,
+    onPreviewUpdate: (List<RawLayer>) -> Unit,
+    onCommitUpdate: (before: List<RawLayer>, after: List<RawLayer>) -> Unit,
+    modifier: Modifier = Modifier
+) {
+    val latestLayers by rememberUpdatedState(allLayers)
+    val density = LocalDensity.current
+    val pxPerSec = with(density) { dpPerSec.dp.toPx() }.coerceAtLeast(8f)
+    val trackTotalWidthDp: Dp = ((totalDurationSec.toFloat() * dpPerSec) + 48f).dp
+    val gutterWidth = 36.dp
+    var beforeSnap by remember { mutableStateOf<List<RawLayer>?>(null) }
+
+    fun snap01(v: Double): Double = (v * 10.0).roundToInt() / 10.0
+
+    Column(modifier = modifier.fillMaxWidth()) {
+        // Top Header: Fixed Eye corner + Horizontally Scrolled Time Ruler with Scrub Gesture
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(26.dp)
+                .background(RawColors.BgPrimary)
+        ) {
+            Box(
+                modifier = Modifier
+                    .width(gutterWidth)
+                    .fillMaxHeight()
+                    .border(0.5.dp, RawColors.Divider),
+                contentAlignment = Alignment.Center
+            ) {
+                RawIcon(RawIconType.EYE, size = 12.dp, tint = RawColors.TextMuted)
+            }
+
+            Box(
+                modifier = Modifier
+                    .weight(1f)
+                    .fillMaxHeight()
+                    .onSizeChanged { onViewportMeasured(it.width.toFloat()) }
+                    .horizontalScroll(scrollState)
+            ) {
+                Box(
+                    modifier = Modifier
+                        .width(trackTotalWidthDp)
+                        .fillMaxHeight()
+                        .pointerInput(totalDurationSec, pxPerSec) {
+                            detectTapGestures { offset ->
+                                onSeekTime((offset.x / pxPerSec).toDouble())
+                            }
+                        }
+                        .pointerInput(totalDurationSec, pxPerSec) {
+                            detectDragGestures { change, _ ->
+                                change.consume()
+                                onSeekTime((change.position.x / pxPerSec).toDouble())
+                            }
+                        }
+                ) {
+                    val stepSec = when {
+                        dpPerSec >= 60f -> 1.0
+                        dpPerSec >= 30f -> 2.0
+                        else -> 5.0
+                    }
+                    Canvas(modifier = Modifier.fillMaxSize()) {
+                        val maxT = ceil(totalDurationSec).toInt()
+                        var sec = 0.0
+                        while (sec <= maxT) {
+                            val x = (sec * pxPerSec).toFloat()
+                            drawLine(
+                                color = RawColors.TextMuted.copy(alpha = 0.65f),
+                                start = Offset(x, size.height - 9.dp.toPx()),
+                                end = Offset(x, size.height),
+                                strokeWidth = 1.dp.toPx()
+                            )
+                            val halfX = ((sec + stepSec * 0.5) * pxPerSec).toFloat()
+                            if (halfX < size.width) {
+                                drawLine(
+                                    color = RawColors.Divider,
+                                    start = Offset(halfX, size.height - 5.dp.toPx()),
+                                    end = Offset(halfX, size.height),
+                                    strokeWidth = 1.dp.toPx()
+                                )
+                            }
+                            sec += stepSec
+                        }
+                        // Playhead triangle at top of ruler
+                        val phX = (currentTimeSec * pxPerSec).toFloat()
+                        val tri = Path().apply {
+                            moveTo(phX, size.height)
+                            lineTo(phX - 6.dp.toPx(), 2.dp.toPx())
+                            lineTo(phX + 6.dp.toPx(), 2.dp.toPx())
+                            close()
+                        }
+                        drawPath(tri, color = PlayheadRed)
+                    }
+
+                    // Second labels placed cleanly along ruler
+                    val labelStep = when {
+                        dpPerSec >= 60f -> 1
+                        dpPerSec >= 30f -> 2
+                        else -> 5
+                    }
+                    var s = 0
+                    val endS = ceil(totalDurationSec).toInt()
+                    while (s <= endS) {
+                        val xDp = (s * dpPerSec).dp
+                        Text(
+                            text = "${s}s",
+                            fontFamily = JetBrainsMonoFamily,
+                            fontSize = 9.sp,
+                            color = RawColors.TextMuted,
+                            modifier = Modifier
+                                .offset(x = xDp + 3.dp, y = 2.dp)
+                        )
+                        s += labelStep
+                    }
+                }
+            }
+        }
+
+        if (tracksTopFirst.isEmpty()) {
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .weight(1f),
+                contentAlignment = Alignment.Center
+            ) {
+                Text(
+                    text = "No layers at this timestamp. Scrub slider or switch filter to All.",
+                    style = RawTypography.bodyMedium,
+                    color = RawColors.TextMuted
+                )
+            }
+        } else {
+            LazyColumn(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .weight(1f),
+                contentPadding = PaddingValues(vertical = 4.dp),
+                verticalArrangement = Arrangement.spacedBy(3.dp)
+            ) {
+                itemsIndexed(tracksTopFirst, key = { _, l -> l.id }) { _, layer ->
+                    val selected = layer.id == selectedId
+                    val activeNow = !layer.hidden && currentTimeSec in layer.start..layer.end
+                    val barColor = when (layer.type) {
+                        "image" -> ClipTeal
+                        "text" -> ClipBlue
+                        else -> ClipSlate
+                    }
+
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(42.dp)
+                            .background(if (selected) RawColors.HeroSurface else Color.Transparent),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        // Fixed Slim Left Gutter (Eye Visibility Toggle)
+                        Box(
+                            modifier = Modifier
+                                .width(gutterWidth)
+                                .fillMaxHeight()
+                                .clickable { onToggleHidden(layer) },
+                            contentAlignment = Alignment.Center
+                        ) {
+                            RawIcon(
+                                type = if (layer.hidden) RawIconType.EYE_OFF else RawIconType.EYE,
+                                size = 14.dp,
+                                tint = if (layer.hidden) RawColors.Divider else RawColors.TextMuted
+                            )
+                        }
+
+                        // Synced Horizontal Clip Lane
+                        Box(
+                            modifier = Modifier
+                                .weight(1f)
+                                .fillMaxHeight()
+                                .horizontalScroll(scrollState)
+                        ) {
+                            Box(
+                                modifier = Modifier
+                                    .width(trackTotalWidthDp)
+                                    .fillMaxHeight()
+                            ) {
+                                val startPx = (layer.start * pxPerSec).roundToInt()
+                                val minBarPx = with(density) { 42.dp.roundToPx() }
+                                val rawWidthPx = ((layer.end - layer.start) * pxPerSec).roundToInt().coerceAtLeast(minBarPx)
+
+                                Box(
+                                    modifier = Modifier
+                                        .offset { IntOffset(startPx, 0) }
+                                        .width(with(density) { rawWidthPx.toDp() })
+                                        .fillMaxHeight()
+                                        .padding(vertical = 3.dp)
+                                        .clip(RoundedCornerShape(7.dp))
+                                        .background(
+                                            barColor.copy(
+                                                alpha = when {
+                                                    layer.hidden -> 0.25f
+                                                    selected -> 1f
+                                                    activeNow -> 0.92f
+                                                    else -> 0.56f
+                                                }
+                                            )
+                                        )
+                                        .border(
+                                            width = if (selected) 1.5.dp else 0.5.dp,
+                                            color = if (selected) Color.White else Color.White.copy(alpha = 0.22f),
+                                            shape = RoundedCornerShape(7.dp)
+                                        )
+                                        .clickable { onSelectTrack(layer) }
+                                        .pointerInput(layer.id, totalDurationSec, pxPerSec) {
+                                            detectDragGestures(
+                                                onDragStart = { beforeSnap = latestLayers },
+                                                onDrag = { change, drag ->
+                                                    change.consume()
+                                                    val cur = latestLayers
+                                                    val curLayer = cur.firstOrNull { it.id == layer.id } ?: return@detectDragGestures
+                                                    val deltaSec = (drag.x / pxPerSec).toDouble()
+                                                    val span = (curLayer.end - curLayer.start).coerceAtLeast(0.1)
+                                                    val nextStart = snap01(
+                                                        (curLayer.start + deltaSec).coerceIn(0.0, (totalDurationSec - span).coerceAtLeast(0.0))
+                                                    )
+                                                    val nextEnd = snap01(nextStart + span)
+                                                    onPreviewUpdate(
+                                                        cur.map { if (it.id == layer.id) it.copy(start = nextStart, end = nextEnd) else it }
+                                                    )
+                                                },
+                                                onDragEnd = {
+                                                    val b = beforeSnap
+                                                    if (b != null) onCommitUpdate(b, latestLayers)
+                                                    beforeSnap = null
+                                                },
+                                                onDragCancel = { beforeSnap = null }
+                                            )
+                                        },
+                                    contentAlignment = Alignment.CenterStart
+                                ) {
+                                    val displayLabel = buildString {
+                                        if (layer.type == "image") append("IMG: ")
+                                        val txt = layer.text?.replace('\n', ' ')?.trim().orEmpty()
+                                        val nm = layer.name.trim()
+                                        append(
+                                            when {
+                                                txt.isNotBlank() && txt.length <= 42 -> txt
+                                                nm.isNotBlank() -> nm
+                                                txt.isNotBlank() -> txt
+                                                else -> layer.id
+                                            }
+                                        )
+                                    }
+                                    Text(
+                                        text = displayLabel,
+                                        color = Color.White,
+                                        fontSize = 11.sp,
+                                        fontWeight = FontWeight.SemiBold,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis,
+                                        modifier = Modifier.padding(horizontal = 14.dp)
+                                    )
+
+                                    if (selected) {
+                                        // Left trim handle
+                                        Box(
+                                            modifier = Modifier
+                                                .align(Alignment.CenterStart)
+                                                .width(12.dp)
+                                                .fillMaxHeight()
+                                                .background(Color.White.copy(alpha = 0.85f))
+                                                .pointerInput(layer.id, totalDurationSec, pxPerSec) {
+                                                    detectDragGestures(
+                                                        onDragStart = { beforeSnap = latestLayers },
+                                                        onDrag = { change, drag ->
+                                                            change.consume()
+                                                            val cur = latestLayers
+                                                            val curLayer = cur.firstOrNull { it.id == layer.id } ?: return@detectDragGestures
+                                                            val deltaSec = (drag.x / pxPerSec).toDouble()
+                                                            val nextStart = snap01(
+                                                                (curLayer.start + deltaSec).coerceIn(0.0, (curLayer.end - 0.1).coerceAtLeast(0.0))
+                                                            )
+                                                            onPreviewUpdate(
+                                                                cur.map { if (it.id == layer.id) it.copy(start = nextStart) else it }
+                                                            )
+                                                        },
+                                                        onDragEnd = {
+                                                            val b = beforeSnap
+                                                            if (b != null) onCommitUpdate(b, latestLayers)
+                                                            beforeSnap = null
+                                                        },
+                                                        onDragCancel = { beforeSnap = null }
+                                                    )
+                                                }
+                                        )
+
+                                        // Right trim handle
+                                        Box(
+                                            modifier = Modifier
+                                                .align(Alignment.CenterEnd)
+                                                .width(12.dp)
+                                                .fillMaxHeight()
+                                                .background(Color.White.copy(alpha = 0.85f))
+                                                .pointerInput(layer.id, totalDurationSec, pxPerSec) {
+                                                    detectDragGestures(
+                                                        onDragStart = { beforeSnap = latestLayers },
+                                                        onDrag = { change, drag ->
+                                                            change.consume()
+                                                            val cur = latestLayers
+                                                            val curLayer = cur.firstOrNull { it.id == layer.id } ?: return@detectDragGestures
+                                                            val deltaSec = (drag.x / pxPerSec).toDouble()
+                                                            val nextEnd = snap01(
+                                                                (curLayer.end + deltaSec).coerceIn(
+                                                                    (curLayer.start + 0.1).coerceAtMost(totalDurationSec),
+                                                                    totalDurationSec
+                                                                )
+                                                            )
+                                                            onPreviewUpdate(
+                                                                cur.map { if (it.id == layer.id) it.copy(end = nextEnd) else it }
+                                                            )
+                                                        },
+                                                        onDragEnd = {
+                                                            val b = beforeSnap
+                                                            if (b != null) onCommitUpdate(b, latestLayers)
+                                                            beforeSnap = null
+                                                        },
+                                                        onDragCancel = { beforeSnap = null }
+                                                    )
+                                                }
+                                        )
+                                    }
+                                }
+
+                                // Continuous vertical playhead line across every track
+                                val playheadPx = (currentTimeSec * pxPerSec).roundToInt()
+                                Box(
+                                    modifier = Modifier
+                                        .offset { IntOffset(playheadPx, 0) }
+                                        .width(2.dp)
+                                        .fillMaxHeight()
+                                        .background(PlayheadRed)
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+        }
     }
 }
 
@@ -1015,7 +1326,9 @@ private fun EditorStageWebView(
     val server = remember(cacheManager) {
         LocalAssetServer(context, cacheManager) { servedHtml }
     }
-    servedHtml = remember(rawHtml) { server.buildInjectedHtml(rawHtml) }
+    servedHtml = remember(rawHtml) {
+        server.buildInjectedHtml(rawHtml = rawHtml, previewFitViewport = true)
+    }
 
     val webView = remember {
         WebView(context).apply {
@@ -1058,9 +1371,12 @@ private fun StageGestureOverlay(
     val scaleX = boxSize.width / 1920f
     val scaleY = boxSize.height / 1080f
     val selected = layers.firstOrNull { it.id == selectedId }
+    val selectedVisibleNow = selected != null && !selected.hidden &&
+        currentTimeSec >= selected.start && currentTimeSec <= selected.end
 
     var beforeSnapshot by remember { mutableStateOf<List<RawLayer>?>(null) }
     var activeCorner by remember { mutableIntStateOf(-1) }
+    var snapCenterGuide by remember { mutableStateOf(false) }
 
     Box(
         modifier = Modifier
@@ -1084,14 +1400,18 @@ private fun StageGestureOverlay(
                     onDragStart = { start ->
                         val cur = latestLayers
                         val sel = cur.firstOrNull { it.id == selectedId }
-                        if (sel == null || sel.locked || scaleX <= 0f || scaleY <= 0f) {
+                        if (sel == null || sel.locked || sel.hidden ||
+                            latestTime < sel.start || latestTime > sel.end ||
+                            scaleX <= 0f || scaleY <= 0f
+                        ) {
                             beforeSnapshot = null
+                            snapCenterGuide = false
                             return@detectDragGestures
                         }
                         beforeSnapshot = cur
                         val sx = start.x / scaleX
                         val sy = start.y / scaleY
-                        val hitRadius = 56f / scaleX
+                        val hitRadius = 60f / scaleX
                         val corners = listOf(
                             Offset(sel.x, sel.y),
                             Offset(sel.x + sel.w, sel.y),
@@ -1111,23 +1431,35 @@ private fun StageGestureOverlay(
                         val dy = drag.y / scaleY
                         val updated = cur.map { l ->
                             if (l.id != sel.id) l else when (activeCorner) {
-                                -1 -> l.copy(x = l.x + dx, y = l.y + dy)
+                                -1 -> {
+                                    var nx = l.x + dx
+                                    val centerDiff = abs((nx + l.w * 0.5f) - 960f)
+                                    snapCenterGuide = centerDiff < 18f
+                                    if (snapCenterGuide) {
+                                        nx = (1920f - l.w) * 0.5f
+                                    }
+                                    l.copy(x = nx, y = l.y + dy)
+                                }
                                 3 -> {
+                                    snapCenterGuide = false
                                     val nw = (l.w + dx).coerceAtLeast(40f)
                                     val nh = if (l.type == "image" && l.w > 0f) nw * (l.h / l.w) else (l.h + dy).coerceAtLeast(40f)
                                     l.copy(w = nw, h = nh)
                                 }
                                 0 -> {
+                                    snapCenterGuide = false
                                     val nw = (l.w - dx).coerceAtLeast(40f)
                                     val nh = if (l.type == "image" && l.w > 0f) nw * (l.h / l.w) else (l.h - dy).coerceAtLeast(40f)
                                     l.copy(x = l.x + (l.w - nw), y = l.y + (l.h - nh), w = nw, h = nh)
                                 }
                                 1 -> {
+                                    snapCenterGuide = false
                                     val nw = (l.w + dx).coerceAtLeast(40f)
                                     val nh = if (l.type == "image" && l.w > 0f) nw * (l.h / l.w) else (l.h - dy).coerceAtLeast(40f)
                                     l.copy(y = l.y + (l.h - nh), w = nw, h = nh)
                                 }
                                 else -> {
+                                    snapCenterGuide = false
                                     val nw = (l.w - dx).coerceAtLeast(40f)
                                     val nh = if (l.type == "image" && l.w > 0f) nw * (l.h / l.w) else (l.h + dy).coerceAtLeast(40f)
                                     l.copy(x = l.x + (l.w - nw), w = nw, h = nh)
@@ -1137,6 +1469,7 @@ private fun StageGestureOverlay(
                         onPreviewMutate(updated)
                     },
                     onDragEnd = {
+                        snapCenterGuide = false
                         val snap = beforeSnapshot
                         if (snap != null) {
                             onCommitMutate(snap, latestLayers)
@@ -1144,35 +1477,55 @@ private fun StageGestureOverlay(
                         beforeSnapshot = null
                     },
                     onDragCancel = {
+                        snapCenterGuide = false
                         beforeSnapshot = null
                     }
                 )
             }
     ) {
-        if (selected != null && !selected.hidden && scaleX > 0f && scaleY > 0f) {
+        if (selectedVisibleNow && selected != null && scaleX > 0f && scaleY > 0f) {
             Canvas(modifier = Modifier.fillMaxSize()) {
+                if (snapCenterGuide) {
+                    val cx = size.width * 0.5f
+                    drawLine(
+                        color = PlayheadRed.copy(alpha = 0.85f),
+                        start = Offset(cx, 0f),
+                        end = Offset(cx, size.height),
+                        strokeWidth = 1.5.dp.toPx()
+                    )
+                }
+
                 val rx = selected.x * scaleX
                 val ry = selected.y * scaleY
                 val rw = selected.w * scaleX
                 val rh = selected.h * scaleY
-                val borderColor = if (selected.locked) RawColors.ErrorCoral else RawColors.TextPrimary
+
+                // Dual-contrast outline so selection box stands out on BOTH dark AND cream/white scenes
                 drawRoundRect(
-                    color = borderColor,
+                    color = Color.Black.copy(alpha = 0.65f),
                     topLeft = Offset(rx, ry),
                     size = Size(rw, rh),
                     cornerRadius = CornerRadius(6.dp.toPx()),
-                    style = Stroke(width = 2.dp.toPx())
+                    style = Stroke(width = 3.5.dp.toPx())
                 )
+                drawRoundRect(
+                    color = if (selected.locked) RawColors.ErrorCoral else Color.White,
+                    topLeft = Offset(rx, ry),
+                    size = Size(rw, rh),
+                    cornerRadius = CornerRadius(6.dp.toPx()),
+                    style = Stroke(width = 1.8.dp.toPx())
+                )
+
                 if (!selected.locked) {
-                    val handleR = 6.dp.toPx()
+                    val handleR = 5.5.dp.toPx()
                     listOf(
                         Offset(rx, ry),
                         Offset(rx + rw, ry),
                         Offset(rx, ry + rh),
                         Offset(rx + rw, ry + rh)
                     ).forEach { corner ->
-                        drawCircle(RawColors.PrimaryBtnBg, radius = handleR, center = corner)
-                        drawCircle(RawColors.BgPrimary, radius = handleR * 0.45f, center = corner)
+                        drawCircle(Color.Black, radius = handleR + 1.5.dp.toPx(), center = corner)
+                        drawCircle(Color.White, radius = handleR, center = corner)
                     }
                 }
             }

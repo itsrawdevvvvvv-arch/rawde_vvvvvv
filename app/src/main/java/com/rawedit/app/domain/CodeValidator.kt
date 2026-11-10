@@ -37,8 +37,7 @@ private data class DryRunPayload(
 
 object CodeValidator {
 
-    private const val MAX_CODE_BYTES = 5 * 1024 * 1024
-    private const val DRY_RUN_TIMEOUT_MS = 10_000L
+    private const val DRY_RUN_TIMEOUT_MS = 15_000L
 
     private val FORBIDDEN_PATTERNS = listOf(
         Regex("<script\\s+[^>]*src\\s*=", RegexOption.IGNORE_CASE) to "External <script src> tags are not allowed.",
@@ -87,9 +86,6 @@ object CodeValidator {
         val code = unwrapMarkdownFences(rawInput)
         if (code.isBlank()) {
             return false to "Paste the HTML code from Claude first."
-        }
-        if (code.toByteArray(Charsets.UTF_8).size >= MAX_CODE_BYTES) {
-            return false to "This code is 5 MB or larger. Ask Claude to keep it under 150 KB."
         }
         if (!code.contains("RAW") || !code.contains("seek")) {
             return false to "Missing window.RAW or RAW.seek(t). Ask Claude to try again and follow the rules."

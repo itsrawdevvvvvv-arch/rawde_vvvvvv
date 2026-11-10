@@ -468,9 +468,10 @@ fun CodePasteScreen(
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
 
-    var codeText by remember(project.id) { mutableStateOf(project.code) }
+    var codeText by remember(project.id) { mutableStateOf(cacheManager.resolveHtmlCode(project.code)) }
     var validating by remember { mutableStateOf(false) }
     var validationResult by remember { mutableStateOf<CodeValidationResult?>(null) }
+    var forceRawEditLarge by remember { mutableStateOf(false) }
 
     fun runValidation(text: String) {
         if (text.isBlank()) {
@@ -485,6 +486,21 @@ fun CodePasteScreen(
         }
     }
 
+    val htmlFilePicker = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.OpenDocument()
+    ) { uri ->
+        if (uri != null) {
+            val loaded = runCatching {
+                context.contentResolver.openInputStream(uri)?.bufferedReader()?.use { it.readText() } ?: ""
+            }.getOrDefault("")
+            if (loaded.isNotBlank()) {
+                codeText = loaded
+                forceRawEditLarge = false
+                runValidation(loaded)
+            }
+        }
+    }
+
     LaunchedEffect(Unit) {
         if (codeText.isNotBlank()) {
             runValidation(codeText)
@@ -493,8 +509,9 @@ fun CodePasteScreen(
 
     fun buildUpdatedProject(res: CodeValidationResult): ProjectEntity {
         val layersEncoded = if (res.hasEditableLayers) LayerJson.encode(res.layers) else ""
+        val storedCode = cacheManager.persistHtmlCode(project.id, res.cleanedHtml)
         return project.copy(
-            code = res.cleanedHtml,
+            code = storedCode,
             layersJson = layersEncoded,
             codeDurationSec = res.durationSec,
             hasEditableLayers = res.hasEditableLayers
@@ -528,7 +545,7 @@ fun CodePasteScreen(
             style = RawTypography.headlineLarge
         )
 
-        // Action row: Paste + Load sample + Clear
+        // Action row: Paste + Pick .html + Load sample + Clear
         Row(
             modifier = Modifier
                 .fillMaxWidth()
@@ -538,10 +555,19 @@ fun CodePasteScreen(
             RawPressButton(
                 onClick = {
                     val cb = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
-                    val item = cb.primaryClip?.getItemAt(0)?.coerceToText(context)?.toString().orEmpty()
-                    if (item.isNotBlank()) {
-                        codeText = item
-                        runValidation(item)
+                    val clip = cb.primaryClip
+                    val full = buildString {
+                        if (clip != null) {
+                            for (i in 0 until clip.itemCount) {
+                                val txt = clip.getItemAt(i)?.coerceToText(context)?.toString().orEmpty()
+                                append(txt)
+                            }
+                        }
+                    }
+                    if (full.isNotBlank()) {
+                        codeText = full
+                        forceRawEditLarge = false
+                        runValidation(full)
                     }
                 }
             ) {
@@ -561,11 +587,29 @@ fun CodePasteScreen(
 
             RawPressButton(
                 onClick = {
+                    htmlFilePicker.launch(arrayOf("text/html", "text/plain", "*/*"))
+                }
+            ) {
+                Box(
+                    modifier = Modifier
+                        .height(44.dp)
+                        .clip(RoundedCornerShape(22.dp))
+                        .background(RawColors.RaisedCard)
+                        .padding(horizontal = 16.dp),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Text("Pick .html file", style = RawTypography.labelLarge)
+                }
+            }
+
+            RawPressButton(
+                onClick = {
                     val sample = runCatching {
                         context.assets.open("sample.html").bufferedReader().use { it.readText() }
                     }.getOrDefault("")
                     if (sample.isNotBlank()) {
                         codeText = sample
+                        forceRawEditLarge = false
                         runValidation(sample)
                     }
                 }
@@ -586,6 +630,7 @@ fun CodePasteScreen(
                 RawPressButton(
                     onClick = {
                         codeText = ""
+                        forceRawEditLarge = false
                         validationResult = null
                     }
                 ) {
@@ -604,32 +649,82 @@ fun CodePasteScreen(
             }
         }
 
-        // Big paste text box
-        OutlinedTextField(
-            value = codeText,
-            onValueChange = {
-                codeText = it
-                validationResult = null
-            },
-            placeholder = {
-                Text("Paste HTML code from Claude here...", color = RawColors.TextMuted)
-            },
-            textStyle = RawTypography.labelMedium.copy(
-                fontFamily = JetBrainsMonoFamily,
-                color = RawColors.TextPrimary
-            ),
-            shape = RoundedCornerShape(20.dp),
-            colors = OutlinedTextFieldDefaults.colors(
-                focusedBorderColor = RawColors.TextPrimary,
-                unfocusedBorderColor = RawColors.Divider,
-                focusedContainerColor = RawColors.CardSurface,
-                unfocusedContainerColor = RawColors.CardSurface,
-                cursorColor = RawColors.TextPrimary
-            ),
-            modifier = Modifier
-                .fillMaxWidth()
-                .weight(1f)
-        )
+        // Big unlimited paste box (uses lightweight head/tail preview above 20k chars so Android 9 never lags)
+        if (codeText.length > 20_000 && !forceRawEditLarge) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .weight(1f)
+                    .clip(RoundedCornerShape(20.dp))
+                    .background(RawColors.CardSurface)
+                    .border(1.dp, RawColors.Divider, RoundedCornerShape(20.dp))
+                    .padding(16.dp),
+                verticalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        text = "${codeText.length} chars loaded (unlimited)",
+                        style = RawTypography.labelLarge,
+                        color = RawColors.SuccessMint
+                    )
+                    Text(
+                        text = "Edit raw text",
+                        style = RawTypography.labelSmall,
+                        color = RawColors.TextMuted,
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(10.dp))
+                            .background(RawColors.RaisedCard)
+                            .clickable { forceRawEditLarge = true }
+                            .padding(horizontal = 10.dp, vertical = 5.dp)
+                    )
+                }
+                val previewStr = codeText.take(1400) + "\n\n... (${codeText.length - 2000} middle chars kept intact) ...\n\n" + codeText.takeLast(600)
+                Box(
+                    modifier = Modifier
+                        .weight(1f)
+                        .fillMaxWidth()
+                        .verticalScroll(rememberScrollState())
+                ) {
+                    Text(
+                        text = previewStr,
+                        fontFamily = JetBrainsMonoFamily,
+                        fontSize = 11.sp,
+                        lineHeight = 16.sp,
+                        color = RawColors.TextMuted
+                    )
+                }
+            }
+        } else {
+            OutlinedTextField(
+                value = codeText,
+                onValueChange = {
+                    codeText = it
+                    validationResult = null
+                },
+                placeholder = {
+                    Text("Paste HTML code from Claude here (unlimited length)...", color = RawColors.TextMuted)
+                },
+                textStyle = RawTypography.labelMedium.copy(
+                    fontFamily = JetBrainsMonoFamily,
+                    color = RawColors.TextPrimary
+                ),
+                shape = RoundedCornerShape(20.dp),
+                colors = OutlinedTextFieldDefaults.colors(
+                    focusedBorderColor = RawColors.TextPrimary,
+                    unfocusedBorderColor = RawColors.Divider,
+                    focusedContainerColor = RawColors.CardSurface,
+                    unfocusedContainerColor = RawColors.CardSurface,
+                    cursorColor = RawColors.TextPrimary
+                ),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .weight(1f)
+            )
+        }
 
         // Validation status box
         if (validating) {

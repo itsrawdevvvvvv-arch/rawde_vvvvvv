@@ -108,13 +108,16 @@ VISUAL PACING & MOTION STYLE
 ================================================================================
 MANDATORY JAVASCRIPT & DOM CONTRACT (MUST PASS VALIDATION ON FIRST TRY)
 ================================================================================
-1. Single HTML file under 150 KB. ZERO external URLs (`http://` or `https://` except `http://www.w3.org/2000/svg` namespace). No `<script src>`, `<link>`, `@import`, `fetch`, `XMLHttpRequest`, or `localStorage`.
+1. Single self-contained HTML file (no character or file size limit — make every scene rich and complete). ZERO external URLs (`http://` or `https://` except `http://www.w3.org/2000/svg` namespace). No `<script src>`, `<link>`, `@import`, `fetch`, `XMLHttpRequest`, or `localStorage`.
 2. `<div id="stage"></div>` styled `position:relative; width:1920px; height:1080px; overflow:hidden;`.
 3. Define `window.RAW = { duration: $durationFormatted, width: 1920, height: 1080, fps: 30, layers: [...], anim: {...}, seek: function(t) { ... } }`.
-4. **`RAW.layers` MUST be a non-empty Array** of EVERY visible text, shape, card, and image element so the user can edit them in the app's timeline editor:
-   `{ id: "scene1_title", name: "Hook Title", type: "text", x: 160, y: 380, w: 1600, h: 180, opacity: 1, z: 10, start: 0.0, end: 3.2, text: "YOUR HOOK", src: null }`
-   - Every visible text block MUST be its own object in `RAW.layers` with accurate `x, y, w, h, start, end, text`!
-   - `seek(t)` MUST read `l.x`, `l.y`, `l.w`, `l.h`, `l.opacity`, `l.z`, `l.start`, `l.end`, and `l.text` directly from `this.layers` on EVERY call so user edits (position, scale, opacity, text, timing, z-order) update immediately!
+4. **`RAW.layers` MUST be a clean, non-empty Array (12 to 45 editable elements total — NEVER 150+ tiny particles/dots!):**
+   - Put ONLY meaningful foreground/scene elements in `RAW.layers` so each track in the mobile timeline editor is clear and easy to tap (`12` to `45` layers for the whole video — NOT individual characters, border lines, or background dots).
+   - Background dot-grids, vignettes, and decorative particle loops must stay inside CSS/scene containers instead of bloating `RAW.layers`.
+   - Format:
+     `{ id: "s1_title", name: "S1 Hero Title", type: "text", x: 140, y: 360, w: 1640, h: 180, opacity: 1, z: 10, start: 0.0, end: 3.2, text: "YOUR HOOK", src: null }`
+   - Every visible text block, card, or image MUST have its own object in `RAW.layers` with accurate `x, y, w, h, start, end, text`!
+   - `seek(t)` MUST read `l.x`, `l.y`, `l.w`, `l.h`, `l.opacity`, `l.z`, `l.start`, `l.end`, and `l.text` directly from `this.layers` on EVERY call AND give its DOM element `id="L_" + l.id` so user edits (position, scale, opacity, text, timing, z-order, masking) update immediately!
    - When `l.type === "image"` and `l.src` is set (from user-added images in the editor), `seek(t)` MUST render an `<img>` element inside `#L_<id>` with `width:100%;height:100%;object-fit:contain`.
 5. **`RAW.seek(t)` MUST be 100% pure and deterministic:**
    - NO `Date.now()`, NO `performance.now()`, NO `Math.random()`, NO `requestAnimationFrame()`, NO `setTimeout`/`setInterval`, NO CSS `@keyframes` or CSS `transition`.

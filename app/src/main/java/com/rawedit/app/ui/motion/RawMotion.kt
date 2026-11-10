@@ -504,9 +504,8 @@ fun <T> RawScreenTransition(
                     initialContentExit = fadeOut(tween(0))
                 )
             } else {
-                (fadeIn(tween(220, easing = RawEasings.SnappyOut)) +
-                    scaleIn(initialScale = 0.965f, animationSpec = tween(240, easing = RawEasings.SnappyOut)))
-                    .togetherWith(fadeOut(tween(160)))
+                fadeIn(tween(180, easing = RawEasings.SnappyOut))
+                    .togetherWith(fadeOut(tween(130)))
             }
         },
         label = "raw_screen_transition"
