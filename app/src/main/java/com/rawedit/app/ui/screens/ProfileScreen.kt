@@ -71,6 +71,7 @@ import com.rawedit.app.data.local.UserProfile
 import com.rawedit.app.data.local.VideoEntity
 import com.rawedit.app.ui.components.BigPrimaryButton
 import com.rawedit.app.ui.components.CircleActionButton
+import com.rawedit.app.ui.components.CircleAvatarCropperDialog
 import com.rawedit.app.ui.components.FormatHelpers
 import com.rawedit.app.ui.components.RawSecondaryButton
 import com.rawedit.app.ui.components.RawToastBanner
