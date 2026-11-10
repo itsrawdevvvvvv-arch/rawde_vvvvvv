@@ -230,12 +230,17 @@ object CodeValidator {
                   }
                   try {
                     raw.seek(0);
+                    if (window.__rawAutoFitStage) window.__rawAutoFitStage();
                     raw.seek(raw.duration / 2);
+                    if (window.__rawAutoFitStage) window.__rawAutoFitStage();
                     raw.seek(Math.max(0, raw.duration - 0.04));
+                    if (window.__rawAutoFitStage) window.__rawAutoFitStage();
                     var sampleT = Math.min(1, raw.duration * 0.25);
                     raw.seek(sampleT);
+                    if (window.__rawAutoFitStage) window.__rawAutoFitStage();
                     var h1 = stage.innerHTML;
                     raw.seek(sampleT);
+                    if (window.__rawAutoFitStage) window.__rawAutoFitStage();
                     var h2 = stage.innerHTML;
                     var hashDiff = (h1 !== h2);
                     return JSON.stringify({

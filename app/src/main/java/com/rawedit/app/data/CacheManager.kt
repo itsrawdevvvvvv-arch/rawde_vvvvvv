@@ -55,6 +55,16 @@ class CacheManager(private val context: Context) {
     val sharedPacksDir: File
         get() = File(context.filesDir, "shared_packs").apply { mkdirs() }
 
+    fun sheetTempDir(projectId: Long): File =
+        File(context.cacheDir, "sheet_temp/project_${projectId}").apply { mkdirs() }
+
+    fun resetSheetTempDir(projectId: Long): File {
+        val dir = File(context.cacheDir, "sheet_temp/project_${projectId}")
+        if (dir.exists()) dir.deleteRecursively()
+        dir.mkdirs()
+        return dir
+    }
+
     fun persistHtmlCode(projectId: Long, html: String): String {
         // Keep Room rows safely under Android 9 CursorWindow limits even for multi-MB unlimited HTML
         if (html.length <= 120_000) return html
@@ -103,6 +113,55 @@ class CacheManager(private val context: Context) {
         runCatching { File(codeStoreDir, "project_${projectId}.html").delete() }
         runCatching { File(codeStoreDir, "topic_${projectId}.txt").delete() }
         runCatching { File(codeStoreDir, "srt_${projectId}.srt").delete() }
+        runCatching { File(context.cacheDir, "sheet_temp/project_${projectId}").deleteRecursively() }
+    }
+
+    suspend fun saveFileToUri(sourceFile: File, destUri: Uri): Result<Unit> = withContext(Dispatchers.IO) {
+        runCatching {
+            context.contentResolver.openOutputStream(destUri)?.use { output ->
+                sourceFile.inputStream().use { input ->
+                    input.copyTo(output)
+                }
+            } ?: throw IllegalStateException("Could not open destination URI.")
+            Unit
+        }
+    }
+
+    suspend fun saveFileToDownloads(
+        sourceFile: File,
+        displayName: String,
+        mimeType: String
+    ): Result<String> = withContext(Dispatchers.IO) {
+        runCatching {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                val values = ContentValues().apply {
+                    put(MediaStore.Downloads.DISPLAY_NAME, displayName)
+                    put(MediaStore.Downloads.MIME_TYPE, mimeType)
+                    put(MediaStore.Downloads.RELATIVE_PATH, "${Environment.DIRECTORY_DOWNLOADS}/raw_edit")
+                    put(MediaStore.Downloads.IS_PENDING, 1)
+                }
+                val resolver = context.contentResolver
+                val uri = resolver.insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI, values)
+                    ?: throw IllegalStateException("Could not create Downloads entry.")
+                try {
+                    resolver.openOutputStream(uri)?.use { out ->
+                        sourceFile.inputStream().use { input ->
+                            input.copyTo(out)
+                        }
+                    } ?: throw IllegalStateException("Could not write file to Downloads.")
+                    val done = ContentValues().apply {
+                        put(MediaStore.Downloads.IS_PENDING, 0)
+                    }
+                    resolver.update(uri, done, null, null)
+                } catch (t: Throwable) {
+                    resolver.delete(uri, null, null)
+                    throw t
+                }
+                "Saved to Downloads/raw_edit/$displayName"
+            } else {
+                throw UnsupportedOperationException("Picker required on Android 9")
+            }
+        }
     }
 
     suspend fun prepareStylePackShareFile(): File = withContext(Dispatchers.IO) {
@@ -390,7 +449,7 @@ class CacheManager(private val context: Context) {
 
     suspend fun cleanExpiredTempFiles(maxAgeDays: Int = 7) = withContext(Dispatchers.IO) {
         val cutoff = System.currentTimeMillis() - maxAgeDays * 24L * 3600L * 1000L
-        listOf(tempDir, File(context.cacheDir, "camera_temp")).forEach { dir ->
+        listOf(tempDir, File(context.cacheDir, "camera_temp"), File(context.cacheDir, "sheet_temp")).forEach { dir ->
             dir.listFiles()?.forEach { file ->
                 if (file.lastModified() < cutoff) {
                     file.deleteRecursively()
@@ -401,7 +460,7 @@ class CacheManager(private val context: Context) {
 
     suspend fun clearAllTempCache(): Long = withContext(Dispatchers.IO) {
         var freed = 0L
-        listOf(tempDir, File(context.cacheDir, "camera_temp"), context.codeCacheDir).forEach { dir ->
+        listOf(tempDir, File(context.cacheDir, "camera_temp"), File(context.cacheDir, "sheet_temp"), context.codeCacheDir).forEach { dir ->
             if (dir.exists()) {
                 freed += folderSize(dir)
                 dir.listFiles()?.forEach { it.deleteRecursively() }
@@ -411,7 +470,7 @@ class CacheManager(private val context: Context) {
     }
 
     suspend fun getTempCacheSizeBytes(): Long = withContext(Dispatchers.IO) {
-        folderSize(tempDir) + folderSize(File(context.cacheDir, "camera_temp"))
+        folderSize(tempDir) + folderSize(File(context.cacheDir, "camera_temp")) + folderSize(File(context.cacheDir, "sheet_temp"))
     }
 
     private fun folderSize(file: File): Long {

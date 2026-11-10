@@ -189,6 +189,195 @@ class LocalAssetServer(
           }
           return null;
         };
+        window.__rawLastDiagnostics = { autoFitCount: 0, notes: [], warnings: [] };
+        window.__rawAutoFitStage = function() {
+          var stage = document.getElementById('stage');
+          if (!stage) {
+            var empty = { autoFitCount: 0, notes: [], warnings: [] };
+            window.__rawLastDiagnostics = empty;
+            return empty;
+          }
+          stage.style.width = '1920px';
+          stage.style.height = '1080px';
+          stage.style.overflow = 'hidden';
+
+          var activeContainer = stage;
+          var scenes = stage.querySelectorAll('.scene');
+          for (var si = 0; si < scenes.length; si++) {
+            if (getComputedStyle(scenes[si]).display !== 'none') {
+              activeContainer = scenes[si];
+              break;
+            }
+          }
+
+          var allEls = stage.querySelectorAll('*');
+          for (var ri = 0; ri < allEls.length; ri++) {
+            var rel = allEls[ri];
+            if (rel.dataset && rel.dataset.rawSaved === '1') {
+              rel.style.fontSize = rel.dataset.rawOrigFs || '';
+              rel.style.maxWidth = rel.dataset.rawOrigMw || '';
+              rel.style.whiteSpace = rel.dataset.rawOrigWs || '';
+              rel.style.overflowWrap = rel.dataset.rawOrigOw || '';
+              rel.style.top = rel.dataset.rawOrigTop || '';
+            }
+          }
+
+          function isSkipped(el) {
+            if (!el || el.nodeType !== 1) return true;
+            var cs = getComputedStyle(el);
+            if (cs.display === 'none' || cs.visibility === 'hidden') return true;
+            var cls = (el.className && typeof el.className === 'string') ? el.className.toLowerCase() : '';
+            var id = (el.id || '').toLowerCase();
+            if (cls.indexOf('ghost') !== -1 || id.indexOf('ghost') !== -1) return true;
+            if (cls.indexOf('dust') !== -1 || cls.indexOf('progress') !== -1 || cls.indexOf('brackets') !== -1) return true;
+            if (cls === 'w' || cls === 'lab' || cls === 'bar' || cls === 'fill' || cls === 'seg') return true;
+            var tag = (el.tagName || '').toUpperCase();
+            if (tag === 'SVG' || tag === 'PATH' || tag === 'CIRCLE' || tag === 'RECT' || tag === 'STYLE' || tag === 'SCRIPT') return true;
+            if (el.offsetWidth >= 1750 && el.offsetHeight >= 900) return true;
+            var baseOp = parseFloat(cs.opacity);
+            if (!isNaN(baseOp) && baseOp > 0 && baseOp <= 0.25 && cls.indexOf('headline') === -1 && cls.indexOf('card') === -1) return true;
+            return false;
+          }
+
+          function saveOrig(el) {
+            if (el.dataset.rawSaved === '1') return;
+            el.dataset.rawSaved = '1';
+            el.dataset.rawOrigFs = el.style.fontSize || '';
+            el.dataset.rawOrigMw = el.style.maxWidth || '';
+            el.dataset.rawOrigWs = el.style.whiteSpace || '';
+            el.dataset.rawOrigOw = el.style.overflowWrap || '';
+            el.dataset.rawOrigTop = el.style.top || '';
+          }
+
+          var rightBlockers = [];
+          var children = activeContainer.children;
+          for (var ci = 0; ci < children.length; ci++) {
+            var ch = children[ci];
+            if (isSkipped(ch)) continue;
+            var cLeft = ch.offsetLeft;
+            var cTop = ch.offsetTop;
+            var cW = ch.offsetWidth;
+            var cH = ch.offsetHeight;
+            var cCls = (ch.className && typeof ch.className === 'string') ? ch.className.toLowerCase() : '';
+            if ((cCls.indexOf('card') !== -1 || cCls.indexOf('phone') !== -1 || cCls.indexOf('round') !== -1) && cLeft >= 920 && cW >= 160) {
+              var pad = (cCls.indexOf('card') !== -1) ? 44 : 24;
+              rightBlockers.push({ left: Math.max(0, cLeft - pad), top: Math.max(0, cTop - 20), bottom: cTop + cH + 20, right: cLeft + cW + pad });
+            }
+          }
+
+          var hasProgress = !!stage.querySelector('.progress');
+          var maxSafeBottom = hasProgress ? 972 : 1020;
+          var notes = [];
+          var warnings = [];
+          var autoFitCount = 0;
+
+          for (var i = 0; i < children.length; i++) {
+            var el = children[i];
+            if (isSkipped(el)) continue;
+            var cls = (el.className && typeof el.className === 'string') ? el.className.toLowerCase() : '';
+            var isTextBlock = cls.indexOf('headline') !== -1 || cls.indexOf('kicker') !== -1 || cls.indexOf('sub') !== -1 ||
+              cls.indexOf('pill') !== -1 || cls.indexOf('chips') !== -1 || (' ' + cls + ' ').indexOf(' t ') !== -1 ||
+              (el.children.length === 0 && (el.textContent || '').trim().length > 0);
+            if (!isTextBlock) {
+              var bEdge = el.offsetTop + el.offsetHeight;
+              if (bEdge > maxSafeBottom && el.offsetHeight < 920) {
+                saveOrig(el);
+                var shiftUp = Math.min(el.offsetTop - 40, bEdge - maxSafeBottom);
+                if (shiftUp > 4) {
+                  el.style.top = Math.round(el.offsetTop - shiftUp) + 'px';
+                  autoFitCount++;
+                  notes.push('Raised element above progress bar by ' + Math.round(shiftUp) + 'px');
+                }
+              }
+              continue;
+            }
+
+            var cs = getComputedStyle(el);
+            var left = el.offsetLeft;
+            var top = el.offsetTop;
+            var isCentered = cs.textAlign === 'center' || (el.style.transform || '').indexOf('translateX(-50%)') !== -1 ||
+              (el._base && String(el._base).indexOf('translateX(-50%)') !== -1);
+
+            var allowedWidth = 1660;
+            var allowedRight = 1800;
+            if (isCentered) {
+              allowedWidth = 1640;
+            } else if (left < 920) {
+              var minBlockerLeft = 1800;
+              for (var bi = 0; bi < rightBlockers.length; bi++) {
+                var rb = rightBlockers[bi];
+                if (top + Math.max(el.offsetHeight, 90) >= rb.top && top <= rb.bottom) {
+                  if (rb.left < minBlockerLeft) minBlockerLeft = rb.left;
+                }
+              }
+              allowedRight = minBlockerLeft;
+              allowedWidth = Math.max(360, allowedRight - left);
+            } else {
+              allowedWidth = Math.max(240, 1800 - left);
+            }
+
+            var naturalW = Math.max(el.offsetWidth, el.scrollWidth);
+            if (naturalW > allowedWidth) {
+              saveOrig(el);
+              var hasWords = (el.textContent || '').trim().indexOf(' ') !== -1;
+              if (hasWords && cs.whiteSpace === 'nowrap') {
+                el.style.whiteSpace = 'normal';
+                el.style.maxWidth = Math.round(allowedWidth) + 'px';
+                el.style.overflowWrap = 'break-word';
+                autoFitCount++;
+                notes.push('Wrapped "' + (el.textContent || '').trim().slice(0, 22) + '" (' + Math.round(allowedWidth) + 'px)');
+              } else {
+                el.style.maxWidth = Math.round(allowedWidth) + 'px';
+              }
+
+              var afterW = Math.max(el.offsetWidth, el.scrollWidth);
+              if (afterW > allowedWidth) {
+                var origFs = parseFloat(cs.fontSize) || 64;
+                var ratio = Math.max(0.42, (allowedWidth / afterW) * 0.96);
+                var nextFs = Math.max(24, Math.floor(origFs * ratio));
+                if (nextFs < origFs) {
+                  el.style.fontSize = nextFs + 'px';
+                  autoFitCount++;
+                  notes.push('Resized "' + (el.textContent || '').trim().slice(0, 22) + '" ' + Math.round(origFs) + '->' + nextFs + 'px');
+                }
+              }
+            }
+
+            var newBottom = el.offsetTop + el.offsetHeight;
+            if (newBottom > maxSafeBottom && el.offsetHeight < 860) {
+              saveOrig(el);
+              var nudge = Math.min(el.offsetTop - 50, newBottom - maxSafeBottom);
+              if (nudge > 4) {
+                el.style.top = Math.round(el.offsetTop - nudge) + 'px';
+                autoFitCount++;
+                notes.push('Lifted "' + (el.textContent || '').trim().slice(0, 20) + '" above progress bar');
+              }
+            }
+
+            var finalW = Math.max(el.offsetWidth, el.scrollWidth);
+            var actualLeft = isCentered ? (left - finalW / 2) : left;
+            var actualRight = isCentered ? (left + finalW / 2) : (left + finalW);
+            if (actualLeft < 40 || actualRight > 1880) {
+              warnings.push('Edge clip on "' + (el.textContent || '').trim().slice(0, 24) + '"');
+            } else if (!isCentered && left < 920 && actualRight > allowedRight + 8) {
+              warnings.push('Card overlap near "' + (el.textContent || '').trim().slice(0, 24) + '"');
+            }
+          }
+
+          var out = { autoFitCount: autoFitCount, notes: notes, warnings: warnings };
+          window.__rawLastDiagnostics = out;
+          return out;
+        };
+        window.__rawExtractScenes = function() {
+          try {
+            if (window.PROJECT && Array.isArray(window.PROJECT.scenes)) {
+              return window.PROJECT.scenes.map(function(s, idx) {
+                return { index: idx + 1, start: Number(s.start) || 0, end: Number(s.end) || 0, bg: String(s.bg || '') };
+              });
+            }
+          } catch (e) {}
+          return [];
+        };
         window.__rawSeekAndWait = function(t, reqId) {
           try {
             var raw = window.__ensureRawContract();
@@ -199,6 +388,7 @@ class LocalAssetServer(
             var dur = (typeof raw.duration === 'number' && raw.duration > 0) ? raw.duration : t;
             var safeT = Math.max(0, Math.min(t, dur));
             raw.seek(safeT);
+            window.__rawAutoFitStage();
             var imgs = Array.prototype.slice.call(document.querySelectorAll('img')).filter(function(img) {
               return img && img.getAttribute('src') && img.style.display !== 'none' && (!img.complete || img.naturalWidth === 0);
             });

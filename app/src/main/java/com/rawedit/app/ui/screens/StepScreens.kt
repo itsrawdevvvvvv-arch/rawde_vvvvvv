@@ -31,6 +31,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.navigationBarsPadding
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
@@ -72,8 +73,11 @@ import com.rawedit.app.domain.SrtParser
 import com.rawedit.app.ui.components.BigPrimaryButton
 import com.rawedit.app.ui.components.CircleActionButton
 import com.rawedit.app.ui.components.FormatHelpers
+import com.rawedit.app.ui.icons.PixelMascotKind
+import com.rawedit.app.ui.icons.PixelSparkle
 import com.rawedit.app.ui.icons.RawIcon
 import com.rawedit.app.ui.icons.RawIconType
+import com.rawedit.app.ui.icons.RawPixelMascot
 import com.rawedit.app.ui.motion.KineticHeading
 import com.rawedit.app.ui.motion.RawEasings
 import com.rawedit.app.ui.motion.RawPressButton
@@ -201,7 +205,24 @@ fun AddVoiceScreen(
                 .verticalScroll(rememberScrollState()),
             verticalArrangement = Arrangement.spacedBy(16.dp)
         ) {
-            CircleActionButton(icon = RawIconType.BACK, onClick = onBack)
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                CircleActionButton(icon = RawIconType.BACK, onClick = onBack)
+                Box(contentAlignment = Alignment.TopEnd) {
+                    RawPixelMascot(
+                        kind = PixelMascotKind.MIC_BOT,
+                        size = 44.dp
+                    )
+                    PixelSparkle(
+                        size = 11.dp,
+                        phaseOffsetMs = 120,
+                        modifier = Modifier.offset(x = 4.dp, y = (-4).dp)
+                    )
+                }
+            }
 
             KineticHeading(
                 words = listOf("Add", "your", "voice"),
@@ -573,7 +594,24 @@ fun CopyPromptScreen(
             .padding(20.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp)
     ) {
-        CircleActionButton(icon = RawIconType.BACK, onClick = onBack)
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            CircleActionButton(icon = RawIconType.BACK, onClick = onBack)
+            Box(contentAlignment = Alignment.TopEnd) {
+                RawPixelMascot(
+                    kind = PixelMascotKind.ZIP_BOT,
+                    size = 44.dp
+                )
+                PixelSparkle(
+                    size = 11.dp,
+                    phaseOffsetMs = 300,
+                    modifier = Modifier.offset(x = 4.dp, y = (-4).dp)
+                )
+            }
+        }
 
         KineticHeading(
             words = listOf("Copy", "prompt"),
@@ -880,6 +918,7 @@ fun CodePasteScreen(
     cacheManager: CacheManager,
     onBack: () -> Unit,
     onValidatedAndSaved: (ProjectEntity) -> Unit,
+    onOpenKeyframeSheet: (ProjectEntity) -> Unit,
     onCreateNow: (ProjectEntity) -> Unit
 ) {
     val context = LocalContext.current
@@ -958,10 +997,26 @@ fun CodePasteScreen(
             verticalAlignment = Alignment.CenterVertically
         ) {
             CircleActionButton(icon = RawIconType.BACK, onClick = onBack)
-            Text(
-                text = "${codeText.length} chars (unlimited)",
-                style = RawTypography.labelMedium
-            )
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
+                Text(
+                    text = "${codeText.length} chars (unlimited)",
+                    style = RawTypography.labelMedium
+                )
+                Box(contentAlignment = Alignment.TopEnd) {
+                    RawPixelMascot(
+                        kind = PixelMascotKind.CODE_BOT,
+                        size = 40.dp
+                    )
+                    PixelSparkle(
+                        size = 10.dp,
+                        phaseOffsetMs = 240,
+                        modifier = Modifier.offset(x = 4.dp, y = (-4).dp)
+                    )
+                }
+            }
         }
 
         KineticHeading(
@@ -1238,51 +1293,81 @@ fun CodePasteScreen(
         ) { isValid ->
             val currentValid = valid
             if (isValid && currentValid != null) {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(10.dp)
-                ) {
+                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                     RawPressButton(
-                        onClick = { onValidatedAndSaved(buildUpdatedProject(currentValid)) },
-                        modifier = Modifier.weight(1f)
-                    ) {
-                        Box(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .height(56.dp)
-                                .clip(RoundedCornerShape(28.dp))
-                                .background(RawColors.RaisedCard),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Text("Save", style = RawTypography.labelLarge)
-                        }
-                    }
-                    RawPressButton(
-                        onClick = {
-                            if (project.audioUri.isNotBlank()) {
-                                onCreateNow(buildUpdatedProject(currentValid))
-                            } else {
-                                onValidatedAndSaved(buildUpdatedProject(currentValid))
-                            }
-                        },
-                        modifier = Modifier.weight(1.4f)
+                        onClick = { onOpenKeyframeSheet(buildUpdatedProject(currentValid)) },
+                        modifier = Modifier.fillMaxWidth()
                     ) {
                         Row(
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .height(56.dp)
-                                .clip(RoundedCornerShape(28.dp))
-                                .background(RawColors.PrimaryBtnBg),
+                                .height(46.dp)
+                                .clip(RoundedCornerShape(23.dp))
+                                .background(RawColors.HeroSurface)
+                                .border(1.dp, RawColors.Divider, RoundedCornerShape(23.dp)),
                             horizontalArrangement = Arrangement.Center,
                             verticalAlignment = Alignment.CenterVertically
                         ) {
-                            RawIcon(RawIconType.PLAY, size = 18.dp, tint = RawColors.PrimaryBtnText)
+                            RawPixelMascot(
+                                kind = PixelMascotKind.LENS_BOT,
+                                size = 24.dp,
+                                interactive = false
+                            )
                             Spacer(modifier = Modifier.width(8.dp))
                             Text(
-                                text = if (project.audioUri.isNotBlank()) "Create video" else "Use code",
-                                style = RawTypography.labelLarge,
-                                color = RawColors.PrimaryBtnText
+                                text = "Contact sheet (auto-fit & PDF)",
+                                style = RawTypography.labelLarge.copy(fontSize = 13.5.sp),
+                                color = RawColors.TextPrimary
                             )
+                        }
+                    }
+
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(10.dp)
+                    ) {
+                        RawPressButton(
+                            onClick = { onValidatedAndSaved(buildUpdatedProject(currentValid)) },
+                            modifier = Modifier.weight(1f)
+                        ) {
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .height(56.dp)
+                                    .clip(RoundedCornerShape(28.dp))
+                                    .background(RawColors.RaisedCard),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Text("Save", style = RawTypography.labelLarge)
+                            }
+                        }
+                        RawPressButton(
+                            onClick = {
+                                if (project.audioUri.isNotBlank()) {
+                                    onCreateNow(buildUpdatedProject(currentValid))
+                                } else {
+                                    onValidatedAndSaved(buildUpdatedProject(currentValid))
+                                }
+                            },
+                            modifier = Modifier.weight(1.4f)
+                        ) {
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .height(56.dp)
+                                    .clip(RoundedCornerShape(28.dp))
+                                    .background(RawColors.PrimaryBtnBg),
+                                horizontalArrangement = Arrangement.Center,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                RawIcon(RawIconType.PLAY, size = 18.dp, tint = RawColors.PrimaryBtnText)
+                                Spacer(modifier = Modifier.width(8.dp))
+                                Text(
+                                    text = if (project.audioUri.isNotBlank()) "Create video" else "Use code",
+                                    style = RawTypography.labelLarge,
+                                    color = RawColors.PrimaryBtnText
+                                )
+                            }
                         }
                     }
                 }

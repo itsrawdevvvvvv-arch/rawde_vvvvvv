@@ -17,6 +17,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.navigationBarsPadding
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
@@ -35,9 +36,12 @@ import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.unit.dp
 import com.rawedit.app.ui.components.RawEditLogoBadge
 import com.rawedit.app.ui.icons.IllustrationKind
+import com.rawedit.app.ui.icons.PixelMascotKind
+import com.rawedit.app.ui.icons.PixelSparkle
 import com.rawedit.app.ui.icons.RawIcon
 import com.rawedit.app.ui.icons.RawIconType
 import com.rawedit.app.ui.icons.RawLineArtIllustration
+import com.rawedit.app.ui.icons.RawPixelMascot
 import com.rawedit.app.ui.motion.KineticHeading
 import com.rawedit.app.ui.motion.LiquidPagerDots
 import com.rawedit.app.ui.motion.RawEasings
@@ -92,17 +96,29 @@ fun OnboardingScreen(
                 .fillMaxSize()
                 .statusBarsPadding()
         ) {
-            // Top-left logo + crisp wordmark
+            // Top-left logo + crisp wordmark + retro pixel companion
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
                     .padding(horizontal = 24.dp, vertical = 18.dp),
+                horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 RawEditLogoBadge(logoSize = 36.dp)
+                Box(contentAlignment = Alignment.TopEnd) {
+                    RawPixelMascot(
+                        kind = PixelMascotKind.TV_BOT,
+                        size = 40.dp
+                    )
+                    PixelSparkle(
+                        size = 10.dp,
+                        phaseOffsetMs = 200,
+                        modifier = Modifier.offset(x = 4.dp, y = (-4).dp)
+                    )
+                }
             }
 
-            // Upper half animated line-art pager with subtle drag parallax
+            // Upper half animated line-art pager with subtle drag parallax + page pixel mascot
             HorizontalPager(
                 state = pagerState,
                 modifier = Modifier
@@ -111,6 +127,11 @@ fun OnboardingScreen(
             ) { page ->
                 val data = ONBOARDING_PAGES[page]
                 val pageOffset = (pagerState.currentPage - page) + pagerState.currentPageOffsetFraction
+                val pageMascot = when (page) {
+                    0 -> PixelMascotKind.MIC_BOT
+                    1 -> PixelMascotKind.ZIP_BOT
+                    else -> PixelMascotKind.PEEKING_CAT
+                }
                 Box(
                     modifier = Modifier
                         .fillMaxSize()
@@ -130,6 +151,20 @@ fun OnboardingScreen(
                             .fillMaxWidth()
                             .height(265.dp),
                         restartKey = page == pagerState.currentPage
+                    )
+                    RawPixelMascot(
+                        kind = pageMascot,
+                        size = 54.dp,
+                        modifier = Modifier
+                            .align(Alignment.BottomEnd)
+                            .padding(end = 12.dp, bottom = 14.dp)
+                    )
+                    PixelSparkle(
+                        size = 13.dp,
+                        phaseOffsetMs = page * 240,
+                        modifier = Modifier
+                            .align(Alignment.TopStart)
+                            .padding(start = 18.dp, top = 22.dp)
                     )
                 }
             }

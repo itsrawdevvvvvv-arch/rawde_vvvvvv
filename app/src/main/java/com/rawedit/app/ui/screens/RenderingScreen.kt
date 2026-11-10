@@ -23,6 +23,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Text
@@ -50,8 +51,11 @@ import com.rawedit.app.render.RenderStage
 import com.rawedit.app.render.RenderStateHolder
 import com.rawedit.app.ui.components.BigPrimaryButton
 import com.rawedit.app.ui.components.FormatHelpers
+import com.rawedit.app.ui.icons.PixelMascotKind
+import com.rawedit.app.ui.icons.PixelSparkle
 import com.rawedit.app.ui.icons.RawIcon
 import com.rawedit.app.ui.icons.RawIconType
+import com.rawedit.app.ui.icons.RawPixelMascot
 import com.rawedit.app.ui.motion.RawPressButton
 import com.rawedit.app.ui.theme.InterFontFamily
 import com.rawedit.app.ui.theme.JetBrainsMonoFamily
@@ -119,10 +123,27 @@ fun RenderingScreen(
         verticalArrangement = Arrangement.SpaceBetween
     ) {
         Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
-            Text(
-                text = "Creating your reel",
-                style = RawTypography.headlineLarge
-            )
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    text = "Creating your reel",
+                    style = RawTypography.headlineLarge,
+                    modifier = Modifier.weight(1f)
+                )
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
+                    PixelSparkle(size = 11.dp, phaseOffsetMs = 120)
+                    RawPixelMascot(
+                        kind = PixelMascotKind.TV_BOT,
+                        size = 48.dp
+                    )
+                }
+            }
 
             // Live 16:9 preview frame of what is being drawn
             Box(
@@ -225,17 +246,27 @@ fun RenderingScreen(
 
                 Row(
                     modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
                 ) {
                     Text(
                         text = "Elapsed: ${FormatHelpers.formatDuration(state.elapsedSeconds.toDouble())}",
                         style = RawTypography.labelMedium
                     )
-                    val eta = state.etaSeconds
-                    if (state.progressPercent >= 5 && eta != null && state.stage == RenderStage.DRAWING_FRAMES) {
-                        Text(
-                            text = "About ${FormatHelpers.formatDuration(eta.toDouble())} left",
-                            style = RawTypography.labelMedium
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        val eta = state.etaSeconds
+                        if (state.progressPercent >= 5 && eta != null && state.stage == RenderStage.DRAWING_FRAMES) {
+                            Text(
+                                text = "About ${FormatHelpers.formatDuration(eta.toDouble())} left",
+                                style = RawTypography.labelMedium
+                            )
+                        }
+                        RawPixelMascot(
+                            kind = PixelMascotKind.PHANTOM_BUDDY,
+                            size = 24.dp
                         )
                     }
                 }

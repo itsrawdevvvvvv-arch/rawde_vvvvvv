@@ -18,6 +18,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.navigationBarsPadding
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
@@ -43,8 +44,11 @@ import com.rawedit.app.ui.components.BigPrimaryButton
 import com.rawedit.app.ui.components.CircleAvatarCropperDialog
 import com.rawedit.app.ui.components.RawEditLogoBadge
 import com.rawedit.app.ui.components.UserAvatarView
+import com.rawedit.app.ui.icons.PixelMascotKind
+import com.rawedit.app.ui.icons.PixelSparkle
 import com.rawedit.app.ui.icons.RawIcon
 import com.rawedit.app.ui.icons.RawIconType
+import com.rawedit.app.ui.icons.RawPixelMascot
 import com.rawedit.app.ui.motion.KineticHeading
 import com.rawedit.app.ui.motion.RawPressButton
 import com.rawedit.app.ui.theme.DotGridSurface
@@ -101,7 +105,24 @@ fun ProfileSetupScreen(
             verticalArrangement = Arrangement.SpaceBetween
         ) {
             Column {
-                RawEditLogoBadge(logoSize = 36.dp)
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    RawEditLogoBadge(logoSize = 36.dp)
+                    Box(contentAlignment = Alignment.TopEnd) {
+                        RawPixelMascot(
+                            kind = PixelMascotKind.PHANTOM_BUDDY,
+                            size = 44.dp
+                        )
+                        PixelSparkle(
+                            size = 10.dp,
+                            phaseOffsetMs = 150,
+                            modifier = Modifier.offset(x = 4.dp, y = (-4).dp)
+                        )
+                    }
+                }
                 Spacer(modifier = Modifier.height(28.dp))
                 KineticHeading(
                     words = listOf("Set", "up", "profile"),

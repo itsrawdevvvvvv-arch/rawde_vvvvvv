@@ -1,19 +1,16 @@
 package com.rawedit.app.ui.screens
 
-import androidx.compose.animation.AnimatedContent
-import androidx.compose.animation.core.spring
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
-import androidx.compose.animation.togetherWith
-import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
@@ -24,536 +21,403 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.itemsIndexed
-import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.graphicsLayer
-import androidx.compose.ui.layout.ContentScale
-import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.text.font.FontStyle
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import coil.compose.AsyncImage
-import com.rawedit.app.data.local.ProjectEntity
 import com.rawedit.app.data.local.UserProfile
-import com.rawedit.app.data.local.VideoEntity
-import com.rawedit.app.ui.components.FormatHelpers
-import com.rawedit.app.ui.components.MorphingFilterChips
 import com.rawedit.app.ui.components.UserAvatarView
-import com.rawedit.app.ui.icons.IllustrationKind
+import com.rawedit.app.ui.icons.PixelMascotKind
+import com.rawedit.app.ui.icons.PixelSparkle
+import com.rawedit.app.ui.icons.PixelTypeMarqueeBadge
 import com.rawedit.app.ui.icons.RawIcon
 import com.rawedit.app.ui.icons.RawIconType
-import com.rawedit.app.ui.icons.RawLineArtIllustration
-import com.rawedit.app.ui.motion.CascadeSkewCard
+import com.rawedit.app.ui.icons.RawPixelMascot
 import com.rawedit.app.ui.motion.KineticHeading
 import com.rawedit.app.ui.motion.RawEasings
 import com.rawedit.app.ui.motion.RawPressButton
 import com.rawedit.app.ui.motion.rememberAnimationsEnabled
 import com.rawedit.app.ui.theme.DotGridSurface
+import com.rawedit.app.ui.theme.InterFontFamily
+import com.rawedit.app.ui.theme.JetBrainsMonoFamily
 import com.rawedit.app.ui.theme.RawColors
 import com.rawedit.app.ui.theme.RawTypography
-import java.io.File
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 
-@OptIn(ExperimentalFoundationApi::class)
 @Composable
 fun HomeScreen(
     userProfile: UserProfile,
-    projects: List<ProjectEntity>,
-    videos: List<VideoEntity>,
     onOpenProfile: () -> Unit,
-    onStartNewReel: (Offset) -> Unit,
-    onOpenProject: (Long, Offset) -> Unit,
-    onOpenVideoResult: (Long, Offset) -> Unit
+    onStartNewReel: (Offset) -> Unit
 ) {
-    var filterIndex by remember { mutableIntStateOf(0) }
-    val listState = rememberLazyListState()
     val animEnabled = rememberAnimationsEnabled()
-    val scrollOffsetPx = listState.firstVisibleItemScrollOffset.toFloat()
+    val scope = rememberCoroutineScope()
+    val ringDraw = remember { Animatable(if (animEnabled) 0f else 1f) }
+    var kittyLine by remember { mutableStateOf<String?>(null) }
+    var tvBotLine by remember { mutableStateOf<String?>(null) }
 
-    val inProgressProjects = remember(projects) {
-        projects.filter { it.state == ProjectEntity.STATE_IN_PROGRESS }
-    }
-    val recentVideo = videos.firstOrNull()
-
-    val displayItems: List<Any> = remember(filterIndex, inProgressProjects, videos) {
-        when (filterIndex) {
-            1 -> inProgressProjects
-            2 -> videos
-            else -> inProgressProjects + videos
+    LaunchedEffect(animEnabled) {
+        if (animEnabled) {
+            ringDraw.snapTo(0f)
+            ringDraw.animateTo(1f, tween(650, easing = RawEasings.Morph))
         }
     }
 
-    LazyColumn(
-        state = listState,
-        modifier = Modifier
-            .fillMaxSize()
-            .background(RawColors.BgPrimary)
-            .statusBarsPadding(),
-        contentPadding = PaddingValues(start = 20.dp, end = 20.dp, top = 16.dp, bottom = 114.dp),
-        verticalArrangement = Arrangement.spacedBy(16.dp)
+    DotGridSurface(
+        modifier = Modifier.fillMaxSize(),
+        backgroundColor = RawColors.BgPrimary,
+        dotColor = RawColors.HeroSurface.copy(alpha = 0.72f)
     ) {
-        // Minimal greeting top bar echoing Phone 2
-        item {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Column {
-                    Text(
-                        text = "Hello, ${userProfile.userName.ifBlank { "Creator" }}",
-                        style = RawTypography.titleLarge
-                    )
-                    Spacer(modifier = Modifier.height(2.dp))
-                    Text(
-                        text = "Offline Reel Studio",
-                        style = RawTypography.bodyMedium
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .statusBarsPadding()
+                .verticalScroll(rememberScrollState())
+                .padding(start = 20.dp, end = 20.dp, top = 16.dp, bottom = 114.dp),
+            verticalArrangement = Arrangement.SpaceBetween
+        ) {
+            Column {
+                // Top minimal header
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Column {
+                        Text(
+                            text = "Hello, ${userProfile.userName.ifBlank { "Creator" }}",
+                            style = RawTypography.titleLarge
+                        )
+                        Spacer(modifier = Modifier.height(2.dp))
+                        Text(
+                            text = "Offline Reel Studio",
+                            style = RawTypography.bodyMedium
+                        )
+                    }
+                    UserAvatarView(
+                        name = userProfile.userName.ifBlank { "R" },
+                        photoPath = userProfile.profilePhotoPath,
+                        size = 46.dp,
+                        onClick = onOpenProfile
                     )
                 }
-                UserAvatarView(
-                    name = userProfile.userName.ifBlank { "R" },
-                    photoPath = userProfile.profilePhotoPath,
-                    size = 46.dp,
-                    onClick = onOpenProfile
-                )
-            }
-        }
 
-        // Crisp 2-line minimal display heading
-        item {
-            Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                KineticHeading(
-                    words = listOf("Let's", "make"),
-                    style = RawTypography.displayLarge.copy(fontSize = 33.sp, lineHeight = 38.sp)
-                )
-                KineticHeading(
-                    words = listOf("a", "reel!"),
-                    style = RawTypography.displayLarge.copy(fontSize = 33.sp, lineHeight = 38.sp)
-                )
-            }
-        }
+                Spacer(modifier = Modifier.height(24.dp))
 
-        // Minimal pill filters with inline numeric counts (Phone 2 layout)
-        item {
-            MorphingFilterChips(
-                options = listOf("All", "Drafts", "Finished"),
-                selectedIndex = filterIndex,
-                counts = listOf(inProgressProjects.size + videos.size, inProgressProjects.size, videos.size),
-                onSelect = { filterIndex = it }
-            )
-        }
+                // Typography Hero Headline with hand-drawn oval highlight, burst rays & pixel stars
+                Box(modifier = Modifier.fillMaxWidth()) {
+                    PixelSparkle(
+                        size = 16.dp,
+                        phaseOffsetMs = 0,
+                        modifier = Modifier
+                            .align(Alignment.TopStart)
+                            .offset(x = 6.dp, y = (-12).dp)
+                    )
+                    PixelSparkle(
+                        size = 12.dp,
+                        phaseOffsetMs = 450,
+                        modifier = Modifier
+                            .align(Alignment.BottomEnd)
+                            .offset(x = (-10).dp, y = 4.dp)
+                    )
 
-        // Featured hero card + tilted overlapping second card (Phone 2 layout)
-        item {
-            Column(modifier = Modifier.fillMaxWidth()) {
-                RawPressButton(onClick = { onStartNewReel(Offset(500f, 700f)) }) {
+                    Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                        KineticHeading(
+                            words = listOf("Let's", "make"),
+                            style = RawTypography.displayLarge.copy(
+                                fontSize = 38.sp,
+                                lineHeight = 42.sp,
+                                fontStyle = FontStyle.Italic
+                            )
+                        )
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(10.dp)
+                        ) {
+                            Text(
+                                text = "a",
+                                style = RawTypography.displayLarge.copy(
+                                    fontSize = 38.sp,
+                                    lineHeight = 42.sp,
+                                    fontStyle = FontStyle.Italic
+                                )
+                            )
+                            Box(
+                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Text(
+                                    text = "reel!",
+                                    style = RawTypography.displayLarge.copy(
+                                        fontSize = 38.sp,
+                                        lineHeight = 42.sp,
+                                        fontStyle = FontStyle.Italic
+                                    ),
+                                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 2.dp)
+                                )
+                                Canvas(modifier = Modifier.matchParentSize()) {
+                                    val sweep = 360f * ringDraw.value
+                                    drawArc(
+                                        color = RawColors.TextPrimary.copy(alpha = 0.92f),
+                                        startAngle = -140f,
+                                        sweepAngle = sweep,
+                                        useCenter = false,
+                                        topLeft = Offset(-2.dp.toPx(), 1.dp.toPx()),
+                                        size = Size(size.width + 4.dp.toPx(), size.height - 2.dp.toPx()),
+                                        style = Stroke(width = 2.2.dp.toPx(), cap = StrokeCap.Round)
+                                    )
+                                }
+                            }
+                            // Comic ray ticks beside "reel!"
+                            Canvas(modifier = Modifier.size(26.dp, 26.dp)) {
+                                val a = ringDraw.value
+                                drawLine(
+                                    color = RawColors.TextPrimary.copy(alpha = 0.9f * a),
+                                    start = Offset(2f, size.height * 0.48f),
+                                    end = Offset(size.width * 0.78f, 3f),
+                                    strokeWidth = 2.5.dp.toPx(),
+                                    cap = StrokeCap.Round
+                                )
+                                drawLine(
+                                    color = RawColors.TextPrimary.copy(alpha = 0.9f * a),
+                                    start = Offset(4f, size.height * 0.85f),
+                                    end = Offset(size.width * 0.92f, size.height * 0.65f),
+                                    strokeWidth = 2.5.dp.toPx(),
+                                    cap = StrokeCap.Round
+                                )
+                            }
+                        }
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(10.dp))
+
+                // Subtext row + interactive retro pixel TV Bot + speech play bubble
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.Bottom
+                ) {
+                    Column(modifier = Modifier.weight(1f).padding(bottom = 14.dp)) {
+                        Text(
+                            text = "Turn your voice & ideas\ninto crisp 1080p edits.",
+                            style = RawTypography.bodyLarge.copy(lineHeight = 22.sp),
+                            color = RawColors.TextMuted
+                        )
+                        AnimatedVisibility(
+                            visible = tvBotLine != null,
+                            enter = fadeIn(tween(180)),
+                            exit = fadeOut(tween(180))
+                        ) {
+                            Text(
+                                text = tvBotLine.orEmpty(),
+                                fontFamily = JetBrainsMonoFamily,
+                                fontSize = 11.sp,
+                                color = RawColors.SuccessMint,
+                                modifier = Modifier.padding(top = 6.dp)
+                            )
+                        }
+                    }
+
+                    Box(
+                        modifier = Modifier.padding(end = 8.dp),
+                        contentAlignment = Alignment.TopEnd
+                    ) {
+                        RawPixelMascot(
+                            kind = PixelMascotKind.TV_BOT,
+                            size = 76.dp,
+                            onTap = {
+                                scope.launch {
+                                    tvBotLine = "ready to render 1080p!"
+                                    delay(1700)
+                                    tvBotLine = null
+                                }
+                            }
+                        )
+                        RawPixelMascot(
+                            kind = PixelMascotKind.SPEECH_PLAY,
+                            size = 32.dp,
+                            modifier = Modifier.offset(x = 12.dp, y = (-18).dp)
+                        )
+                    }
+                }
+
+                // Single Hero Typography Creation Card (NO workspace/draft clutter!)
+                RawPressButton(
+                    onClick = { onStartNewReel(Offset(540f, 820f)) },
+                    modifier = Modifier.fillMaxWidth()
+                ) {
                     DotGridSurface(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .clip(RoundedCornerShape(28.dp))
-                            .border(1.dp, RawColors.Divider.copy(alpha = 0.65f), RoundedCornerShape(28.dp)),
+                            .graphicsLayer { rotationZ = -1.6f }
+                            .clip(RoundedCornerShape(30.dp))
+                            .border(1.dp, RawColors.PillGrey.copy(alpha = 0.7f), RoundedCornerShape(30.dp)),
                         backgroundColor = RawColors.HeroSurface
                     ) {
                         Column(
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .padding(20.dp)
+                                .padding(horizontal = 22.dp, vertical = 24.dp)
                         ) {
                             Row(
                                 modifier = Modifier.fillMaxWidth(),
                                 horizontalArrangement = Arrangement.SpaceBetween,
-                                verticalAlignment = Alignment.Top
+                                verticalAlignment = Alignment.CenterVertically
                             ) {
                                 Column(modifier = Modifier.weight(1f)) {
                                     Text(
-                                        text = "Typography\nReel",
-                                        style = RawTypography.headlineLarge.copy(fontSize = 27.sp, lineHeight = 31.sp)
+                                        text = "Typography",
+                                        fontFamily = InterFontFamily,
+                                        fontWeight = FontWeight.ExtraBold,
+                                        fontSize = 31.sp,
+                                        lineHeight = 33.sp,
+                                        fontStyle = FontStyle.Italic,
+                                        color = RawColors.TextPrimary
                                     )
-                                    Spacer(modifier = Modifier.height(6.dp))
+                                    Text(
+                                        text = "Reel",
+                                        fontFamily = InterFontFamily,
+                                        fontWeight = FontWeight.ExtraBold,
+                                        fontSize = 36.sp,
+                                        lineHeight = 38.sp,
+                                        color = RawColors.TextMuted.copy(alpha = 0.78f)
+                                    )
+                                    Spacer(modifier = Modifier.height(12.dp))
                                     Text(
                                         text = "16:9 1080p MP4 offline",
                                         style = RawTypography.bodyMedium
                                     )
                                 }
-                                RawLineArtIllustration(
-                                    kind = IllustrationKind.HERO_TYPOGRAPHY,
-                                    modifier = Modifier.size(116.dp),
-                                    scrollOffsetPx = scrollOffsetPx
-                                )
+
+                                Box(contentAlignment = Alignment.TopEnd) {
+                                    PixelTypeMarqueeBadge(size = 98.dp)
+                                    PixelSparkle(
+                                        size = 13.dp,
+                                        phaseOffsetMs = 220,
+                                        modifier = Modifier.offset(x = 6.dp, y = (-8).dp)
+                                    )
+                                }
                             }
 
-                            Spacer(modifier = Modifier.height(16.dp))
+                            Spacer(modifier = Modifier.height(22.dp))
 
-                            // Inset pill button matching reference card CTA
+                            // High-contrast crisp pill button matching design
                             Row(
                                 modifier = Modifier
                                     .fillMaxWidth()
-                                    .height(54.dp)
-                                    .clip(RoundedCornerShape(27.dp))
-                                    .background(RawColors.BgPrimary)
-                                    .border(1.dp, RawColors.Divider.copy(alpha = 0.7f), RoundedCornerShape(27.dp))
-                                    .padding(start = 18.dp, end = 7.dp),
+                                    .height(58.dp)
+                                    .clip(RoundedCornerShape(29.dp))
+                                    .background(RawColors.PrimaryBtnBg)
+                                    .padding(start = 24.dp, end = 8.dp),
                                 horizontalArrangement = Arrangement.SpaceBetween,
                                 verticalAlignment = Alignment.CenterVertically
                             ) {
                                 Text(
                                     text = "Start creating",
-                                    style = RawTypography.labelLarge
+                                    style = RawTypography.titleMedium.copy(fontWeight = FontWeight.SemiBold),
+                                    color = RawColors.PrimaryBtnText
                                 )
                                 Box(
                                     modifier = Modifier
-                                        .size(40.dp)
+                                        .size(42.dp)
                                         .clip(CircleShape)
-                                        .background(RawColors.TextPrimary),
+                                        .background(RawColors.BgPrimary),
                                     contentAlignment = Alignment.Center
                                 ) {
                                     RawIcon(
                                         type = RawIconType.PLAY,
-                                        size = 16.dp,
-                                        tint = RawColors.PrimaryBtnText
+                                        size = 17.dp,
+                                        tint = RawColors.TextPrimary
                                     )
                                 }
                             }
                         }
                     }
                 }
-
-                // Slightly overlapping tilted card echoing Phone 2 bottom card
-                Box(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .offset(y = (-10).dp)
-                        .graphicsLayer {
-                            rotationZ = -2.0f
-                        }
-                        .padding(horizontal = 6.dp)
-                ) {
-                    if (recentVideo != null) {
-                        RecentReelOverlapCard(
-                            video = recentVideo,
-                            onClick = { onOpenVideoResult(recentVideo.id, Offset(500f, 1100f)) }
-                        )
-                    } else {
-                        EmptyRecentOverlapCard(
-                            onClick = { onStartNewReel(Offset(500f, 1100f)) }
-                        )
-                    }
-                }
-            }
-        }
-
-        // Filtered projects / finished videos list
-        if (displayItems.isNotEmpty()) {
-            item {
-                AnimatedContent(
-                    targetState = filterIndex,
-                    transitionSpec = {
-                        if (!animEnabled) fadeIn(tween(0)) togetherWith fadeOut(tween(0))
-                        else fadeIn(tween(220, easing = RawEasings.Morph)) togetherWith fadeOut(tween(140))
-                    },
-                    label = "workspace_title_morph"
-                ) { f ->
-                    Text(
-                        text = when (f) {
-                            1 -> "In progress"
-                            2 -> "Finished reels"
-                            else -> "Workspace"
-                        },
-                        style = RawTypography.titleLarge
-                    )
-                }
             }
 
-            itemsIndexed(
-                items = displayItems,
-                key = { _, item ->
-                    when (item) {
-                        is ProjectEntity -> "p_${item.id}"
-                        is VideoEntity -> "v_${item.id}"
-                        else -> "x_${item.hashCode()}"
-                    }
-                }
-            ) { index, item ->
-                Box(
-                    modifier = Modifier.animateItem(
-                        fadeInSpec = tween(240, easing = RawEasings.Morph),
-                        fadeOutSpec = tween(180),
-                        placementSpec = spring(dampingRatio = 0.8f, stiffness = 360f)
-                    )
-                ) {
-                    CascadeSkewCard(index = index) {
-                        when (item) {
-                            is ProjectEntity -> ProjectSummaryRow(
-                                project = item,
-                                onClick = { onOpenProject(item.id, Offset(540f, 1200f)) }
-                            )
-                            is VideoEntity -> FinishedVideoRow(
-                                video = item,
-                                onClick = { onOpenVideoResult(item.id, Offset(540f, 1200f)) }
-                            )
-                        }
-                    }
-                }
-            }
-        }
-    }
-}
+            Spacer(modifier = Modifier.height(34.dp))
 
-@Composable
-private fun RecentReelOverlapCard(
-    video: VideoEntity,
-    onClick: () -> Unit
-) {
-    Column(
-        modifier = Modifier
-            .fillMaxWidth()
-            .clip(RoundedCornerShape(26.dp))
-            .background(RawColors.RaisedCard)
-            .border(1.dp, RawColors.PillGrey.copy(alpha = 0.75f), RoundedCornerShape(26.dp))
-            .clickable(onClick = onClick)
-            .padding(18.dp),
-        verticalArrangement = Arrangement.spacedBy(12.dp)
-    ) {
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(12.dp)
-        ) {
-            Column(modifier = Modifier.weight(1f)) {
-                Text(
-                    text = "RECENT REEL",
-                    style = RawTypography.labelSmall,
-                    color = RawColors.TextMuted
-                )
-                Spacer(modifier = Modifier.height(2.dp))
-                Text(
-                    text = video.title,
-                    style = RawTypography.titleMedium,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis
-                )
-                Spacer(modifier = Modifier.height(2.dp))
-                Text(
-                    text = "${FormatHelpers.formatDuration(video.durationSec)} • ${FormatHelpers.formatFileSize(video.sizeBytes)}",
-                    style = RawTypography.labelMedium
-                )
-            }
-
-            Box(
-                modifier = Modifier
-                    .width(92.dp)
-                    .height(54.dp)
-                    .clip(RoundedCornerShape(12.dp))
-                    .background(RawColors.CardSurface),
-                contentAlignment = Alignment.Center
-            ) {
-                if (video.thumbnailPath.isNotBlank() && File(video.thumbnailPath).exists()) {
-                    AsyncImage(
-                        model = File(video.thumbnailPath),
-                        contentDescription = video.title,
-                        contentScale = ContentScale.Crop,
-                        modifier = Modifier.fillMaxSize()
-                    )
-                } else {
-                    RawIcon(RawIconType.FILM, size = 22.dp, tint = RawColors.TextMuted)
-                }
-            }
-        }
-
-        // Inset dark pill button echoing Phone 2 card CTA
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .height(48.dp)
-                .clip(RoundedCornerShape(24.dp))
-                .background(RawColors.BgPrimary)
-                .padding(start = 16.dp, end = 6.dp),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Text(
-                text = "Watch reel",
-                style = RawTypography.labelLarge
-            )
-            Box(
-                modifier = Modifier
-                    .size(36.dp)
-                    .clip(CircleShape)
-                    .background(RawColors.TextPrimary),
-                contentAlignment = Alignment.Center
-            ) {
-                RawIcon(RawIconType.PLAY, size = 14.dp, tint = RawColors.PrimaryBtnText)
-            }
-        }
-    }
-}
-
-@Composable
-private fun EmptyRecentOverlapCard(onClick: () -> Unit) {
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .clip(RoundedCornerShape(24.dp))
-            .background(RawColors.CardSurface)
-            .border(1.dp, RawColors.Divider.copy(alpha = 0.6f), RoundedCornerShape(24.dp))
-            .clickable(onClick = onClick)
-            .padding(16.dp),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(14.dp)
-    ) {
-        RawLineArtIllustration(
-            kind = IllustrationKind.EMPTY_REELS,
-            modifier = Modifier.size(62.dp)
-        )
-        Column(modifier = Modifier.weight(1f)) {
-            Text(
-                text = "No finished reels yet",
-                style = RawTypography.titleMedium
-            )
-            Spacer(modifier = Modifier.height(3.dp))
-            Text(
-                text = "Tap Start creating above to render your first reel.",
-                style = RawTypography.bodyMedium
-            )
-        }
-    }
-}
-
-@Composable
-private fun ProjectSummaryRow(
-    project: ProjectEntity,
-    onClick: () -> Unit
-) {
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .clip(RoundedCornerShape(20.dp))
-            .background(RawColors.CardSurface)
-            .border(1.dp, RawColors.Divider.copy(alpha = 0.55f), RoundedCornerShape(20.dp))
-            .clickable(onClick = onClick)
-            .padding(16.dp),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.SpaceBetween
-    ) {
-        Column(modifier = Modifier.weight(1f)) {
+            // Playful bottom retro pixel companions above the dock
             Row(
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 6.dp),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.Bottom
             ) {
-                Text(
-                    text = project.title.ifBlank { "Typography Reel" },
-                    style = RawTypography.titleMedium,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                    modifier = Modifier.weight(1f, fill = false)
-                )
-                Box(
-                    modifier = Modifier
-                        .clip(RoundedCornerShape(8.dp))
-                        .background(RawColors.RaisedCard)
-                        .padding(horizontal = 8.dp, vertical = 2.dp)
+                Row(
+                    verticalAlignment = Alignment.Bottom,
+                    horizontalArrangement = Arrangement.spacedBy(10.dp)
                 ) {
-                    Text(
-                        text = "Draft",
-                        style = RawTypography.labelSmall,
-                        color = RawColors.TextPrimary
+                    RawPixelMascot(
+                        kind = PixelMascotKind.PEEKING_CAT,
+                        size = 78.dp,
+                        onTap = {
+                            scope.launch {
+                                kittyLine = "purr~ tap Reels tab for saved drafts"
+                                delay(1900)
+                                kittyLine = null
+                            }
+                        }
+                    )
+                    AnimatedVisibility(
+                        visible = kittyLine != null,
+                        enter = fadeIn(tween(180)),
+                        exit = fadeOut(tween(180))
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .padding(bottom = 26.dp)
+                                .clip(RoundedCornerShape(12.dp))
+                                .background(RawColors.CardSurface)
+                                .border(1.dp, RawColors.Divider, RoundedCornerShape(12.dp))
+                                .padding(horizontal = 10.dp, vertical = 6.dp)
+                        ) {
+                            Text(
+                                text = kittyLine.orEmpty(),
+                                fontFamily = JetBrainsMonoFamily,
+                                fontSize = 10.sp,
+                                color = RawColors.TextPrimary
+                            )
+                        }
+                    }
+                }
+
+                Box(contentAlignment = Alignment.TopEnd) {
+                    RawPixelMascot(
+                        kind = PixelMascotKind.FOLDER_PLAY,
+                        size = 48.dp
+                    )
+                    PixelSparkle(
+                        size = 11.dp,
+                        phaseOffsetMs = 600,
+                        modifier = Modifier.offset(x = 6.dp, y = (-8).dp)
                     )
                 }
             }
-            Spacer(modifier = Modifier.height(4.dp))
-            val sub = buildString {
-                if (project.audioDurationSec > 0.0) {
-                    append(FormatHelpers.formatDuration(project.audioDurationSec))
-                } else {
-                    append("No audio yet")
-                }
-                append("  •  ")
-                append(if (project.code.isNotBlank()) "Code ready" else "Waiting for code")
-            }
-            Text(text = sub, style = RawTypography.bodyMedium)
-        }
-
-        Box(
-            modifier = Modifier
-                .size(40.dp)
-                .clip(CircleShape)
-                .background(RawColors.RaisedCard),
-            contentAlignment = Alignment.Center
-        ) {
-            RawIcon(RawIconType.ARROW_RIGHT, size = 16.dp)
-        }
-    }
-}
-
-@Composable
-private fun FinishedVideoRow(
-    video: VideoEntity,
-    onClick: () -> Unit
-) {
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .clip(RoundedCornerShape(20.dp))
-            .background(RawColors.CardSurface)
-            .border(1.dp, RawColors.Divider.copy(alpha = 0.55f), RoundedCornerShape(20.dp))
-            .clickable(onClick = onClick)
-            .padding(14.dp),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(12.dp)
-    ) {
-        Box(
-            modifier = Modifier
-                .width(78.dp)
-                .height(46.dp)
-                .clip(RoundedCornerShape(10.dp))
-                .background(RawColors.HeroSurface),
-            contentAlignment = Alignment.Center
-        ) {
-            if (video.thumbnailPath.isNotBlank() && File(video.thumbnailPath).exists()) {
-                AsyncImage(
-                    model = File(video.thumbnailPath),
-                    contentDescription = video.title,
-                    contentScale = ContentScale.Crop,
-                    modifier = Modifier.fillMaxSize()
-                )
-            } else {
-                RawIcon(RawIconType.FILM, size = 20.dp, tint = RawColors.TextMuted)
-            }
-        }
-
-        Column(modifier = Modifier.weight(1f)) {
-            Text(
-                text = video.title,
-                style = RawTypography.titleMedium,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis
-            )
-            Spacer(modifier = Modifier.height(2.dp))
-            Text(
-                text = "${FormatHelpers.formatDuration(video.durationSec)}  •  ${FormatHelpers.formatFileSize(video.sizeBytes)}",
-                style = RawTypography.labelMedium
-            )
-        }
-
-        Box(
-            modifier = Modifier
-                .size(40.dp)
-                .clip(CircleShape)
-                .background(RawColors.TextPrimary),
-            contentAlignment = Alignment.Center
-        ) {
-            RawIcon(RawIconType.PLAY, size = 16.dp, tint = RawColors.PrimaryBtnText)
         }
     }
 }

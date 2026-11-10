@@ -31,6 +31,7 @@ import com.rawedit.app.ui.screens.CodePasteScreen
 import com.rawedit.app.ui.screens.CopyPromptScreen
 import com.rawedit.app.ui.screens.CreateHubScreen
 import com.rawedit.app.ui.screens.HomeScreen
+import com.rawedit.app.ui.screens.KeyframeSheetScreen
 import com.rawedit.app.ui.screens.MyReelsScreen
 import com.rawedit.app.ui.screens.OnboardingScreen
 import com.rawedit.app.ui.screens.ProfileScreen
@@ -53,6 +54,7 @@ private sealed interface AppRoute {
     data class AddVoice(val projectId: Long) : AppRoute
     data class CopyPrompt(val projectId: Long) : AppRoute
     data class CodePaste(val projectId: Long) : AppRoute
+    data class KeyframeSheet(val projectId: Long) : AppRoute
     data class Rendering(val projectId: Long) : AppRoute
     data class Result(val videoId: Long, val celebrate: Boolean) : AppRoute
 }
@@ -201,27 +203,26 @@ private fun MainAuthenticatedHost(
                             when (tab) {
                                 MainTab.HOME -> HomeScreen(
                                     userProfile = userProfile,
-                                    projects = projects,
-                                    videos = videos,
                                     onOpenProfile = { switchTab(MainTab.PROFILE) },
                                     onStartNewReel = { _ ->
                                         scope.launch {
                                             val id = container.repository.createEmptyProject()
                                             pushRoute(AppRoute.CreateHub(id))
                                         }
-                                    },
-                                    onOpenProject = { id, _ ->
-                                        pushRoute(AppRoute.CreateHub(id))
-                                    },
-                                    onOpenVideoResult = { videoId, _ ->
-                                        pushRoute(AppRoute.Result(videoId, celebrate = false))
                                     }
                                 )
 
                                 MainTab.CREATE -> Unit
 
                                 MainTab.REELS -> MyReelsScreen(
+                                    projects = projects,
                                     videos = videos,
+                                    onOpenProject = { id, _ ->
+                                        pushRoute(AppRoute.CreateHub(id))
+                                    },
+                                    onDeleteProject = { proj ->
+                                        scope.launch { container.repository.deleteProject(proj) }
+                                    },
                                     onPlayVideo = { vid, _ ->
                                         pushRoute(AppRoute.Result(vid, celebrate = false))
                                     },
@@ -262,9 +263,16 @@ private fun MainAuthenticatedHost(
                         CreateHubScreen(
                             project = proj,
                             onBack = ::popRoute,
+                            onDeleteProject = {
+                                scope.launch {
+                                    container.repository.deleteProject(proj)
+                                    popRoute()
+                                }
+                            },
                             onOpenAddVoice = { pushRoute(AppRoute.AddVoice(proj.id)) },
                             onOpenCopyPrompt = { pushRoute(AppRoute.CopyPrompt(proj.id)) },
                             onOpenCodePaste = { pushRoute(AppRoute.CodePaste(proj.id)) },
+                            onOpenKeyframeSheet = { pushRoute(AppRoute.KeyframeSheet(proj.id)) },
                             onSwipeCreate = { _ ->
                                 pushRoute(AppRoute.Rendering(proj.id))
                             }
@@ -316,12 +324,42 @@ private fun MainAuthenticatedHost(
                                     popRoute()
                                 }
                             },
+                            onOpenKeyframeSheet = { updated ->
+                                scope.launch {
+                                    container.repository.saveProject(updated)
+                                    pushRoute(AppRoute.KeyframeSheet(updated.id))
+                                }
+                            },
                             onCreateNow = { updated ->
                                 scope.launch {
                                     container.repository.saveProject(updated)
                                     isForward = true
                                     backStack = backStack.dropLast(1) + AppRoute.Rendering(updated.id)
                                 }
+                            }
+                        )
+                    }
+                }
+
+                is AppRoute.KeyframeSheet -> {
+                    val project by container.repository.observeProject(route.projectId)
+                        .collectAsState(initial = null)
+                    project?.let { proj ->
+                        KeyframeSheetScreen(
+                            project = proj,
+                            cacheManager = container.cacheManager,
+                            onBack = ::popRoute,
+                            onEditCode = {
+                                if (backStack.getOrNull(backStack.lastIndex - 1) is AppRoute.CodePaste) {
+                                    popRoute()
+                                } else {
+                                    isForward = true
+                                    backStack = backStack.dropLast(1) + AppRoute.CodePaste(proj.id)
+                                }
+                            },
+                            onRenderNow = {
+                                isForward = true
+                                backStack = backStack.dropLast(1) + AppRoute.Rendering(proj.id)
                             }
                         )
                     }
@@ -362,6 +400,18 @@ private fun MainAuthenticatedHost(
                                         AppRoute.Tabs,
                                         AppRoute.CreateHub(nextId)
                                     )
+                                }
+                            },
+                            onDeleteVideo = {
+                                scope.launch {
+                                    container.repository.deleteVideo(v)
+                                    if (backStack.size > 1) {
+                                        popRoute()
+                                    } else {
+                                        isForward = false
+                                        currentTab = MainTab.REELS
+                                        backStack = listOf(AppRoute.Tabs)
+                                    }
                                 }
                             },
                             onBack = {

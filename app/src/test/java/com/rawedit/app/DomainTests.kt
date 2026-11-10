@@ -1,7 +1,11 @@
 package com.rawedit.app
 
 import com.rawedit.app.domain.CodeValidator
+import com.rawedit.app.domain.KeyframeSample
+import com.rawedit.app.domain.KeyframeSheetGenerator
 import com.rawedit.app.domain.PromptGenerator
+import com.rawedit.app.domain.SceneSpan
+import com.rawedit.app.domain.SheetSamplingMode
 import com.rawedit.app.domain.SrtParser
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -85,5 +89,36 @@ Enjoy!
         val unclosedFence = "```html\n<!DOCTYPE html><html><body><div id='stage'></div><script>window.RAW={duration:5,seek:function(t){}}</script></body></html>"
         assertTrue(CodeValidator.unwrapMarkdownFences(unclosedFence).startsWith("<!DOCTYPE html>"))
         assertTrue(CodeValidator.staticValidate(unclosedFence).first)
+    }
+
+    @Test
+    fun keyframeSheetGeneratorBuildsTimestampsSceneLabelsAndFixPrompt() {
+        val scenes = listOf(
+            SceneSpan(index = 1, start = 0.0, end = 2.5, bg = "dark"),
+            SceneSpan(index = 2, start = 2.5, end = 6.0, bg = "light")
+        )
+
+        val stdTimes = KeyframeSheetGenerator.buildSampleTimestamps(6.0, scenes, SheetSamplingMode.STANDARD_05S)
+        assertTrue(stdTimes.first() == 0.0)
+        assertTrue(stdTimes.last() >= 5.9)
+        assertTrue(stdTimes.zipWithNext().all { (a, b) -> b > a })
+
+        val beatTimes = KeyframeSheetGenerator.buildSampleTimestamps(6.0, scenes, SheetSamplingMode.SCENE_BEATS)
+        assertTrue(beatTimes.size in 4..10)
+
+        assertEquals("S1 DARK", KeyframeSheetGenerator.resolveSceneLabel(1.2, scenes))
+        assertEquals("S2 LIGHT", KeyframeSheetGenerator.resolveSceneLabel(6.0, scenes))
+
+        val samples = listOf(
+            KeyframeSample(0, 0.0, "S1 DARK", "/tmp/a.jpg", 0, emptyList(), emptyList()),
+            KeyframeSample(4, 2.5, "S2 LIGHT", "/tmp/b.jpg", 1, listOf("Resized \"ANDROID\" 200->128px"), emptyList()),
+            KeyframeSample(7, 4.25, "S2 LIGHT", "/tmp/c.jpg", 1, emptyList(), listOf("Edge clip on \"VERYLONGTEXT\""))
+        )
+        val prompt = KeyframeSheetGenerator.buildFixPrompt(samples, "My Test Reel", 6.0)
+        assertTrue(prompt.contains("t=4.25s"))
+        assertTrue(prompt.contains("t=2.50s"))
+        assertTrue(prompt.contains("Edge clip"))
+        assertTrue(prompt.contains("Resized"))
+        assertFalse(prompt.contains("t=0.00s"))
     }
 }

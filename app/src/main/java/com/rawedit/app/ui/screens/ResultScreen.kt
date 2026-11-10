@@ -25,12 +25,15 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
@@ -59,8 +62,11 @@ import com.rawedit.app.data.local.VideoEntity
 import com.rawedit.app.ui.components.BigPrimaryButton
 import com.rawedit.app.ui.components.CircleActionButton
 import com.rawedit.app.ui.components.FormatHelpers
+import com.rawedit.app.ui.icons.PixelMascotKind
+import com.rawedit.app.ui.icons.PixelSparkle
 import com.rawedit.app.ui.icons.RawIcon
 import com.rawedit.app.ui.icons.RawIconType
+import com.rawedit.app.ui.icons.RawPixelMascot
 import com.rawedit.app.ui.motion.KineticHeading
 import com.rawedit.app.ui.motion.RawEasings
 import com.rawedit.app.ui.motion.RawPressButton
@@ -79,6 +85,7 @@ fun ResultScreen(
     playCelebration: Boolean,
     onSavedToGallery: (galleryUri: String) -> Unit,
     onMakeAnother: () -> Unit,
+    onDeleteVideo: () -> Unit,
     onBack: () -> Unit
 ) {
     val context = LocalContext.current
@@ -88,6 +95,7 @@ fun ResultScreen(
     var saving by remember { mutableStateOf(false) }
     var saveFeedback by remember { mutableStateOf<String?>(null) }
     var celebratedOnce by remember(video.id) { mutableStateOf(false) }
+    var showDeleteConfirm by remember { mutableStateOf(false) }
 
     val printReveal = remember(video.id) { Animatable(if (playCelebration && animEnabled) 0f else 1f) }
     LaunchedEffect(video.id, playCelebration) {
@@ -134,13 +142,42 @@ fun ResultScreen(
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 CircleActionButton(icon = RawIconType.BACK, onClick = onBack)
-                Text("1920x1080  •  30 fps", style = RawTypography.labelMedium)
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    Text("1920x1080  •  30 fps", style = RawTypography.labelMedium)
+                    CircleActionButton(
+                        icon = RawIconType.TRASH,
+                        onClick = { showDeleteConfirm = true },
+                        size = 40.dp,
+                        backgroundColor = RawColors.ErrorCoral.copy(alpha = 0.14f),
+                        iconTint = RawColors.ErrorCoral
+                    )
+                }
             }
 
-            KineticHeading(
-                words = listOf("Your", "reel", "is", "ready"),
-                style = RawTypography.headlineLarge
-            )
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                KineticHeading(
+                    words = listOf("Your", "reel", "is", "ready"),
+                    style = RawTypography.headlineLarge,
+                    modifier = Modifier.weight(1f)
+                )
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(4.dp)
+                ) {
+                    PixelSparkle(size = 12.dp, phaseOffsetMs = 100)
+                    RawPixelMascot(
+                        kind = PixelMascotKind.PHANTOM_BUDDY,
+                        size = 46.dp
+                    )
+                }
+            }
 
             // ExoPlayer 16:9 frame with snapping corner brackets celebration
             Box(
@@ -326,6 +363,34 @@ fun ResultScreen(
         ResultCelebrationOverlay(
             play = playCelebration,
             modifier = Modifier.fillMaxSize()
+        )
+    }
+
+    if (showDeleteConfirm) {
+        AlertDialog(
+            onDismissRequest = { showDeleteConfirm = false },
+            containerColor = RawColors.HeroSurface,
+            titleContentColor = RawColors.TextPrimary,
+            textContentColor = RawColors.TextMuted,
+            title = { Text("Delete this reel?") },
+            text = {
+                Text("Deletes \"${video.title}\" and its local MP4 from raw_edit. Any copy saved to your phone's Movies folder stays untouched.")
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        showDeleteConfirm = false
+                        onDeleteVideo()
+                    }
+                ) {
+                    Text("Delete", color = RawColors.ErrorCoral)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showDeleteConfirm = false }) {
+                    Text("Cancel", color = RawColors.TextPrimary)
+                }
+            }
         )
     }
 }
