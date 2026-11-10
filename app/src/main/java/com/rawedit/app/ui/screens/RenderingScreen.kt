@@ -9,12 +9,14 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.IntrinsicSize
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.aspectRatio
@@ -25,6 +27,7 @@ import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
@@ -40,14 +43,17 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.draw.drawWithContent
+import androidx.compose.ui.geometry.CornerRadius
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
-import androidx.compose.ui.graphics.drawscope.clipRect
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
@@ -62,7 +68,8 @@ import com.rawedit.app.ui.icons.PixelMascotKind
 import com.rawedit.app.ui.icons.RawIcon
 import com.rawedit.app.ui.icons.RawIconType
 import com.rawedit.app.ui.icons.RawPixelMascot
-import com.rawedit.app.ui.theme.InterFontFamily
+import com.rawedit.app.ui.theme.BricolageCondensedFamily
+import com.rawedit.app.ui.theme.InstrumentSerifFamily
 import com.rawedit.app.ui.theme.JetBrainsMonoFamily
 import com.rawedit.app.ui.theme.RawColors
 import com.rawedit.app.ui.theme.RawTypography
@@ -146,20 +153,21 @@ fun RenderingScreen(
                 .padding(start = 18.dp, end = 18.dp, bottom = 104.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
-            // Header (.bar)
+            // Header (.bar + .hi)
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .height(58.dp),
+                    .height(62.dp),
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Text(
                     text = "Creating your reel",
-                    fontFamily = InterFontFamily,
-                    fontWeight = FontWeight.ExtraBold,
-                    fontSize = 23.sp,
-                    letterSpacing = (-1.0).sp,
+                    fontFamily = InstrumentSerifFamily,
+                    fontWeight = FontWeight.Normal,
+                    fontSize = 31.sp,
+                    lineHeight = 33.sp,
+                    letterSpacing = (-0.3).sp,
                     color = RawColors.TextPrimary
                 )
                 RawPixelMascot(kind = PixelMascotKind.TV_BOT, size = 40.dp)
@@ -177,11 +185,16 @@ fun RenderingScreen(
                     RawPixelMascot(kind = PixelMascotKind.CODE_BOT, size = 86.dp)
                     Text(
                         text = if (state.stage == RenderStage.CANCELLED) "Render cancelled" else "Render failed",
-                        style = RawTypography.headlineMedium.copy(fontWeight = FontWeight.Bold)
+                        fontFamily = InstrumentSerifFamily,
+                        fontWeight = FontWeight.Normal,
+                        fontSize = 34.sp,
+                        lineHeight = 36.sp,
+                        color = RawColors.TextPrimary
                     )
                     Text(
                         text = state.errorMessage ?: "Your files are safe on your phone.",
-                        style = RawTypography.bodyMedium
+                        style = RawTypography.bodyLarge.copy(fontSize = 16.sp),
+                        color = RawColors.TextMuted
                     )
                     Spacer(modifier = Modifier.height(16.dp))
                     Row(
@@ -190,6 +203,7 @@ fun RenderingScreen(
                     ) {
                         BigPrimaryButton(
                             text = "Try again",
+                            height = 60.dp,
                             onClick = {
                                 RenderStateHolder.resetForNewRender(projectId)
                                 RenderService.start(context, projectId)
@@ -198,7 +212,7 @@ fun RenderingScreen(
                         )
                         RawSecondaryButton(
                             text = "Back to steps",
-                            height = 52.dp,
+                            height = 60.dp,
                             onClick = onCancelledOrBack,
                             modifier = Modifier.weight(1f)
                         )
@@ -229,7 +243,7 @@ fun RenderingScreen(
                     }
                 }
 
-                // Giant stacked "REN / DER / ING" filling bottom-to-top from #262B26 to Mint #8CE3A8 (.gi)
+                // Giant condensed "REN / DER / ING" + 4dp Mint progress underline (.gi:after)
                 val targetFraction = (state.progressPercent / 100f).coerceIn(0f, 1f)
                 val smoothFractionState = animateFloatAsState(
                     targetValue = targetFraction,
@@ -239,42 +253,59 @@ fun RenderingScreen(
                 Box(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .height(226.dp)
-                        .clip(RoundedCornerShape(22.dp))
+                        .height(250.dp)
+                        .clip(RoundedCornerShape(20.dp))
                         .background(RawColors.CardSurface)
-                        .border(1.dp, RawColors.Divider, RoundedCornerShape(22.dp)),
+                        .border(1.dp, RawColors.Divider, RoundedCornerShape(20.dp)),
                     contentAlignment = Alignment.Center
                 ) {
-                    val stackedStyle = RawTypography.displayLarge.copy(
-                        fontSize = 68.sp,
-                        lineHeight = 58.sp,
-                        letterSpacing = (-3.0).sp
-                    )
-                    Text(
-                        text = "REN\nDER\nING",
-                        style = stackedStyle,
-                        color = Color(0xFF262B26)
-                    )
-                    Text(
-                        text = "REN\nDER\nING",
-                        style = stackedStyle,
-                        color = RawColors.Mint,
-                        modifier = Modifier.drawWithContent {
-                            val topY = size.height * (1f - smoothFractionState.value)
-                            clipRect(left = 0f, top = topY, right = size.width, bottom = size.height) {
-                                this@drawWithContent.drawContent()
+                    Column(
+                        modifier = Modifier.width(IntrinsicSize.Max),
+                        horizontalAlignment = Alignment.CenterHorizontally
+                    ) {
+                        Text(
+                            text = "REN\nDER\nING",
+                            fontFamily = BricolageCondensedFamily,
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 74.sp,
+                            lineHeight = 68.sp,
+                            letterSpacing = (-2.0).sp,
+                            textAlign = TextAlign.Center,
+                            color = RawColors.TextPrimary
+                        )
+                        Spacer(modifier = Modifier.height(14.dp))
+                        Canvas(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(4.dp)
+                        ) {
+                            val r = CornerRadius(2.dp.toPx(), 2.dp.toPx())
+                            drawRoundRect(
+                                color = RawColors.PillGrey,
+                                topLeft = Offset.Zero,
+                                size = size,
+                                cornerRadius = r
+                            )
+                            val fillW = (size.width * smoothFractionState.value).coerceIn(0f, size.width)
+                            if (fillW > 0f) {
+                                drawRoundRect(
+                                    color = RawColors.Mint,
+                                    topLeft = Offset.Zero,
+                                    size = Size(fillW, size.height),
+                                    cornerRadius = r
+                                )
                             }
                         }
-                    )
+                    }
                 }
 
                 // Telemetry card (.tele) with PHANTOM_BUDDY top-right
                 Box(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .clip(RoundedCornerShape(22.dp))
+                        .clip(RoundedCornerShape(20.dp))
                         .background(RawColors.CardSurface)
-                        .border(1.dp, RawColors.Divider, RoundedCornerShape(22.dp))
+                        .border(1.dp, RawColors.Divider, RoundedCornerShape(20.dp))
                         .padding(16.dp)
                 ) {
                     RawPixelMascot(
@@ -292,23 +323,28 @@ fun RenderingScreen(
                         Text(
                             text = state.statusText,
                             fontFamily = JetBrainsMonoFamily,
-                            fontSize = 12.sp,
+                            fontWeight = FontWeight.Medium,
+                            fontSize = 14.sp,
+                            style = TextStyle(fontFeatureSettings = "tnum"),
                             color = RawColors.TextMuted
                         )
                         Text(
                             text = "${state.progressPercent}%",
                             fontFamily = JetBrainsMonoFamily,
-                            fontWeight = FontWeight.Bold,
+                            fontWeight = FontWeight.Medium,
                             fontSize = 22.sp,
+                            style = TextStyle(fontFeatureSettings = "tnum"),
                             color = RawColors.TextPrimary
                         )
                         val etaText = if (state.progressPercent >= 5 && state.etaSeconds != null && state.stage == RenderStage.DRAWING_FRAMES) {
-                            "  •  About ${FormatHelpers.formatDuration(state.etaSeconds!!.toDouble())} left"
+                            "  \u2022  About ${FormatHelpers.formatDuration(state.etaSeconds!!.toDouble())} left"
                         } else ""
                         Text(
                             text = "Elapsed: ${FormatHelpers.formatDuration(state.elapsedSeconds.toDouble())}$etaText",
                             fontFamily = JetBrainsMonoFamily,
-                            fontSize = 12.sp,
+                            fontWeight = FontWeight.Medium,
+                            fontSize = 14.sp,
+                            style = TextStyle(fontFeatureSettings = "tnum"),
                             color = RawColors.TextMuted
                         )
                     }
@@ -331,7 +367,7 @@ fun RenderingScreen(
             ) {
                 RawSecondaryButton(
                     text = "Cancel",
-                    height = 52.dp,
+                    height = 60.dp,
                     onClick = { showCancelConfirm = true }
                 )
             }

@@ -73,6 +73,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.rawedit.app.ui.icons.RawIcon
 import com.rawedit.app.ui.icons.RawIconType
+import com.rawedit.app.ui.theme.BricolageFamily
 import com.rawedit.app.ui.theme.JetBrainsMonoFamily
 import com.rawedit.app.ui.theme.RawColors
 import com.rawedit.app.ui.theme.RawTypography
@@ -191,6 +192,7 @@ fun KineticHeading(
     words: List<String>,
     modifier: Modifier = Modifier,
     style: TextStyle = RawTypography.headlineLarge,
+    highlightLastWord: Boolean = false,
     triggerKey: Any = words
 ) {
     val animEnabled = rememberAnimationsEnabled()
@@ -206,6 +208,7 @@ fun KineticHeading(
     }
 
     val count = words.size.coerceAtLeast(1)
+    val safeLineHeight = if (style.fontSize.isSp) (style.fontSize.value * 1.08f).sp else style.lineHeight
 
     Layout(
         modifier = modifier,
@@ -213,23 +216,28 @@ fun KineticHeading(
             words.forEachIndexed { idx, word ->
                 val startAt = (idx.toFloat() / (count + 1.5f)).coerceAtMost(0.45f)
                 val span = (1f - startAt).coerceAtLeast(0.35f)
+                val isLast = idx == words.lastIndex
+                val wordColor = if (highlightLastWord && isLast) RawColors.Mint else style.color
                 Box(modifier = Modifier.clipToBounds()) {
                     Text(
                         text = word,
-                        style = style,
+                        style = style.copy(lineHeight = safeLineHeight),
+                        color = wordColor,
                         maxLines = 1,
                         softWrap = false,
-                        modifier = Modifier.graphicsLayer {
-                            val p = ((master.value - startAt) / span).coerceIn(0f, 1f)
-                            translationY = (1f - p) * 24f
-                            alpha = p
-                        }
+                        modifier = Modifier
+                            .padding(bottom = 2.dp)
+                            .graphicsLayer {
+                                val p = ((master.value - startAt) / span).coerceIn(0f, 1f)
+                                translationY = (1f - p) * 24f
+                                alpha = p
+                            }
                     )
                 }
             }
         }
     ) { measurables, constraints ->
-        val hGap = 8.dp.roundToPx()
+        val hGap = 9.dp.roundToPx()
         val vGap = 2.dp.roundToPx()
         val maxW = if (constraints.hasBoundedWidth) constraints.maxWidth else Int.MAX_VALUE
         val childConstraints = constraints.copy(minWidth = 0, minHeight = 0)
@@ -371,7 +379,7 @@ fun SwipeToCreateSlider(
     val animEnabled = rememberAnimationsEnabled()
 
     var widthPx by remember { mutableFloatStateOf(1f) }
-    val knobSizeDp = 48.dp
+    val knobSizeDp = 52.dp
     val density = LocalDensity.current
     val padPx = with(density) { 4.dp.toPx() }
     val knobPx = with(density) { knobSizeDp.toPx() }
@@ -417,11 +425,11 @@ fun SwipeToCreateSlider(
     Box(
         modifier = modifier
             .fillMaxWidth()
-            .height(58.dp)
+            .height(62.dp)
             .graphicsLayer { translationX = shakeOffset.value }
-            .clip(RoundedCornerShape(29.dp))
+            .clip(RoundedCornerShape(16.dp))
             .background(RawColors.RaisedCard)
-            .border(1.dp, RawColors.Divider, RoundedCornerShape(29.dp))
+            .border(1.dp, RawColors.Divider, RoundedCornerShape(16.dp))
             .onSizeChanged { widthPx = it.width.toFloat() }
             .then(
                 if (!unlocked) {
@@ -437,13 +445,13 @@ fun SwipeToCreateSlider(
         // GPU Draw-phase trail & chevrons (ZERO recompositions while dragging or idling!)
         Canvas(modifier = Modifier.fillMaxSize()) {
             val ratio = ratioAnim.value
-            val fillWidth = (knobPx + padPx + maxTravelPx * ratio).coerceIn(knobPx, size.width)
+            val fillWidth = (knobPx + padPx * 2f + maxTravelPx * ratio).coerceIn(knobPx, size.width)
             if (unlocked && ratio > 0.01f) {
                 drawRoundRect(
                     color = RawColors.Mint,
-                    topLeft = Offset(0f, 2.dp.toPx()),
-                    size = Size(fillWidth, size.height - 4.dp.toPx()),
-                    cornerRadius = CornerRadius(27.dp.toPx())
+                    topLeft = Offset.Zero,
+                    size = Size(fillWidth, size.height),
+                    cornerRadius = CornerRadius(16.dp.toPx())
                 )
             }
         }
@@ -452,7 +460,7 @@ fun SwipeToCreateSlider(
         Row(
             modifier = Modifier
                 .fillMaxSize()
-                .padding(start = 58.dp, end = 14.dp),
+                .padding(start = 62.dp, end = 14.dp),
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically
         ) {
@@ -483,7 +491,9 @@ fun SwipeToCreateSlider(
                 val labelText = if (showReleaseLabel) "Release to create" else "Swipe to create"
                 Text(
                     text = labelText,
-                    style = RawTypography.labelLarge.copy(fontSize = 13.5.sp, fontWeight = FontWeight.SemiBold),
+                    fontFamily = BricolageFamily,
+                    fontWeight = FontWeight.SemiBold,
+                    fontSize = 17.sp,
                     color = when {
                         !unlocked -> Color(0xFF6E746E)
                         pastMidpoint -> RawColors.PrimaryBtnText
@@ -495,15 +505,16 @@ fun SwipeToCreateSlider(
             if (showRightTag) {
                 Box(
                     modifier = Modifier
-                        .clip(RoundedCornerShape(99.dp))
+                        .clip(RoundedCornerShape(6.dp))
                         .background(RawColors.PillGrey)
-                        .padding(horizontal = 9.dp, vertical = 4.dp)
+                        .padding(horizontal = 9.dp, vertical = 5.dp)
                 ) {
                     Text(
                         text = rightTag,
                         fontFamily = JetBrainsMonoFamily,
                         fontWeight = FontWeight.SemiBold,
-                        fontSize = 10.sp,
+                        fontSize = 12.5.sp,
+                        style = TextStyle(fontFeatureSettings = "tnum"),
                         color = RawColors.TextPrimary
                     )
                 }
@@ -555,7 +566,7 @@ fun SwipeToCreateSlider(
             RawIcon(
                 type = if (unlocked) RawIconType.ARROW_RIGHT else RawIconType.LOCK,
                 tint = if (unlocked) RawColors.PrimaryBtnText else RawColors.TextMuted,
-                size = 20.dp
+                size = 22.dp
             )
         }
     }

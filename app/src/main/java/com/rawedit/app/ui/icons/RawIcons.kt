@@ -315,10 +315,10 @@ fun RawIcon(
     modifier: Modifier = Modifier,
     size: Dp = 22.dp,
     tint: Color = RawColors.TextPrimary,
-    strokeWidth: Dp = 2.dp
+    strokeWidth: Dp = 2.2.dp
 ) {
-    val effectiveStroke = if (strokeWidth == 2.dp && size < 18.dp) {
-        (size * 0.1f).coerceAtLeast(1.4.dp)
+    val effectiveStroke = if (strokeWidth == 2.2.dp && size < 18.dp) {
+        (size * 0.11f).coerceAtLeast(1.4.dp)
     } else {
         strokeWidth
     }

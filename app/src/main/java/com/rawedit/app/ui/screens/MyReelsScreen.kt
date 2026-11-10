@@ -24,7 +24,6 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
-import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
@@ -51,6 +50,7 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
@@ -63,6 +63,7 @@ import coil.compose.AsyncImage
 import coil.request.ImageRequest
 import com.rawedit.app.data.local.ProjectEntity
 import com.rawedit.app.data.local.VideoEntity
+import com.rawedit.app.ui.components.BigPrimaryButton
 import com.rawedit.app.ui.components.CircleActionButton
 import com.rawedit.app.ui.components.FormatHelpers
 import com.rawedit.app.ui.components.MorphingFilterChips
@@ -74,12 +75,31 @@ import com.rawedit.app.ui.icons.RawIconType
 import com.rawedit.app.ui.icons.RawPixelMascot
 import com.rawedit.app.ui.motion.KineticHeading
 import com.rawedit.app.ui.motion.RawEasings
-import com.rawedit.app.ui.motion.RawPressButton
 import com.rawedit.app.ui.motion.rememberAnimationsEnabled
+import com.rawedit.app.ui.theme.BricolageCondensedFamily
+import com.rawedit.app.ui.theme.BricolageFamily
+import com.rawedit.app.ui.theme.InstrumentSerifFamily
 import com.rawedit.app.ui.theme.JetBrainsMonoFamily
 import com.rawedit.app.ui.theme.RawColors
 import com.rawedit.app.ui.theme.RawTypography
 import java.io.File
+
+private val STOP_WORDS = setOf(
+    "the", "a", "an", "of", "and", "or", "to", "in", "on", "for",
+    "is", "are", "why", "how", "what", "when", "with", "your", "my",
+    "reel", "typography", "video", "untitled"
+)
+
+private fun buildReelArtLabel(title: String): String {
+    val tokens = title
+        .split(Regex("[^A-Za-z0-9]+"))
+        .map { it.trim() }
+        .filter { it.isNotEmpty() }
+    val picked = tokens.firstOrNull { token ->
+        token.lowercase() !in STOP_WORDS && token.any { it.isLetter() }
+    } ?: tokens.lastOrNull { token -> token.any { it.isLetter() } } ?: "RAW"
+    return picked.uppercase().take(8)
+}
 
 @OptIn(ExperimentalFoundationApi::class, ExperimentalMaterial3Api::class)
 @Composable
@@ -118,7 +138,7 @@ fun MyReelsScreen(
             .background(RawColors.BgPrimary)
             .statusBarsPadding()
     ) {
-        // Header matching R.reels
+        // Editorial Serif Header matching R.reels
         Row(
             modifier = Modifier
                 .fillMaxWidth()
@@ -129,15 +149,22 @@ fun MyReelsScreen(
             Column(modifier = Modifier.weight(1f)) {
                 KineticHeading(
                     words = listOf("My", "reels"),
-                    style = RawTypography.headlineLarge.copy(fontSize = 30.sp)
+                    style = RawTypography.headlineLarge.copy(
+                        fontSize = 48.sp,
+                        lineHeight = 50.sp,
+                        letterSpacing = (-1.1).sp
+                    )
                 )
-                Spacer(modifier = Modifier.height(5.dp))
+                Spacer(modifier = Modifier.height(6.dp))
+                val draftsLabel = if (inProgressProjects.size == 1) "draft" else "drafts"
+                val finishedLabel = if (videos.size == 1) "finished video" else "finished videos"
                 Text(
-                    text = "${inProgressProjects.size} DRAFTS  •  ${videos.size} FINISHED VIDEOS",
+                    text = "${inProgressProjects.size} $draftsLabel  \u2022  ${videos.size} $finishedLabel",
                     fontFamily = JetBrainsMonoFamily,
-                    fontWeight = FontWeight.SemiBold,
-                    fontSize = 10.sp,
-                    letterSpacing = 1.0.sp,
+                    fontWeight = FontWeight.Medium,
+                    fontSize = 12.5.sp,
+                    letterSpacing = 0.1.sp,
+                    style = TextStyle(fontFeatureSettings = "tnum"),
                     color = RawColors.TextMuted
                 )
             }
@@ -147,7 +174,7 @@ fun MyReelsScreen(
             )
         }
 
-        // All / Drafts / Finished Mint filter pills
+        // All / Drafts / Finished outlined/Mint filter pills
         Box(modifier = Modifier.padding(horizontal = 18.dp, vertical = 4.dp)) {
             MorphingFilterChips(
                 options = listOf("All", "Drafts", "Finished"),
@@ -190,12 +217,22 @@ fun MyReelsScreen(
                                 2 -> "No finished reels yet"
                                 else -> "Nothing here yet"
                             },
-                            style = RawTypography.titleLarge.copy(fontSize = 19.sp, fontWeight = FontWeight.Bold)
+                            fontFamily = InstrumentSerifFamily,
+                            fontWeight = FontWeight.Normal,
+                            fontSize = 34.sp,
+                            lineHeight = 36.sp,
+                            letterSpacing = (-0.5).sp,
+                            color = RawColors.TextPrimary,
+                            textAlign = TextAlign.Center
                         )
-                        Spacer(modifier = Modifier.height(6.dp))
+                        Spacer(modifier = Modifier.height(8.dp))
                         Text(
                             text = "Tap Create to make your first reel. Drafts and finished videos will live here.",
-                            style = RawTypography.bodyMedium,
+                            fontFamily = BricolageFamily,
+                            fontWeight = FontWeight.Medium,
+                            fontSize = 16.5.sp,
+                            lineHeight = 24.5.sp,
+                            color = RawColors.TextMuted,
                             textAlign = TextAlign.Center
                         )
                     }
@@ -204,8 +241,8 @@ fun MyReelsScreen(
         } else {
             LazyColumn(
                 modifier = Modifier.fillMaxSize(),
-                contentPadding = PaddingValues(start = 18.dp, end = 18.dp, bottom = 110.dp),
-                verticalArrangement = Arrangement.spacedBy(10.dp)
+                contentPadding = PaddingValues(start = 18.dp, end = 18.dp, bottom = 120.dp),
+                verticalArrangement = Arrangement.spacedBy(12.dp)
             ) {
                 items(
                     items = displayItems,
@@ -237,9 +274,9 @@ fun MyReelsScreen(
                                     Box(
                                         modifier = Modifier
                                             .fillMaxSize()
-                                            .clip(RoundedCornerShape(22.dp))
+                                            .clip(RoundedCornerShape(20.dp))
                                             .background(RawColors.ErrorSoft)
-                                            .border(1.dp, RawColors.ErrorBorder, RoundedCornerShape(22.dp))
+                                            .border(1.dp, RawColors.ErrorBorder, RoundedCornerShape(20.dp))
                                             .padding(end = 22.dp),
                                         contentAlignment = Alignment.CenterEnd
                                     ) {
@@ -274,9 +311,9 @@ fun MyReelsScreen(
                                     Box(
                                         modifier = Modifier
                                             .fillMaxSize()
-                                            .clip(RoundedCornerShape(22.dp))
+                                            .clip(RoundedCornerShape(18.dp))
                                             .background(RawColors.ErrorSoft)
-                                            .border(1.dp, RawColors.ErrorBorder, RoundedCornerShape(22.dp))
+                                            .border(1.dp, RawColors.ErrorBorder, RoundedCornerShape(18.dp))
                                             .padding(end = 22.dp),
                                         contentAlignment = Alignment.CenterEnd
                                     ) {
@@ -303,6 +340,7 @@ fun MyReelsScreen(
     actionTarget?.let { target ->
         ModalBottomSheet(
             onDismissRequest = { actionTarget = null },
+            shape = RoundedCornerShape(topStart = 20.dp, topEnd = 20.dp),
             containerColor = RawColors.CardSurface,
             contentColor = RawColors.TextPrimary
         ) {
@@ -313,7 +351,12 @@ fun MyReelsScreen(
             ) {
                 Text(
                     text = target.title,
-                    style = RawTypography.titleLarge.copy(fontWeight = FontWeight.ExtraBold)
+                    fontFamily = BricolageFamily,
+                    fontWeight = FontWeight.SemiBold,
+                    fontSize = 22.sp,
+                    color = RawColors.TextPrimary,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis
                 )
                 Spacer(modifier = Modifier.height(10.dp))
                 SheetActionRow(
@@ -372,24 +415,34 @@ fun MyReelsScreen(
                 modifier = Modifier
                     .fillMaxWidth()
                     .padding(horizontal = 26.dp)
-                    .clip(RoundedCornerShape(24.dp))
+                    .clip(RoundedCornerShape(20.dp))
                     .background(RawColors.CardSurface)
-                    .border(1.dp, RawColors.DividerStrong, RoundedCornerShape(24.dp))
+                    .border(1.dp, RawColors.DividerStrong, RoundedCornerShape(20.dp))
                     .padding(24.dp)
             ) {
                 Text(
                     text = "Rename reel",
-                    style = RawTypography.headlineMedium.copy(fontWeight = FontWeight.ExtraBold)
+                    fontFamily = InstrumentSerifFamily,
+                    fontWeight = FontWeight.Normal,
+                    fontSize = 29.sp,
+                    lineHeight = 32.sp,
+                    color = RawColors.TextPrimary
                 )
                 Spacer(modifier = Modifier.height(14.dp))
                 OutlinedTextField(
                     value = titleDraft,
                     onValueChange = { if (it.length <= 40) titleDraft = it },
                     singleLine = true,
-                    shape = RoundedCornerShape(16.dp),
+                    textStyle = TextStyle(
+                        fontFamily = BricolageFamily,
+                        fontWeight = FontWeight.SemiBold,
+                        fontSize = 19.sp,
+                        color = RawColors.TextPrimary
+                    ),
+                    shape = RoundedCornerShape(14.dp),
                     colors = OutlinedTextFieldDefaults.colors(
                         focusedBorderColor = RawColors.MintFocus,
-                        unfocusedBorderColor = RawColors.Divider,
+                        unfocusedBorderColor = RawColors.DividerStrong,
                         focusedContainerColor = RawColors.RaisedCard,
                         unfocusedContainerColor = RawColors.RaisedCard,
                         focusedTextColor = RawColors.TextPrimary,
@@ -405,11 +458,13 @@ fun MyReelsScreen(
                 ) {
                     RawSecondaryButton(
                         text = "Cancel",
-                        height = 42.dp,
+                        height = 50.dp,
                         onClick = { renameTarget = null },
                         modifier = Modifier.weight(1f)
                     )
-                    RawPressButton(
+                    BigPrimaryButton(
+                        text = "Save",
+                        height = 50.dp,
                         onClick = {
                             if (titleDraft.trim().isNotEmpty()) {
                                 onRenameVideo(target.id, titleDraft.trim())
@@ -417,22 +472,7 @@ fun MyReelsScreen(
                             renameTarget = null
                         },
                         modifier = Modifier.weight(1f)
-                    ) {
-                        Box(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .height(42.dp)
-                                .clip(RoundedCornerShape(99.dp))
-                                .background(RawColors.Mint),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Text(
-                                text = "Save",
-                                style = RawTypography.labelLarge.copy(fontSize = 13.sp, fontWeight = FontWeight.SemiBold),
-                                color = RawColors.PrimaryBtnText
-                            )
-                        }
-                    }
+                    )
                 }
             }
         }
@@ -476,18 +516,18 @@ private fun DraftProjectRow(
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .clip(RoundedCornerShape(22.dp))
+            .clip(RoundedCornerShape(20.dp))
             .background(RawColors.CardSurface)
-            .border(1.dp, RawColors.Divider, RoundedCornerShape(22.dp))
+            .border(1.dp, RawColors.Divider, RoundedCornerShape(20.dp))
             .clickable(onClick = onOpen)
-            .padding(12.dp),
+            .padding(horizontal = 14.dp, vertical = 16.dp),
         verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(12.dp)
+        horizontalArrangement = Arrangement.spacedBy(13.dp)
     ) {
         Box(
             modifier = Modifier
-                .size(52.dp)
-                .clip(RoundedCornerShape(14.dp))
+                .size(60.dp)
+                .clip(RoundedCornerShape(12.dp))
                 .background(RawColors.RaisedCard),
             contentAlignment = Alignment.Center
         ) {
@@ -501,47 +541,47 @@ private fun DraftProjectRow(
         }
 
         Column(modifier = Modifier.weight(1f)) {
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            Text(
+                text = project.title.ifBlank { "Untitled Reel" },
+                fontFamily = BricolageFamily,
+                fontWeight = FontWeight.SemiBold,
+                fontSize = 18.sp,
+                lineHeight = 22.sp,
+                color = RawColors.TextPrimary,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
+            Spacer(modifier = Modifier.height(6.dp))
+            Box(
+                modifier = Modifier
+                    .clip(RoundedCornerShape(6.dp))
+                    .background(RawColors.RaisedCard)
+                    .padding(horizontal = 10.dp, vertical = 4.dp)
             ) {
                 Text(
-                    text = project.title.ifBlank { "Untitled Reel" },
-                    style = RawTypography.titleMedium.copy(fontSize = 15.sp, fontWeight = FontWeight.Bold),
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                    modifier = Modifier.weight(1f, fill = false)
+                    text = "Draft",
+                    fontFamily = JetBrainsMonoFamily,
+                    fontWeight = FontWeight.Medium,
+                    fontSize = 12.sp,
+                    color = RawColors.TextMuted
                 )
-                Box(
-                    modifier = Modifier
-                        .clip(RoundedCornerShape(99.dp))
-                        .background(RawColors.RaisedCard)
-                        .padding(horizontal = 8.dp, vertical = 3.dp)
-                ) {
-                    Text(
-                        text = "DRAFT",
-                        fontFamily = JetBrainsMonoFamily,
-                        fontWeight = FontWeight.SemiBold,
-                        fontSize = 9.sp,
-                        letterSpacing = 0.6.sp,
-                        color = RawColors.TextMuted
-                    )
-                }
             }
-            Spacer(modifier = Modifier.height(3.dp))
+            Spacer(modifier = Modifier.height(5.dp))
             val sub = buildString {
                 if (project.audioDurationSec > 0.0) {
                     append(FormatHelpers.formatDuration(project.audioDurationSec))
                 } else {
                     append("No audio yet")
                 }
-                append("  •  ")
+                append("  \u2022  ")
                 append(if (project.code.isNotBlank()) "Code ready" else "Waiting for code")
             }
             Text(
                 text = sub,
                 fontFamily = JetBrainsMonoFamily,
-                fontSize = 10.5.sp,
+                fontWeight = FontWeight.Medium,
+                fontSize = 12.5.sp,
+                style = TextStyle(fontFeatureSettings = "tnum"),
                 color = RawColors.TextMuted,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis
@@ -575,34 +615,33 @@ private fun VideoLibraryRow(
     val hasThumb = remember(video.thumbnailPath) {
         video.thumbnailPath.isNotBlank() && File(video.thumbnailPath).exists()
     }
-    Row(
+    val artLabel = remember(video.title) { buildReelArtLabel(video.title) }
+
+    // Full-width editorial finished reel card (.rcz)
+    Column(
         modifier = Modifier
             .fillMaxWidth()
-            .clip(RoundedCornerShape(22.dp))
+            .clip(RoundedCornerShape(18.dp))
             .background(RawColors.CardSurface)
-            .border(1.dp, RawColors.Divider, RoundedCornerShape(22.dp))
+            .border(1.dp, RawColors.Divider, RoundedCornerShape(18.dp))
             .combinedClickable(
                 onClick = onClick,
                 onLongClick = onLongClick
             )
-            .padding(12.dp),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(12.dp)
     ) {
-        // 16:9 thumbnail decoded cleanly to 320x180 + centered Mint play circle (.thb .pc)
+        // Top 16:9 thumbnail box (.rcz-th)
         Box(
             modifier = Modifier
-                .width(112.dp)
+                .fillMaxWidth()
                 .aspectRatio(16f / 9f)
-                .clip(RoundedCornerShape(10.dp))
-                .background(Color.Black),
+                .background(RawColors.CodeSurface),
             contentAlignment = Alignment.Center
         ) {
             if (hasThumb) {
                 val thumbReq = remember(video.thumbnailPath) {
                     ImageRequest.Builder(context)
                         .data(File(video.thumbnailPath))
-                        .size(320, 180)
+                        .size(640, 360)
                         .build()
                 }
                 AsyncImage(
@@ -612,62 +651,105 @@ private fun VideoLibraryRow(
                     modifier = Modifier.fillMaxSize()
                 )
             } else {
-                RawIcon(RawIconType.FILM, size = 22.dp, tint = RawColors.TextMuted)
+                Text(
+                    text = artLabel,
+                    fontFamily = BricolageCondensedFamily,
+                    fontWeight = FontWeight.ExtraBold,
+                    fontSize = 48.sp,
+                    letterSpacing = (-1.5).sp,
+                    color = RawColors.TextPrimary,
+                    maxLines = 1,
+                    softWrap = false
+                )
             }
 
+            // Top-left 34dp translucent play circle (.rcz-play)
             Box(
                 modifier = Modifier
-                    .size(28.dp)
+                    .align(Alignment.TopStart)
+                    .padding(start = 10.dp, top = 10.dp)
+                    .size(34.dp)
                     .clip(CircleShape)
-                    .background(Color.Black.copy(alpha = 0.45f))
-                    .padding(2.dp)
-                    .clip(CircleShape)
-                    .background(RawColors.Mint),
+                    .background(Color(0x990A0C0A))
+                    .border(1.dp, Color(0x38FFFFFF), CircleShape),
                 contentAlignment = Alignment.Center
             ) {
                 RawIcon(
                     type = RawIconType.PLAY,
-                    size = 12.dp,
-                    tint = RawColors.PrimaryBtnText
+                    size = 15.dp,
+                    tint = Color.White
+                )
+            }
+
+            // Bottom-right duration badge (.rcz-dur)
+            Box(
+                modifier = Modifier
+                    .align(Alignment.BottomEnd)
+                    .padding(end = 8.dp, bottom = 8.dp)
+                    .clip(RoundedCornerShape(6.dp))
+                    .background(Color(0xBD000000))
+                    .padding(horizontal = 7.dp, vertical = 3.dp)
+            ) {
+                Text(
+                    text = FormatHelpers.formatDuration(video.durationSec),
+                    fontFamily = JetBrainsMonoFamily,
+                    fontWeight = FontWeight.Medium,
+                    fontSize = 12.5.sp,
+                    letterSpacing = 0.2.sp,
+                    style = TextStyle(fontFeatureSettings = "tnum"),
+                    color = Color.White
                 )
             }
         }
 
-        Column(modifier = Modifier.weight(1f)) {
-            Text(
-                text = video.title,
-                style = RawTypography.titleMedium.copy(fontSize = 15.sp, fontWeight = FontWeight.Bold),
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis
-            )
-            Spacer(modifier = Modifier.height(3.dp))
-            Text(
-                text = "${FormatHelpers.formatDuration(video.durationSec)}  •  ${FormatHelpers.formatFileSize(video.sizeBytes)}",
-                fontFamily = JetBrainsMonoFamily,
-                fontSize = 10.5.sp,
-                color = RawColors.TextMuted
-            )
-            Spacer(modifier = Modifier.height(2.dp))
-            Text(
-                text = FormatHelpers.formatDate(video.createdAt),
-                fontFamily = JetBrainsMonoFamily,
-                fontSize = 10.5.sp,
-                color = RawColors.TextMuted
-            )
-        }
+        // Bottom metadata + actions row (.rcz-meta)
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(start = 14.dp, end = 14.dp, top = 13.dp, bottom = 14.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(10.dp)
+        ) {
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    text = video.title,
+                    fontFamily = BricolageFamily,
+                    fontWeight = FontWeight.SemiBold,
+                    fontSize = 18.5.sp,
+                    lineHeight = 23.sp,
+                    color = RawColors.TextPrimary,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+                Spacer(modifier = Modifier.height(5.dp))
+                Text(
+                    text = "${FormatHelpers.formatFileSize(video.sizeBytes)}  \u2022  ${FormatHelpers.formatDate(video.createdAt)}",
+                    fontFamily = JetBrainsMonoFamily,
+                    fontWeight = FontWeight.Medium,
+                    fontSize = 12.5.sp,
+                    style = TextStyle(fontFeatureSettings = "tnum"),
+                    color = RawColors.TextMuted,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+            }
 
-        Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-            CircleActionButton(
-                icon = RawIconType.TRASH,
-                size = 36.dp,
-                iconTint = RawColors.ErrorCoral,
-                onClick = onDelete
-            )
-            CircleActionButton(
-                icon = RawIconType.MORE_VERT,
-                size = 36.dp,
-                onClick = onMoreClick
-            )
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                CircleActionButton(
+                    icon = RawIconType.TRASH,
+                    size = 36.dp,
+                    iconTint = RawColors.ErrorCoral,
+                    onClick = onDelete
+                )
+                CircleActionButton(
+                    icon = RawIconType.MORE_VERT,
+                    size = 36.dp,
+                    onClick = onMoreClick
+                )
+            }
         }
     }
 }
@@ -684,9 +766,9 @@ fun SheetActionRow(
         modifier = Modifier
             .fillMaxWidth()
             .clickable(onClick = onClick)
-            .padding(vertical = 12.dp, horizontal = 4.dp),
+            .padding(vertical = 14.dp, horizontal = 4.dp),
         verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(14.dp)
+        horizontalArrangement = Arrangement.spacedBy(15.dp)
     ) {
         Box(
             modifier = Modifier
@@ -700,7 +782,9 @@ fun SheetActionRow(
         }
         Text(
             text = label,
-            style = RawTypography.titleMedium.copy(fontWeight = FontWeight.SemiBold),
+            fontFamily = BricolageFamily,
+            fontWeight = FontWeight.SemiBold,
+            fontSize = 17.sp,
             color = tint
         )
     }

@@ -25,11 +25,11 @@ object RawColors {
     val RaisedCard = Color(0xFF1B1E1B)
     val CodeSurface = Color(0xFF0E100E)
     val PillGrey = Color(0xFF242824)
-    val DockBg = Color(0xF0161916)
+    val DockBg = Color(0xE6161916)
     val DotGrid = Color(0xFF1F231F)
 
-    val TextPrimary = Color(0xFFEFF3EE)
-    val TextMuted = Color(0xFF98A098)
+    val TextPrimary = Color(0xFFF7FAF6)
+    val TextMuted = Color(0xFFB3BBB2)
 
     val Divider = Color(0x13FFFFFF)       // rgba(255,255,255,0.075)
     val DividerStrong = Color(0x24FFFFFF) // rgba(255,255,255,0.14)
@@ -48,97 +48,112 @@ object RawColors {
     val ErrorBorder = Color(0x38FF8F80)   // rgba(255,143,128,0.22)
 }
 
-val InterFontFamily = FontFamily(
-    Font(R.font.inter_regular, FontWeight.Normal),
-    Font(R.font.inter_medium, FontWeight.Medium),
-    Font(R.font.inter_semibold, FontWeight.SemiBold),
-    Font(R.font.inter_bold, FontWeight.Bold),
-    Font(R.font.inter_extrabold, FontWeight.ExtraBold)
+val InstrumentSerifFamily = FontFamily(
+    Font(R.font.instrument_serif_regular, FontWeight.Normal)
+)
+
+val BricolageFamily = FontFamily(
+    Font(R.font.bricolage_grotesque_regular, FontWeight.Normal),
+    Font(R.font.bricolage_grotesque_medium, FontWeight.Medium),
+    Font(R.font.bricolage_grotesque_semibold, FontWeight.SemiBold),
+    Font(R.font.bricolage_grotesque_bold, FontWeight.Bold),
+    Font(R.font.bricolage_grotesque_extrabold, FontWeight.ExtraBold)
+)
+
+val BricolageCondensedFamily = FontFamily(
+    Font(R.font.bricolage_grotesque_condensed_medium, FontWeight.Medium),
+    Font(R.font.bricolage_grotesque_condensed_bold, FontWeight.Bold),
+    Font(R.font.bricolage_grotesque_condensed_extrabold, FontWeight.ExtraBold)
 )
 
 val JetBrainsMonoFamily = FontFamily(
     Font(R.font.jetbrains_mono_regular, FontWeight.Normal),
     Font(R.font.jetbrains_mono_medium, FontWeight.Medium),
+    Font(R.font.jetbrains_mono_semibold, FontWeight.SemiBold),
     Font(R.font.jetbrains_mono_bold, FontWeight.Bold)
 )
 
 val RawTypography = Typography(
     displayLarge = TextStyle(
-        fontFamily = InterFontFamily,
-        fontWeight = FontWeight.ExtraBold,
-        fontSize = 36.sp,
-        lineHeight = 38.sp,
-        letterSpacing = (-1.6).sp,
+        fontFamily = InstrumentSerifFamily,
+        fontWeight = FontWeight.Normal,
+        fontSize = 46.sp,
+        lineHeight = 48.sp,
+        letterSpacing = (-0.9).sp,
         color = RawColors.TextPrimary
     ),
     headlineLarge = TextStyle(
-        fontFamily = InterFontFamily,
-        fontWeight = FontWeight.ExtraBold,
-        fontSize = 31.sp,
-        lineHeight = 33.sp,
-        letterSpacing = (-1.3).sp,
+        fontFamily = InstrumentSerifFamily,
+        fontWeight = FontWeight.Normal,
+        fontSize = 50.sp,
+        lineHeight = 52.sp,
+        letterSpacing = (-1.0).sp,
         color = RawColors.TextPrimary
     ),
     headlineMedium = TextStyle(
-        fontFamily = InterFontFamily,
-        fontWeight = FontWeight.Bold,
-        fontSize = 21.sp,
-        lineHeight = 26.sp,
-        letterSpacing = (-0.6).sp,
+        fontFamily = InstrumentSerifFamily,
+        fontWeight = FontWeight.Normal,
+        fontSize = 29.sp,
+        lineHeight = 32.sp,
+        letterSpacing = (-0.3).sp,
         color = RawColors.TextPrimary
     ),
     titleLarge = TextStyle(
-        fontFamily = InterFontFamily,
-        fontWeight = FontWeight.Bold,
-        fontSize = 18.sp,
-        lineHeight = 23.sp,
-        letterSpacing = (-0.4).sp,
+        fontFamily = BricolageFamily,
+        fontWeight = FontWeight.SemiBold,
+        fontSize = 20.sp,
+        lineHeight = 25.sp,
+        letterSpacing = 0.sp,
         color = RawColors.TextPrimary
     ),
     titleMedium = TextStyle(
-        fontFamily = InterFontFamily,
+        fontFamily = BricolageFamily,
         fontWeight = FontWeight.SemiBold,
-        fontSize = 15.5.sp,
-        lineHeight = 21.sp,
-        letterSpacing = (-0.2).sp,
+        fontSize = 18.sp,
+        lineHeight = 23.sp,
+        letterSpacing = 0.sp,
         color = RawColors.TextPrimary
     ),
     bodyLarge = TextStyle(
-        fontFamily = InterFontFamily,
-        fontWeight = FontWeight.Normal,
-        fontSize = 14.5.sp,
-        lineHeight = 21.sp,
+        fontFamily = BricolageFamily,
+        fontWeight = FontWeight.Medium,
+        fontSize = 16.5.sp,
+        lineHeight = 24.sp,
+        letterSpacing = 0.sp,
         color = RawColors.TextPrimary
     ),
     bodyMedium = TextStyle(
-        fontFamily = InterFontFamily,
-        fontWeight = FontWeight.Normal,
-        fontSize = 13.5.sp,
-        lineHeight = 19.sp,
+        fontFamily = BricolageFamily,
+        fontWeight = FontWeight.Medium,
+        fontSize = 15.5.sp,
+        lineHeight = 23.sp,
+        letterSpacing = 0.sp,
         color = RawColors.TextMuted
     ),
     labelLarge = TextStyle(
-        fontFamily = InterFontFamily,
-        fontWeight = FontWeight.Bold,
-        fontSize = 14.5.sp,
-        lineHeight = 19.sp,
-        letterSpacing = (-0.1).sp,
+        fontFamily = BricolageFamily,
+        fontWeight = FontWeight.SemiBold,
+        fontSize = 18.sp,
+        lineHeight = 22.sp,
+        letterSpacing = 0.sp,
         color = RawColors.TextPrimary
     ),
     labelMedium = TextStyle(
         fontFamily = JetBrainsMonoFamily,
         fontWeight = FontWeight.Medium,
-        fontSize = 11.5.sp,
-        lineHeight = 16.sp,
-        letterSpacing = 0.3.sp,
+        fontSize = 13.sp,
+        lineHeight = 18.sp,
+        letterSpacing = 0.15.sp,
+        fontFeatureSettings = "tnum",
         color = RawColors.TextMuted
     ),
     labelSmall = TextStyle(
         fontFamily = JetBrainsMonoFamily,
         fontWeight = FontWeight.SemiBold,
-        fontSize = 10.sp,
-        lineHeight = 14.sp,
-        letterSpacing = 0.5.sp,
+        fontSize = 11.5.sp,
+        lineHeight = 15.sp,
+        letterSpacing = 0.15.sp,
+        fontFeatureSettings = "tnum",
         color = RawColors.TextMuted
     )
 )

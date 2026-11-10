@@ -48,7 +48,6 @@ import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
-import com.rawedit.app.ui.motion.RawPressButton
 import com.rawedit.app.ui.theme.RawColors
 import com.rawedit.app.ui.theme.RawTypography
 import kotlin.math.min
@@ -182,10 +181,13 @@ fun CircleAvatarCropperDialog(
             ) {
                 RawSecondaryButton(
                     text = "Cancel",
+                    height = 60.dp,
                     onClick = onCancel,
                     modifier = Modifier.weight(1f)
                 )
-                RawPressButton(
+                BigPrimaryButton(
+                    text = "Use Photo",
+                    height = 60.dp,
                     onClick = {
                         val cropped = cropBitmapTo512(
                             source = sourceBitmap,
@@ -197,18 +199,7 @@ fun CircleAvatarCropperDialog(
                         onConfirmCrop(cropped)
                     },
                     modifier = Modifier.weight(1f)
-                ) {
-                    Box(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .height(52.dp)
-                            .clip(RoundedCornerShape(99.dp))
-                            .background(RawColors.Mint),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Text("Use Photo", style = RawTypography.labelLarge, color = RawColors.PrimaryBtnText)
-                    }
-                }
+                )
             }
         }
     }

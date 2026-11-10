@@ -67,6 +67,7 @@ import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalHapticFeedback
+import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -96,6 +97,8 @@ import com.rawedit.app.ui.motion.KineticHeading
 import com.rawedit.app.ui.motion.RawEasings
 import com.rawedit.app.ui.motion.RawPressButton
 import com.rawedit.app.ui.motion.rememberAnimationsEnabled
+import com.rawedit.app.ui.theme.BricolageFamily
+import com.rawedit.app.ui.theme.InstrumentSerifFamily
 import com.rawedit.app.ui.theme.JetBrainsMonoFamily
 import com.rawedit.app.ui.theme.RawColors
 import com.rawedit.app.ui.theme.RawTypography
@@ -386,11 +389,11 @@ fun KeyframeSheetScreen(
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .height(58.dp),
+                    .height(62.dp),
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                CircleActionButton(icon = RawIconType.BACK, onClick = onBack, size = 42.dp)
+                CircleActionButton(icon = RawIconType.BACK, onClick = onBack, size = 50.dp)
                 RawPixelMascot(kind = PixelMascotKind.LENS_BOT, size = 40.dp)
             }
 
@@ -401,7 +404,8 @@ fun KeyframeSheetScreen(
 
             Text(
                 text = "Live DOM auto-fit ran on every frame, fully on-device. Zero API cost.",
-                style = RawTypography.bodyMedium
+                style = RawTypography.bodyLarge.copy(fontSize = 16.5.sp),
+                color = RawColors.TextMuted
             )
 
             MorphingFilterChips(
@@ -505,8 +509,9 @@ fun KeyframeSheetScreen(
                                         "Warming up offline stage..."
                                     },
                                     fontFamily = JetBrainsMonoFamily,
-                                    fontWeight = FontWeight.SemiBold,
-                                    fontSize = 11.sp,
+                                    fontWeight = FontWeight.Medium,
+                                    fontSize = 12.sp,
+                                    style = TextStyle(fontFeatureSettings = "tnum"),
                                     color = Color.White.copy(alpha = 0.72f),
                                     modifier = Modifier
                                         .align(Alignment.BottomStart)
@@ -517,9 +522,9 @@ fun KeyframeSheetScreen(
                             Column(
                                 modifier = Modifier
                                     .fillMaxWidth()
-                                    .clip(RoundedCornerShape(22.dp))
+                                    .clip(RoundedCornerShape(20.dp))
                                     .background(RawColors.CardSurface)
-                                    .border(1.dp, RawColors.Divider, RoundedCornerShape(22.dp))
+                                    .border(1.dp, RawColors.Divider, RoundedCornerShape(20.dp))
                                     .padding(16.dp)
                             ) {
                                 Row(
@@ -533,15 +538,14 @@ fun KeyframeSheetScreen(
                                         } else {
                                             "Preparing bundled fonts & auto-fit..."
                                         },
-                                        fontFamily = JetBrainsMonoFamily,
-                                        fontSize = 11.sp,
-                                        color = RawColors.TextMuted
+                                        style = RawTypography.labelMedium
                                     )
                                     Text(
                                         text = "$percentInt%",
                                         fontFamily = JetBrainsMonoFamily,
-                                        fontWeight = FontWeight.Bold,
-                                        fontSize = 11.sp,
+                                        fontWeight = FontWeight.Medium,
+                                        fontSize = 13.sp,
+                                        style = TextStyle(fontFeatureSettings = "tnum"),
                                         color = RawColors.TextPrimary
                                     )
                                 }
@@ -578,18 +582,24 @@ fun KeyframeSheetScreen(
                             RawPixelMascot(kind = PixelMascotKind.CODE_BOT, size = 76.dp)
                             Text(
                                 text = "Capture stopped",
-                                style = RawTypography.headlineMedium.copy(fontWeight = FontWeight.Bold)
+                                fontFamily = InstrumentSerifFamily,
+                                fontWeight = FontWeight.Normal,
+                                fontSize = 34.sp,
+                                lineHeight = 36.sp,
+                                color = RawColors.TextPrimary
                             )
                             Text(
                                 text = captureError.orEmpty(),
-                                style = RawTypography.bodyMedium
+                                style = RawTypography.bodyLarge.copy(fontSize = 16.sp),
+                                color = RawColors.TextMuted
                             )
                             Spacer(modifier = Modifier.height(6.dp))
                             BigPrimaryButton(
                                 text = "Retry capture",
+                                height = 60.dp,
                                 leadingIcon = RawIconType.REFRESH,
                                 onClick = { captureGen++ },
-                                modifier = Modifier.width(200.dp)
+                                modifier = Modifier.width(210.dp)
                             )
                         }
                     }
@@ -604,7 +614,7 @@ fun KeyframeSheetScreen(
                         LazyVerticalGrid(
                             columns = GridCells.Fixed(2),
                             modifier = Modifier.fillMaxSize(),
-                            contentPadding = PaddingValues(top = 4.dp, bottom = 104.dp),
+                            contentPadding = PaddingValues(top = 4.dp, bottom = 112.dp),
                             verticalArrangement = Arrangement.spacedBy(10.dp),
                             horizontalArrangement = Arrangement.spacedBy(10.dp)
                         ) {
@@ -613,9 +623,9 @@ fun KeyframeSheetScreen(
                                 Column(
                                     modifier = Modifier
                                         .fillMaxWidth()
-                                        .clip(RoundedCornerShape(22.dp))
+                                        .clip(RoundedCornerShape(20.dp))
                                         .background(RawColors.CardSurface)
-                                        .border(1.dp, RawColors.Divider, RoundedCornerShape(22.dp))
+                                        .border(1.dp, RawColors.Divider, RoundedCornerShape(20.dp))
                                         .padding(16.dp),
                                     verticalArrangement = Arrangement.spacedBy(10.dp)
                                 ) {
@@ -625,8 +635,11 @@ fun KeyframeSheetScreen(
                                         verticalAlignment = Alignment.CenterVertically
                                     ) {
                                         Text(
-                                            text = "${res.samples.size} frames  •  ${String.format(Locale.US, "%.1fs", res.durationSec)}",
-                                            style = RawTypography.titleMedium.copy(fontSize = 17.sp, fontWeight = FontWeight.Bold)
+                                            text = "${res.samples.size} frames  \u2022  ${String.format(Locale.US, "%.1fs", res.durationSec)}",
+                                            fontFamily = BricolageFamily,
+                                            fontWeight = FontWeight.SemiBold,
+                                            fontSize = 21.sp,
+                                            color = RawColors.TextPrimary
                                         )
                                         val isClean = res.warningCount == 0 && res.totalAutoFits == 0
                                         val badgeLabel = when {
@@ -636,16 +649,16 @@ fun KeyframeSheetScreen(
                                         }
                                         Box(
                                             modifier = Modifier
-                                                .clip(RoundedCornerShape(99.dp))
+                                                .clip(RoundedCornerShape(6.dp))
                                                 .background(if (isClean) RawColors.MintSoft else RawColors.RaisedCard)
-                                                .padding(horizontal = 11.dp, vertical = 6.dp)
+                                                .padding(horizontal = 12.dp, vertical = 7.dp)
                                         ) {
                                             Text(
                                                 text = badgeLabel,
                                                 fontFamily = JetBrainsMonoFamily,
-                                                fontWeight = FontWeight.SemiBold,
-                                                fontSize = 10.sp,
-                                                letterSpacing = 0.6.sp,
+                                                fontWeight = FontWeight.Medium,
+                                                fontSize = 12.sp,
+                                                style = TextStyle(fontFeatureSettings = "tnum"),
                                                 color = if (isClean) RawColors.Mint else RawColors.TextMuted
                                             )
                                         }
@@ -671,22 +684,23 @@ fun KeyframeSheetScreen(
                                 Column(
                                     modifier = Modifier
                                         .fillMaxWidth()
-                                        .clip(RoundedCornerShape(22.dp))
+                                        .clip(RoundedCornerShape(20.dp))
                                         .background(RawColors.CardSurface)
-                                        .border(1.dp, RawColors.Divider, RoundedCornerShape(22.dp))
+                                        .border(1.dp, RawColors.Divider, RoundedCornerShape(20.dp))
                                         .padding(16.dp),
                                     verticalArrangement = Arrangement.spacedBy(10.dp)
                                 ) {
                                     Column {
                                         Text(
                                             text = "Export sheet for Cloud AI",
-                                            style = RawTypography.titleMedium.copy(fontWeight = FontWeight.Bold)
+                                            fontFamily = BricolageFamily,
+                                            fontWeight = FontWeight.SemiBold,
+                                            fontSize = 19.5.sp,
+                                            color = RawColors.TextPrimary
                                         )
                                         Text(
                                             text = "0 API cost",
-                                            fontFamily = JetBrainsMonoFamily,
-                                            fontSize = 11.sp,
-                                            color = RawColors.TextMuted
+                                            style = RawTypography.labelMedium
                                         )
                                     }
 
@@ -694,19 +708,17 @@ fun KeyframeSheetScreen(
                                         modifier = Modifier.fillMaxWidth(),
                                         horizontalArrangement = Arrangement.spacedBy(10.dp)
                                     ) {
-                                        RawSecondaryButton(
+                                        ExportTileButton(
                                             text = "Download PDF",
-                                            height = 42.dp,
                                             enabled = !exportBusy,
-                                            leadingIcon = RawIconType.DOWNLOAD,
+                                            icon = RawIconType.DOWNLOAD,
                                             onClick = { exportPdf(share = false) },
                                             modifier = Modifier.weight(1f)
                                         )
-                                        RawSecondaryButton(
+                                        ExportTileButton(
                                             text = "Share PDF",
-                                            height = 42.dp,
                                             enabled = !exportBusy,
-                                            leadingIcon = RawIconType.SHARE,
+                                            icon = RawIconType.SHARE,
                                             onClick = { exportPdf(share = true) },
                                             modifier = Modifier.weight(1f)
                                         )
@@ -716,19 +728,17 @@ fun KeyframeSheetScreen(
                                         modifier = Modifier.fillMaxWidth(),
                                         horizontalArrangement = Arrangement.spacedBy(10.dp)
                                     ) {
-                                        RawSecondaryButton(
+                                        ExportTileButton(
                                             text = "Download ZIP",
-                                            height = 42.dp,
                                             enabled = !exportBusy,
-                                            leadingIcon = RawIconType.DOWNLOAD,
+                                            icon = RawIconType.DOWNLOAD,
                                             onClick = { exportZip(share = false) },
                                             modifier = Modifier.weight(1f)
                                         )
-                                        RawSecondaryButton(
+                                        ExportTileButton(
                                             text = "Share ZIP",
-                                            height = 42.dp,
                                             enabled = !exportBusy,
-                                            leadingIcon = RawIconType.SHARE,
+                                            icon = RawIconType.SHARE,
                                             onClick = { exportZip(share = true) },
                                             modifier = Modifier.weight(1f)
                                         )
@@ -755,8 +765,8 @@ fun KeyframeSheetScreen(
                                         Row(
                                             modifier = Modifier
                                                 .fillMaxWidth()
-                                                .height(42.dp)
-                                                .clip(RoundedCornerShape(99.dp))
+                                                .height(50.dp)
+                                                .clip(RoundedCornerShape(16.dp))
                                                 .background(RawColors.Mint),
                                             horizontalArrangement = Arrangement.Center,
                                             verticalAlignment = Alignment.CenterVertically
@@ -769,8 +779,12 @@ fun KeyframeSheetScreen(
                                             Spacer(modifier = Modifier.width(7.dp))
                                             Text(
                                                 text = if (promptCopied) "Copied fix prompt!" else "Copy targeted AI fix prompt",
-                                                style = RawTypography.labelLarge.copy(fontSize = 13.sp, fontWeight = FontWeight.SemiBold),
-                                                color = RawColors.PrimaryBtnText
+                                                fontFamily = BricolageFamily,
+                                                fontWeight = FontWeight.SemiBold,
+                                                fontSize = 15.5.sp,
+                                                color = RawColors.PrimaryBtnText,
+                                                maxLines = 1,
+                                                softWrap = false
                                             )
                                         }
                                     }
@@ -782,9 +796,9 @@ fun KeyframeSheetScreen(
                                     Column(
                                         modifier = Modifier
                                             .fillMaxWidth()
-                                            .clip(RoundedCornerShape(22.dp))
+                                            .clip(RoundedCornerShape(20.dp))
                                             .background(RawColors.CardSurface)
-                                            .border(1.dp, RawColors.MintBorder, RoundedCornerShape(22.dp))
+                                            .border(1.dp, RawColors.MintBorder, RoundedCornerShape(20.dp))
                                             .padding(20.dp),
                                         horizontalAlignment = Alignment.CenterHorizontally,
                                         verticalArrangement = Arrangement.spacedBy(8.dp)
@@ -792,7 +806,7 @@ fun KeyframeSheetScreen(
                                         RawPixelMascot(kind = PixelMascotKind.LENS_BOT, size = 48.dp)
                                         Text(
                                             text = "All ${res.samples.size} frames look clean",
-                                            style = RawTypography.titleMedium.copy(fontWeight = FontWeight.Bold),
+                                            style = RawTypography.titleMedium,
                                             color = RawColors.Mint
                                         )
                                         Text(
@@ -802,7 +816,7 @@ fun KeyframeSheetScreen(
                                         Spacer(modifier = Modifier.height(4.dp))
                                         RawSecondaryButton(
                                             text = "Show all frames",
-                                            height = 40.dp,
+                                            height = 50.dp,
                                             fillWidth = false,
                                             onClick = { flaggedOnly = false }
                                         )
@@ -845,13 +859,14 @@ fun KeyframeSheetScreen(
             ) {
                 RawSecondaryButton(
                     text = "Fix code",
-                    height = 52.dp,
+                    height = 60.dp,
                     onClick = onEditCode,
                     modifier = Modifier.weight(1f)
                 )
                 val hasAudio = project.audioUri.isNotBlank() && project.audioDurationSec > 0.0
                 BigPrimaryButton(
                     text = if (hasAudio) "Render video" else "Add audio first",
+                    height = 60.dp,
                     enabled = hasAudio && !capturing,
                     onClick = onRenderNow,
                     modifier = Modifier.weight(1f)
@@ -864,7 +879,7 @@ fun KeyframeSheetScreen(
             modifier = Modifier
                 .align(Alignment.BottomCenter)
                 .navigationBarsPadding()
-                .padding(bottom = 86.dp)
+                .padding(bottom = 94.dp)
         )
     }
 
@@ -895,12 +910,16 @@ fun KeyframeSheetScreen(
                         Text(
                             text = String.format(
                                 Locale.US,
-                                "Frame #%02d  •  t=%.2fs  •  %s",
+                                "Frame #%02d  \u2022  t=%.2fs  \u2022  %s",
                                 sample.index + 1,
                                 sample.timeSec,
                                 sample.sceneLabel.ifBlank { "SCENE" }
                             ),
-                            style = RawTypography.titleLarge.copy(fontSize = 18.sp, fontWeight = FontWeight.ExtraBold),
+                            fontFamily = InstrumentSerifFamily,
+                            fontWeight = FontWeight.Normal,
+                            fontSize = 29.sp,
+                            lineHeight = 32.sp,
+                            color = RawColors.TextPrimary,
                             maxLines = 1,
                             overflow = TextOverflow.Ellipsis,
                             modifier = Modifier.weight(1f)
@@ -960,8 +979,10 @@ fun KeyframeSheetScreen(
                                 Text(
                                     text = "WARNING: $w",
                                     fontFamily = JetBrainsMonoFamily,
-                                    fontSize = 11.5.sp,
-                                    lineHeight = 18.sp,
+                                    fontWeight = FontWeight.Medium,
+                                    fontSize = 13.sp,
+                                    lineHeight = 20.sp,
+                                    style = TextStyle(fontFeatureSettings = "tnum"),
                                     color = RawColors.ErrorCoral
                                 )
                             }
@@ -977,8 +998,10 @@ fun KeyframeSheetScreen(
                                 Text(
                                     text = "AUTO-FIT: $note",
                                     fontFamily = JetBrainsMonoFamily,
-                                    fontSize = 11.5.sp,
-                                    lineHeight = 18.sp,
+                                    fontWeight = FontWeight.Medium,
+                                    fontSize = 13.sp,
+                                    lineHeight = 20.sp,
+                                    style = TextStyle(fontFeatureSettings = "tnum"),
                                     color = RawColors.Mint
                                 )
                             }
@@ -993,7 +1016,9 @@ fun KeyframeSheetScreen(
                             Text(
                                 text = "OK - all other text inside margins",
                                 fontFamily = JetBrainsMonoFamily,
-                                fontSize = 11.5.sp,
+                                fontWeight = FontWeight.Medium,
+                                fontSize = 13.sp,
+                                style = TextStyle(fontFeatureSettings = "tnum"),
                                 color = RawColors.TextMuted
                             )
                         }
@@ -1007,7 +1032,9 @@ fun KeyframeSheetScreen(
                             Text(
                                 text = "OK - no external resources requested",
                                 fontFamily = JetBrainsMonoFamily,
-                                fontSize = 11.5.sp,
+                                fontWeight = FontWeight.Medium,
+                                fontSize = 13.sp,
+                                style = TextStyle(fontFeatureSettings = "tnum"),
                                 color = RawColors.TextMuted
                             )
                         }
@@ -1019,7 +1046,7 @@ fun KeyframeSheetScreen(
                     ) {
                         RawSecondaryButton(
                             text = "Prev frame",
-                            height = 52.dp,
+                            height = 58.dp,
                             leadingIcon = RawIconType.CHEVRON_LEFT,
                             onClick = {
                                 inspectingIndex = (sample.index - 1 + samplesList.size) % samplesList.size
@@ -1035,10 +1062,10 @@ fun KeyframeSheetScreen(
                             Row(
                                 modifier = Modifier
                                     .fillMaxWidth()
-                                    .height(52.dp)
-                                    .clip(RoundedCornerShape(99.dp))
+                                    .height(58.dp)
+                                    .clip(RoundedCornerShape(16.dp))
                                     .background(RawColors.RaisedCard)
-                                    .border(1.dp, RawColors.Divider, RoundedCornerShape(99.dp)),
+                                    .border(1.dp, RawColors.Divider, RoundedCornerShape(16.dp)),
                                 horizontalArrangement = Arrangement.Center,
                                 verticalAlignment = Alignment.CenterVertically
                             ) {
@@ -1078,11 +1105,11 @@ private fun ContactSheetFrameTile(
         Column(
             modifier = Modifier
                 .fillMaxWidth()
-                .clip(RoundedCornerShape(16.dp))
+                .clip(RoundedCornerShape(12.dp))
                 .background(RawColors.CardSurface)
-                .border(1.dp, RawColors.Divider, RoundedCornerShape(16.dp))
+                .border(1.dp, RawColors.Divider, RoundedCornerShape(12.dp))
                 .padding(8.dp),
-            verticalArrangement = Arrangement.spacedBy(6.dp)
+            verticalArrangement = Arrangement.spacedBy(7.dp)
         ) {
             Row(
                 modifier = Modifier.fillMaxWidth(),
@@ -1092,8 +1119,9 @@ private fun ContactSheetFrameTile(
                 Text(
                     text = String.format(Locale.US, "#%02d t=%.2fs", sample.index + 1, sample.timeSec),
                     fontFamily = JetBrainsMonoFamily,
-                    fontWeight = FontWeight.SemiBold,
-                    fontSize = 10.sp,
+                    fontWeight = FontWeight.Medium,
+                    fontSize = 11.5.sp,
+                    style = TextStyle(fontFeatureSettings = "tnum"),
                     color = RawColors.TextMuted,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
@@ -1103,14 +1131,14 @@ private fun ContactSheetFrameTile(
                     modifier = Modifier
                         .clip(RoundedCornerShape(6.dp))
                         .background(statusBg)
-                        .padding(horizontal = 7.dp, vertical = 3.dp)
+                        .padding(horizontal = 8.dp, vertical = 3.dp)
                 ) {
                     Text(
                         text = statusLabel,
                         fontFamily = JetBrainsMonoFamily,
-                        fontWeight = FontWeight.SemiBold,
-                        fontSize = 9.sp,
-                        letterSpacing = 0.5.sp,
+                        fontWeight = FontWeight.Medium,
+                        fontSize = 11.sp,
+                        style = TextStyle(fontFeatureSettings = "tnum"),
                         color = statusFg
                     )
                 }
@@ -1147,11 +1175,51 @@ private fun ContactSheetFrameTile(
             Text(
                 text = if (sample.sceneLabel.isNotBlank()) sample.sceneLabel else String.format(Locale.US, "%.2fs", sample.timeSec),
                 fontFamily = JetBrainsMonoFamily,
-                fontWeight = FontWeight.SemiBold,
-                fontSize = 10.sp,
+                fontWeight = FontWeight.Medium,
+                fontSize = 11.5.sp,
+                style = TextStyle(fontFeatureSettings = "tnum"),
                 color = RawColors.TextMuted,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis
+            )
+        }
+    }
+}
+
+@Composable
+private fun ExportTileButton(
+    text: String,
+    icon: RawIconType,
+    enabled: Boolean,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    RawPressButton(
+        onClick = onClick,
+        enabled = enabled,
+        modifier = modifier
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(50.dp)
+                .clip(RoundedCornerShape(16.dp))
+                .background(RawColors.RaisedCard)
+                .border(1.dp, RawColors.Divider, RoundedCornerShape(16.dp))
+                .padding(horizontal = 8.dp),
+            horizontalArrangement = Arrangement.Center,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            RawIcon(type = icon, size = 16.dp, tint = RawColors.TextPrimary)
+            Spacer(modifier = Modifier.width(6.dp))
+            Text(
+                text = text,
+                fontFamily = BricolageFamily,
+                fontWeight = FontWeight.SemiBold,
+                fontSize = 14.5.sp,
+                color = RawColors.TextPrimary,
+                maxLines = 1,
+                softWrap = false
             )
         }
     }
@@ -1170,18 +1238,19 @@ private fun SheetTogglePill(
     )
     Box(
         modifier = Modifier
-            .height(34.dp)
-            .clip(RoundedCornerShape(99.dp))
+            .height(44.dp)
+            .clip(RoundedCornerShape(10.dp))
             .background(bg)
-            .border(1.dp, if (selected) RawColors.Mint else RawColors.Divider, RoundedCornerShape(99.dp))
+            .border(1.dp, if (selected) RawColors.Mint else RawColors.DividerStrong, RoundedCornerShape(10.dp))
             .clickable(onClick = onClick)
-            .padding(horizontal = 14.dp),
+            .padding(horizontal = 18.dp),
         contentAlignment = Alignment.Center
     ) {
         Text(
             text = label,
-            fontSize = 12.5.sp,
+            fontFamily = BricolageFamily,
             fontWeight = FontWeight.SemiBold,
+            fontSize = 15.5.sp,
             color = if (selected) RawColors.PrimaryBtnText else RawColors.TextMuted
         )
     }

@@ -39,6 +39,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -53,6 +54,7 @@ import com.rawedit.app.ui.icons.PixelRawEditLogo
 import com.rawedit.app.ui.icons.RawIconType
 import com.rawedit.app.ui.icons.RawPixelMascot
 import com.rawedit.app.ui.motion.KineticHeading
+import com.rawedit.app.ui.theme.BricolageFamily
 import com.rawedit.app.ui.theme.JetBrainsMonoFamily
 import com.rawedit.app.ui.theme.RawColors
 import com.rawedit.app.ui.theme.RawTypography
@@ -122,10 +124,10 @@ fun ProfileSetupScreen(
                 words = listOf("Set", "up", "profile"),
                 style = RawTypography.headlineLarge
             )
-            Spacer(modifier = Modifier.height(8.dp))
+            Spacer(modifier = Modifier.height(10.dp))
             Text(
-                text = "Everything stays locally on your phone.",
-                style = RawTypography.bodyLarge.copy(fontSize = 14.sp),
+                text = "Everything stays locally on your phone",
+                style = RawTypography.bodyLarge.copy(fontSize = 16.5.sp),
                 color = RawColors.TextMuted
             )
 
@@ -135,9 +137,9 @@ fun ProfileSetupScreen(
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .clip(RoundedCornerShape(22.dp))
+                    .clip(RoundedCornerShape(20.dp))
                     .background(RawColors.CardSurface)
-                    .border(1.dp, RawColors.Divider, RoundedCornerShape(22.dp))
+                    .border(1.dp, RawColors.Divider, RoundedCornerShape(20.dp))
                     .padding(16.dp),
                 horizontalAlignment = Alignment.CenterHorizontally
             ) {
@@ -159,10 +161,10 @@ fun ProfileSetupScreen(
                     )
                 }
 
-                Spacer(modifier = Modifier.height(10.dp))
+                Spacer(modifier = Modifier.height(12.dp))
                 Text(
                     text = "Profile photo (optional)",
-                    style = RawTypography.titleMedium.copy(fontWeight = FontWeight.Bold)
+                    style = RawTypography.titleMedium
                 )
                 Spacer(modifier = Modifier.height(14.dp))
 
@@ -172,7 +174,7 @@ fun ProfileSetupScreen(
                 ) {
                     RawSecondaryButton(
                         text = "Gallery",
-                        height = 42.dp,
+                        height = 50.dp,
                         leadingIcon = RawIconType.IMAGE,
                         onClick = {
                             galleryPicker.launch(
@@ -183,7 +185,7 @@ fun ProfileSetupScreen(
                     )
                     RawSecondaryButton(
                         text = "Camera",
-                        height = 42.dp,
+                        height = 50.dp,
                         leadingIcon = RawIconType.CAMERA,
                         onClick = {
                             val tempFile = cacheManager.createCameraTempFile()
@@ -203,14 +205,14 @@ fun ProfileSetupScreen(
                     Spacer(modifier = Modifier.height(10.dp))
                     RawSecondaryButton(
                         text = "Remove photo",
-                        height = 42.dp,
+                        height = 50.dp,
                         isDanger = true,
                         onClick = { savedPhotoPath = null }
                     )
                 }
             }
 
-            Spacer(modifier = Modifier.height(22.dp))
+            Spacer(modifier = Modifier.height(24.dp))
 
             // Your name + live N/32 mono counter (.lbl)
             Row(
@@ -222,13 +224,17 @@ fun ProfileSetupScreen(
             ) {
                 Text(
                     text = "Your name",
-                    style = RawTypography.bodyMedium.copy(fontWeight = FontWeight.SemiBold, fontSize = 13.sp),
-                    color = RawColors.TextMuted
+                    fontFamily = BricolageFamily,
+                    fontWeight = FontWeight.SemiBold,
+                    fontSize = 15.sp,
+                    color = RawColors.TextPrimary
                 )
                 Text(
                     text = "${name.length}/32",
                     fontFamily = JetBrainsMonoFamily,
-                    fontSize = 11.sp,
+                    fontWeight = FontWeight.Medium,
+                    fontSize = 13.sp,
+                    style = TextStyle(fontFeatureSettings = "tnum"),
                     color = RawColors.TextMuted
                 )
             }
@@ -236,12 +242,26 @@ fun ProfileSetupScreen(
             OutlinedTextField(
                 value = name,
                 onValueChange = { if (it.length <= 32) name = it },
-                placeholder = { Text("What should we call you?", color = RawColors.TextMuted) },
+                placeholder = {
+                    Text(
+                        "What should we call you?",
+                        fontFamily = BricolageFamily,
+                        fontWeight = FontWeight.Medium,
+                        fontSize = 18.sp,
+                        color = RawColors.TextMuted
+                    )
+                },
+                textStyle = TextStyle(
+                    fontFamily = BricolageFamily,
+                    fontWeight = FontWeight.SemiBold,
+                    fontSize = 20.sp,
+                    color = RawColors.TextPrimary
+                ),
                 singleLine = true,
-                shape = RoundedCornerShape(16.dp),
+                shape = RoundedCornerShape(14.dp),
                 colors = OutlinedTextFieldDefaults.colors(
                     focusedBorderColor = RawColors.MintFocus,
-                    unfocusedBorderColor = RawColors.Divider,
+                    unfocusedBorderColor = RawColors.DividerStrong,
                     focusedContainerColor = RawColors.RaisedCard,
                     unfocusedContainerColor = RawColors.RaisedCard,
                     focusedTextColor = RawColors.TextPrimary,
@@ -279,6 +299,7 @@ fun ProfileSetupScreen(
         ) {
             BigPrimaryButton(
                 text = "Continue to raw_edit",
+                height = 62.dp,
                 enabled = name.trim().isNotEmpty(),
                 onClick = { onComplete(name.trim(), savedPhotoPath) }
             )

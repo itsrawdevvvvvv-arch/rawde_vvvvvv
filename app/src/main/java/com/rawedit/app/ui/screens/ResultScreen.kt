@@ -45,6 +45,7 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -74,6 +75,7 @@ import com.rawedit.app.ui.motion.RawEasings
 import com.rawedit.app.ui.motion.RawPressButton
 import com.rawedit.app.ui.motion.ResultCelebrationOverlay
 import com.rawedit.app.ui.motion.rememberAnimationsEnabled
+import com.rawedit.app.ui.theme.BricolageFamily
 import com.rawedit.app.ui.theme.JetBrainsMonoFamily
 import com.rawedit.app.ui.theme.RawColors
 import com.rawedit.app.ui.theme.RawTypography
@@ -158,24 +160,24 @@ fun ResultScreen(
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .height(58.dp),
+                    .height(62.dp),
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                CircleActionButton(icon = RawIconType.BACK, onClick = onBack, size = 42.dp)
+                CircleActionButton(icon = RawIconType.BACK, onClick = onBack, size = 50.dp)
 
                 Box(
                     modifier = Modifier
-                        .clip(RoundedCornerShape(99.dp))
+                        .clip(RoundedCornerShape(6.dp))
                         .background(RawColors.RaisedCard)
-                        .padding(horizontal = 10.dp, vertical = 5.dp)
+                        .padding(horizontal = 10.dp, vertical = 6.dp)
                 ) {
                     Text(
-                        text = "1920X1080  •  30 FPS",
+                        text = "1920x1080  \u2022  30 fps",
                         fontFamily = JetBrainsMonoFamily,
-                        fontWeight = FontWeight.SemiBold,
-                        fontSize = 9.5.sp,
-                        letterSpacing = 0.7.sp,
+                        fontWeight = FontWeight.Medium,
+                        fontSize = 12.sp,
+                        style = TextStyle(fontFeatureSettings = "tnum"),
                         color = RawColors.TextMuted
                     )
                 }
@@ -183,7 +185,7 @@ fun ResultScreen(
                 CircleActionButton(
                     icon = RawIconType.TRASH,
                     onClick = { showDeleteConfirm = true },
-                    size = 42.dp,
+                    size = 50.dp,
                     iconTint = RawColors.ErrorCoral
                 )
             }
@@ -196,7 +198,7 @@ fun ResultScreen(
             ) {
                 KineticHeading(
                     words = listOf("Your", "reel", "is", "ready"),
-                    style = RawTypography.headlineLarge,
+                    style = RawTypography.headlineLarge.copy(fontSize = 48.sp, lineHeight = 50.sp),
                     modifier = Modifier.weight(1f)
                 )
                 RawPixelMascot(
@@ -238,18 +240,21 @@ fun ResultScreen(
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .clip(RoundedCornerShape(22.dp))
+                    .clip(RoundedCornerShape(20.dp))
                     .background(RawColors.CardSurface)
-                    .border(1.dp, RawColors.Divider, RoundedCornerShape(22.dp))
+                    .border(1.dp, RawColors.Divider, RoundedCornerShape(20.dp))
                     .padding(16.dp)
             ) {
                 Text(
                     text = video.title,
-                    style = RawTypography.titleLarge.copy(fontWeight = FontWeight.Bold)
+                    fontFamily = BricolageFamily,
+                    fontWeight = FontWeight.SemiBold,
+                    fontSize = 23.sp,
+                    color = RawColors.TextPrimary
                 )
                 Spacer(modifier = Modifier.height(4.dp))
                 Text(
-                    text = "${FormatHelpers.formatDuration(video.durationSec)}  •  ${FormatHelpers.formatFileSize(video.sizeBytes)}  •  MP4 (H.264 + AAC)",
+                    text = "${FormatHelpers.formatDuration(video.durationSec)}  \u2022  ${FormatHelpers.formatFileSize(video.sizeBytes)}  \u2022  MP4 (H.264 + AAC)",
                     style = RawTypography.labelMedium
                 )
             }
@@ -287,22 +292,23 @@ fun ResultScreen(
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .height(52.dp)
-                            .clip(RoundedCornerShape(99.dp))
+                            .height(60.dp)
+                            .clip(RoundedCornerShape(16.dp))
                             .background(saveBg)
                             .then(
-                                if (isSaved) Modifier.border(1.dp, RawColors.Divider, RoundedCornerShape(99.dp))
+                                if (isSaved) Modifier.border(1.dp, RawColors.Divider, RoundedCornerShape(16.dp))
                                 else Modifier
-                            ),
+                            )
+                            .padding(horizontal = 12.dp),
                         horizontalArrangement = Arrangement.Center,
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         RawIcon(
                             type = if (isSaved) RawIconType.CHECK else RawIconType.DOWNLOAD,
-                            size = 18.dp,
+                            size = 17.dp,
                             tint = saveFg
                         )
-                        Spacer(modifier = Modifier.width(8.dp))
+                        Spacer(modifier = Modifier.width(7.dp))
                         val labelStr = when {
                             saving -> "Saving..."
                             isSaved -> "Saved"
@@ -316,14 +322,22 @@ fun ResultScreen(
                             },
                             label = "res_save_lbl"
                         ) { t ->
-                            Text(text = t, style = RawTypography.labelLarge, color = saveFg)
+                            Text(
+                                text = t,
+                                fontFamily = BricolageFamily,
+                                fontWeight = FontWeight.SemiBold,
+                                fontSize = 16.5.sp,
+                                color = saveFg,
+                                maxLines = 1,
+                                softWrap = false
+                            )
                         }
                     }
                 }
 
                 RawSecondaryButton(
                     text = "Share",
-                    height = 52.dp,
+                    height = 60.dp,
                     leadingIcon = RawIconType.SHARE,
                     onClick = {
                         val file = File(video.fileUri)
@@ -361,6 +375,7 @@ fun ResultScreen(
         ) {
             BigPrimaryButton(
                 text = "Make another",
+                height = 62.dp,
                 leadingIcon = RawIconType.PLUS,
                 onClick = onMakeAnother
             )
@@ -376,7 +391,7 @@ fun ResultScreen(
             modifier = Modifier
                 .align(Alignment.BottomCenter)
                 .navigationBarsPadding()
-                .padding(bottom = 86.dp)
+                .padding(bottom = 94.dp)
         )
     }
 

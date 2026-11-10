@@ -59,7 +59,7 @@ enum class PixelMascotKind {
     PIXEL_CURSOR
 }
 
-private const val COL_WHITE = 0xFFEFF3EE.toInt()
+private const val COL_WHITE = 0xFFFFFFFF.toInt()
 private const val COL_GREY = 0xFF8D8D8D.toInt()
 private const val COL_EYE = 0xFF0A0A0A.toInt()
 private const val COL_DARK = 0xFF3A3A3A.toInt()

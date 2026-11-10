@@ -69,6 +69,7 @@ import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalHapticFeedback
+import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.text.style.TextOverflow
@@ -95,6 +96,7 @@ import com.rawedit.app.ui.motion.RawEasings
 import com.rawedit.app.ui.motion.RawPressButton
 import com.rawedit.app.ui.motion.SplitFlapText
 import com.rawedit.app.ui.motion.rememberAnimationsEnabled
+import com.rawedit.app.ui.theme.BricolageFamily
 import com.rawedit.app.ui.theme.JetBrainsMonoFamily
 import com.rawedit.app.ui.theme.RawColors
 import com.rawedit.app.ui.theme.RawTypography
@@ -257,15 +259,15 @@ fun AddVoiceScreen(
                 .padding(start = 18.dp, end = 18.dp, bottom = 120.dp),
             verticalArrangement = Arrangement.spacedBy(14.dp)
         ) {
-            // Top bar with centered/right MIC_BOT
+            // Top bar with BACK squircle + MIC_BOT
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .height(58.dp),
+                    .height(62.dp),
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                CircleActionButton(icon = RawIconType.BACK, onClick = onBack, size = 42.dp)
+                CircleActionButton(icon = RawIconType.BACK, onClick = onBack, size = 50.dp)
                 RawPixelMascot(kind = PixelMascotKind.MIC_BOT, size = 40.dp)
             }
 
@@ -282,12 +284,12 @@ fun AddVoiceScreen(
                 Box(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .height(190.dp)
-                        .clip(RoundedCornerShape(22.dp))
+                        .height(216.dp)
+                        .clip(RoundedCornerShape(20.dp))
                         .background(if (isSelected) RawColors.MintSoft else RawColors.CardSurface)
                         .then(
                             if (isSelected) {
-                                Modifier.border(1.dp, RawColors.MintBorder, RoundedCornerShape(22.dp))
+                                Modifier.border(1.dp, RawColors.MintBorder, RoundedCornerShape(20.dp))
                             } else Modifier
                         )
                 ) {
@@ -299,7 +301,7 @@ fun AddVoiceScreen(
                                     width = 1.6.dp.toPx(),
                                     pathEffect = PathEffect.dashPathEffect(dashIntervals, dashPhaseState?.value ?: 0f)
                                 ),
-                                cornerRadius = CornerRadius(22.dp.toPx())
+                                cornerRadius = CornerRadius(20.dp.toPx())
                             )
                         }
                     }
@@ -329,11 +331,11 @@ fun AddVoiceScreen(
                                 1 -> {
                                     CircularProgressIndicator(
                                         color = RawColors.Mint,
-                                        modifier = Modifier.size(32.dp),
+                                        modifier = Modifier.size(34.dp),
                                         strokeWidth = 2.5.dp
                                     )
                                     Spacer(modifier = Modifier.height(12.dp))
-                                    Text("Reading voiceover...", style = RawTypography.titleMedium)
+                                    Text("Reading voiceover...", style = RawTypography.titleLarge)
                                 }
                                 2 -> {
                                     Box(
@@ -343,24 +345,26 @@ fun AddVoiceScreen(
                                             .background(RawColors.Mint),
                                         contentAlignment = Alignment.Center
                                     ) {
-                                        RawIcon(RawIconType.CHECK, size = 26.dp, tint = RawColors.PrimaryBtnText)
+                                        RawIcon(RawIconType.CHECK, size = 28.dp, tint = RawColors.PrimaryBtnText)
                                     }
                                     Spacer(modifier = Modifier.height(10.dp))
                                     Text(
                                         text = audioName,
-                                        style = RawTypography.titleMedium.copy(fontWeight = FontWeight.Bold),
+                                        style = RawTypography.titleLarge,
                                         maxLines = 1,
                                         overflow = TextOverflow.Ellipsis
                                     )
                                     Spacer(modifier = Modifier.height(3.dp))
                                     Text(
-                                        text = "${FormatHelpers.formatDuration(audioDuration)}  •  ${FormatHelpers.formatFileSize(audioSize)}",
+                                        text = "${FormatHelpers.formatDuration(audioDuration)}  \u2022  ${FormatHelpers.formatFileSize(audioSize)}",
                                         style = RawTypography.labelMedium
                                     )
                                     Spacer(modifier = Modifier.height(4.dp))
                                     Text(
                                         text = "Tap to change",
-                                        fontSize = 12.5.sp,
+                                        fontFamily = BricolageFamily,
+                                        fontWeight = FontWeight.Medium,
+                                        fontSize = 14.5.sp,
                                         color = RawColors.TextMuted,
                                         textDecoration = TextDecoration.Underline
                                     )
@@ -368,21 +372,21 @@ fun AddVoiceScreen(
                                 else -> {
                                     Box(
                                         modifier = Modifier
-                                            .size(58.dp)
-                                            .clip(RoundedCornerShape(18.dp))
+                                            .size(64.dp)
+                                            .clip(RoundedCornerShape(16.dp))
                                             .background(RawColors.MintSoft),
                                         contentAlignment = Alignment.Center
                                     ) {
-                                        RawIcon(RawIconType.SHARE, size = 28.dp, tint = RawColors.Mint)
+                                        RawIcon(RawIconType.SHARE, size = 30.dp, tint = RawColors.Mint)
                                     }
                                     Spacer(modifier = Modifier.height(10.dp))
                                     Text(
                                         text = "Tap to pick voiceover",
-                                        style = RawTypography.titleMedium.copy(fontWeight = FontWeight.Bold)
+                                        style = RawTypography.titleLarge
                                     )
                                     Spacer(modifier = Modifier.height(3.dp))
                                     Text(
-                                        text = "MP3, M4A, WAV, AAC  •  1s to 20m",
+                                        text = "MP3, M4A, WAV, AAC  \u2022  1s to 20m",
                                         style = RawTypography.labelMedium
                                     )
                                 }
@@ -396,9 +400,9 @@ fun AddVoiceScreen(
                 Box(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .clip(RoundedCornerShape(14.dp))
+                        .clip(RoundedCornerShape(12.dp))
                         .background(RawColors.ErrorSoft)
-                        .border(1.dp, RawColors.ErrorBorder, RoundedCornerShape(14.dp))
+                        .border(1.dp, RawColors.ErrorBorder, RoundedCornerShape(12.dp))
                         .padding(14.dp)
                 ) {
                     Text(text = msg, style = RawTypography.bodyMedium, color = RawColors.ErrorCoral)
@@ -409,40 +413,46 @@ fun AddVoiceScreen(
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .clip(RoundedCornerShape(22.dp))
+                    .clip(RoundedCornerShape(20.dp))
                     .background(RawColors.CardSurface)
-                    .border(1.dp, RawColors.Divider, RoundedCornerShape(22.dp))
+                    .border(1.dp, RawColors.Divider, RoundedCornerShape(20.dp))
                     .clickable { srtPicker.launch(arrayOf("*/*")) }
-                    .padding(14.dp),
+                    .padding(horizontal = 17.dp, vertical = 18.dp),
                 verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(12.dp)
+                horizontalArrangement = Arrangement.spacedBy(14.dp)
             ) {
                 Box(
                     modifier = Modifier
-                        .size(44.dp)
-                        .clip(RoundedCornerShape(14.dp))
+                        .size(48.dp)
+                        .clip(RoundedCornerShape(12.dp))
                         .background(RawColors.RaisedCard)
-                        .border(1.dp, RawColors.Divider, RoundedCornerShape(14.dp)),
+                        .border(1.dp, RawColors.Divider, RoundedCornerShape(12.dp)),
                     contentAlignment = Alignment.Center
                 ) {
-                    RawIcon(RawIconType.SRT, size = 20.dp, tint = RawColors.TextPrimary)
+                    RawIcon(RawIconType.SRT, size = 22.dp, tint = RawColors.TextPrimary)
                 }
                 Column(modifier = Modifier.weight(1f)) {
                     Text(
                         text = "Add SRT file (optional)",
-                        style = RawTypography.titleMedium.copy(fontSize = 15.5.sp, fontWeight = FontWeight.Bold)
+                        fontFamily = BricolageFamily,
+                        fontWeight = FontWeight.SemiBold,
+                        fontSize = 19.sp,
+                        color = RawColors.TextPrimary
                     )
-                    Spacer(modifier = Modifier.height(2.dp))
+                    Spacer(modifier = Modifier.height(4.dp))
                     Text(
                         text = if (srtCueCount > 0) "$srtCueCount subtitle cues attached" else "Gives Cloud AI exact timing per word",
-                        fontSize = 12.sp,
+                        fontFamily = BricolageFamily,
+                        fontWeight = FontWeight.SemiBold,
+                        fontSize = 14.sp,
+                        lineHeight = 19.sp,
                         color = if (srtCueCount > 0) RawColors.Mint else RawColors.TextMuted
                     )
                 }
                 if (srtCueCount > 0) {
                     RawSecondaryButton(
                         text = "Remove",
-                        height = 38.dp,
+                        height = 50.dp,
                         isDanger = true,
                         fillWidth = false,
                         onClick = {
@@ -467,9 +477,11 @@ fun AddVoiceScreen(
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 Text(
                     text = "Script / topic notes (optional)",
-                    style = RawTypography.bodyMedium.copy(fontWeight = FontWeight.SemiBold, fontSize = 13.sp),
-                    color = RawColors.TextMuted,
-                    modifier = Modifier.padding(start = 2.dp)
+                    fontFamily = BricolageFamily,
+                    fontWeight = FontWeight.SemiBold,
+                    fontSize = 15.sp,
+                    color = RawColors.TextPrimary,
+                    modifier = Modifier.padding(top = 6.dp, start = 2.dp)
                 )
                 Row(
                     modifier = Modifier
@@ -479,15 +491,16 @@ fun AddVoiceScreen(
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     Text(
-                        text = "${topic.length} chars • unlimited",
+                        text = "${topic.length} chars \u2022 unlimited",
                         fontFamily = JetBrainsMonoFamily,
-                        fontWeight = FontWeight.SemiBold,
-                        fontSize = 11.sp,
+                        fontWeight = FontWeight.Medium,
+                        fontSize = 13.sp,
+                        style = TextStyle(fontFeatureSettings = "tnum"),
                         color = RawColors.TextMuted
                     )
                     RawSecondaryButton(
                         text = "Paste",
-                        height = 34.dp,
+                        height = 36.dp,
                         leadingIcon = RawIconType.PASTE,
                         fillWidth = false,
                         onClick = {
@@ -509,10 +522,10 @@ fun AddVoiceScreen(
                     Column(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .clip(RoundedCornerShape(22.dp))
+                            .clip(RoundedCornerShape(20.dp))
                             .background(RawColors.CardSurface)
-                            .border(1.dp, RawColors.Divider, RoundedCornerShape(22.dp))
-                            .padding(14.dp),
+                            .border(1.dp, RawColors.Divider, RoundedCornerShape(20.dp))
+                            .padding(16.dp),
                         verticalArrangement = Arrangement.spacedBy(10.dp)
                     ) {
                         val preview = topic.take(900) + "\n\n... (${topic.length - 1300} middle chars kept) ...\n\n" + topic.takeLast(400)
@@ -534,13 +547,13 @@ fun AddVoiceScreen(
                         ) {
                             RawSecondaryButton(
                                 text = "Edit raw",
-                                height = 40.dp,
+                                height = 50.dp,
                                 onClick = { forceRawEditTopic = true },
                                 modifier = Modifier.weight(1f)
                             )
                             RawSecondaryButton(
                                 text = "Clear",
-                                height = 40.dp,
+                                height = 50.dp,
                                 isDanger = true,
                                 onClick = {
                                     topic = ""
@@ -555,10 +568,17 @@ fun AddVoiceScreen(
                         value = topic,
                         onValueChange = { topic = it },
                         placeholder = { Text("Paste your script or topic here...", color = RawColors.TextMuted) },
-                        textStyle = RawTypography.labelMedium.copy(color = RawColors.TextPrimary, fontSize = 12.sp),
-                        minLines = 4,
-                        maxLines = 7,
-                        shape = RoundedCornerShape(16.dp),
+                        textStyle = TextStyle(
+                            fontFamily = JetBrainsMonoFamily,
+                            fontWeight = FontWeight.Medium,
+                            fontSize = 14.sp,
+                            lineHeight = 23.sp,
+                            fontFeatureSettings = "tnum",
+                            color = RawColors.TextPrimary
+                        ),
+                        minLines = 5,
+                        maxLines = 8,
+                        shape = RoundedCornerShape(12.dp),
                         colors = OutlinedTextFieldDefaults.colors(
                             focusedBorderColor = RawColors.MintFocus,
                             unfocusedBorderColor = RawColors.Divider,
@@ -731,11 +751,11 @@ fun CopyPromptScreen(
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .height(58.dp),
+                    .height(62.dp),
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                CircleActionButton(icon = RawIconType.BACK, onClick = onBack, size = 42.dp)
+                CircleActionButton(icon = RawIconType.BACK, onClick = onBack, size = 50.dp)
                 RawPixelMascot(kind = PixelMascotKind.ZIP_BOT, size = 40.dp)
             }
 
@@ -745,8 +765,9 @@ fun CopyPromptScreen(
             )
 
             Text(
-                text = "1) Attach Style Pack ZIP in Cloud AI • 2) Paste this prompt • 3) Answer 3 questions & copy HTML code.",
-                style = RawTypography.bodyMedium
+                text = "1) Attach Style Pack ZIP in Cloud AI \u2022 2) Paste this prompt \u2022 3) Answer 3 questions & copy HTML code.",
+                style = RawTypography.bodyLarge.copy(fontSize = 16.5.sp),
+                color = RawColors.TextMuted
             )
 
             // Style Pack ZIP Card (.card.pad)
@@ -758,9 +779,9 @@ fun CopyPromptScreen(
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .clip(RoundedCornerShape(22.dp))
+                    .clip(RoundedCornerShape(20.dp))
                     .background(RawColors.CardSurface)
-                    .border(1.dp, zipBorder, RoundedCornerShape(22.dp))
+                    .border(1.dp, zipBorder, RoundedCornerShape(20.dp))
                     .padding(16.dp),
                 verticalArrangement = Arrangement.spacedBy(12.dp)
             ) {
@@ -771,40 +792,41 @@ fun CopyPromptScreen(
                 ) {
                     Box(
                         modifier = Modifier
-                            .size(44.dp)
-                            .clip(RoundedCornerShape(14.dp))
+                            .size(48.dp)
+                            .clip(RoundedCornerShape(12.dp))
                             .background(RawColors.RaisedCard)
-                            .border(1.dp, RawColors.Divider, RoundedCornerShape(14.dp)),
+                            .border(1.dp, RawColors.Divider, RoundedCornerShape(12.dp)),
                         contentAlignment = Alignment.Center
                     ) {
-                        RawIcon(RawIconType.ZIP, size = 20.dp, tint = RawColors.TextPrimary)
+                        RawIcon(RawIconType.ZIP, size = 22.dp, tint = RawColors.TextPrimary)
                     }
                     Column(modifier = Modifier.weight(1f)) {
                         Text(
                             text = CacheManager.STYLE_PACK_ASSET_NAME,
-                            style = RawTypography.titleMedium.copy(fontSize = 14.sp, fontWeight = FontWeight.Bold),
+                            fontFamily = BricolageFamily,
+                            fontWeight = FontWeight.SemiBold,
+                            fontSize = 17.sp,
+                            color = RawColors.TextPrimary,
                             maxLines = 1,
                             overflow = TextOverflow.Ellipsis
                         )
                         Text(
                             text = "Style pack for Cloud AI",
-                            fontFamily = JetBrainsMonoFamily,
-                            fontSize = 11.sp,
-                            color = RawColors.TextMuted
+                            style = RawTypography.labelMedium
                         )
                     }
                     Box(
                         modifier = Modifier
-                            .clip(RoundedCornerShape(99.dp))
+                            .clip(RoundedCornerShape(6.dp))
                             .background(if (zipSaved) RawColors.MintSoft else RawColors.RaisedCard)
-                            .padding(horizontal = 9.dp, vertical = 5.dp)
+                            .padding(horizontal = 10.dp, vertical = 6.dp)
                     ) {
                         Text(
-                            text = if (zipSaved) "SAVED" else "552 KB",
+                            text = if (zipSaved) "Saved" else "552 KB",
                             fontFamily = JetBrainsMonoFamily,
-                            fontWeight = FontWeight.SemiBold,
-                            fontSize = 9.5.sp,
-                            letterSpacing = 0.7.sp,
+                            fontWeight = FontWeight.Medium,
+                            fontSize = 12.sp,
+                            style = TextStyle(fontFeatureSettings = "tnum"),
                             color = if (zipSaved) RawColors.Mint else RawColors.TextMuted
                         )
                     }
@@ -820,7 +842,7 @@ fun CopyPromptScreen(
                             zipSaved -> "Downloaded"
                             else -> "Download ZIP"
                         },
-                        height = 42.dp,
+                        height = 50.dp,
                         enabled = !zipBusy,
                         leadingIcon = if (zipSaved) RawIconType.CHECK else RawIconType.DOWNLOAD,
                         onClick = {
@@ -847,7 +869,7 @@ fun CopyPromptScreen(
 
                     RawSecondaryButton(
                         text = "Share ZIP",
-                        height = 42.dp,
+                        height = 50.dp,
                         enabled = !zipBusy,
                         leadingIcon = RawIconType.SHARE,
                         onClick = {
@@ -889,19 +911,21 @@ fun CopyPromptScreen(
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .height(290.dp)
+                    .height(310.dp)
                     .clip(RoundedCornerShape(18.dp))
                     .background(RawColors.CodeSurface)
                     .border(1.dp, RawColors.Divider, RoundedCornerShape(18.dp))
                     .verticalScroll(rememberScrollState())
-                    .padding(14.dp)
+                    .padding(16.dp)
             ) {
                 Text(
                     text = displayPrompt,
                     fontFamily = JetBrainsMonoFamily,
-                    fontSize = 11.5.sp,
-                    lineHeight = 18.sp,
-                    color = Color(0xFFB9C0B9)
+                    fontWeight = FontWeight.Medium,
+                    fontSize = 13.5.sp,
+                    lineHeight = 22.sp,
+                    style = TextStyle(fontFeatureSettings = "tnum"),
+                    color = Color(0xFFD5DBD4)
                 )
             }
         }
@@ -938,7 +962,7 @@ fun CopyPromptScreen(
                                 copied = false
                             }
                         } else {
-                            toastMsg = "Prompt too large — tap Share"
+                            toastMsg = "Prompt too large \u2014 tap Share"
                         }
                     },
                     modifier = Modifier.weight(1f)
@@ -946,8 +970,8 @@ fun CopyPromptScreen(
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .height(52.dp)
-                            .clip(RoundedCornerShape(99.dp))
+                            .height(60.dp)
+                            .clip(RoundedCornerShape(16.dp))
                             .background(RawColors.Mint),
                         horizontalArrangement = Arrangement.Center,
                         verticalAlignment = Alignment.CenterVertically
@@ -960,7 +984,7 @@ fun CopyPromptScreen(
                         Spacer(modifier = Modifier.width(8.dp))
                         SplitFlapText(
                             text = if (copied) "Copied" else "Copy prompt",
-                            style = RawTypography.labelLarge,
+                            style = RawTypography.labelLarge.copy(fontSize = 18.sp),
                             color = RawColors.PrimaryBtnText
                         )
                     }
@@ -968,7 +992,7 @@ fun CopyPromptScreen(
 
                 RawSecondaryButton(
                     text = "Share",
-                    height = 52.dp,
+                    height = 60.dp,
                     leadingIcon = RawIconType.SHARE,
                     onClick = {
                         scope.launch {
@@ -1118,20 +1142,18 @@ fun CodePasteScreen(
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .height(58.dp),
+                    .height(62.dp),
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                CircleActionButton(icon = RawIconType.BACK, onClick = onBack, size = 42.dp)
+                CircleActionButton(icon = RawIconType.BACK, onClick = onBack, size = 50.dp)
                 Row(
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
                     Text(
                         text = "${codeText.length} chars (unlimited)",
-                        fontFamily = JetBrainsMonoFamily,
-                        fontSize = 11.sp,
-                        color = RawColors.TextMuted
+                        style = RawTypography.labelMedium
                     )
                     RawPixelMascot(kind = PixelMascotKind.CODE_BOT, size = 38.dp)
                 }
@@ -1151,7 +1173,7 @@ fun CodePasteScreen(
             ) {
                 RawSecondaryButton(
                     text = "Paste",
-                    height = 40.dp,
+                    height = 50.dp,
                     leadingIcon = RawIconType.PASTE,
                     fillWidth = false,
                     onClick = {
@@ -1162,21 +1184,21 @@ fun CodePasteScreen(
                                 forceRawEditLarge = false
                                 runValidation(full)
                             } else {
-                                toastMsg = "Clipboard empty — copy code or pick .html file"
+                                toastMsg = "Clipboard empty \u2014 copy code or pick .html file"
                             }
                         }
                     }
                 )
                 RawSecondaryButton(
                     text = "Pick .html file",
-                    height = 40.dp,
+                    height = 50.dp,
                     leadingIcon = RawIconType.FILE,
                     fillWidth = false,
                     onClick = { htmlFilePicker.launch(arrayOf("text/html", "text/plain", "*/*")) }
                 )
                 RawSecondaryButton(
                     text = "Load 6s sample",
-                    height = 40.dp,
+                    height = 50.dp,
                     leadingIcon = RawIconType.FILM,
                     fillWidth = false,
                     onClick = {
@@ -1197,7 +1219,7 @@ fun CodePasteScreen(
                 if (codeText.isNotEmpty()) {
                     RawSecondaryButton(
                         text = "Clear",
-                        height = 40.dp,
+                        height = 50.dp,
                         leadingIcon = RawIconType.CLOSE,
                         fillWidth = false,
                         onClick = {
@@ -1214,16 +1236,15 @@ fun CodePasteScreen(
                 Column(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .clip(RoundedCornerShape(22.dp))
+                        .clip(RoundedCornerShape(20.dp))
                         .background(RawColors.CardSurface)
-                        .border(1.dp, RawColors.Divider, RoundedCornerShape(22.dp))
+                        .border(1.dp, RawColors.Divider, RoundedCornerShape(20.dp))
                         .padding(16.dp),
                     verticalArrangement = Arrangement.spacedBy(10.dp)
                 ) {
                     Text(
-                        text = "${codeText.count { it == '\n' } + 1} lines  •  ${codeText.length} chars (collapsed)",
-                        fontFamily = JetBrainsMonoFamily,
-                        fontSize = 11.5.sp,
+                        text = "${codeText.count { it == '\n' } + 1} lines  \u2022  ${codeText.length} chars (collapsed)",
+                        style = RawTypography.labelMedium,
                         color = RawColors.Mint
                     )
                     val previewStr = codeText.take(1200) + "\n\n... (${codeText.length - 1700} middle chars kept intact) ...\n\n" + codeText.takeLast(500)
@@ -1236,8 +1257,10 @@ fun CodePasteScreen(
                         Text(
                             text = previewStr,
                             fontFamily = JetBrainsMonoFamily,
-                            fontSize = 11.sp,
-                            lineHeight = 16.sp,
+                            fontWeight = FontWeight.Medium,
+                            fontSize = 13.sp,
+                            lineHeight = 20.sp,
+                            style = TextStyle(fontFeatureSettings = "tnum"),
                             color = RawColors.TextMuted
                         )
                     }
@@ -1247,13 +1270,13 @@ fun CodePasteScreen(
                     ) {
                         RawSecondaryButton(
                             text = "Show editor",
-                            height = 42.dp,
+                            height = 50.dp,
                             onClick = { forceRawEditLarge = true },
                             modifier = Modifier.weight(1f)
                         )
                         RawSecondaryButton(
                             text = "Clear",
-                            height = 42.dp,
+                            height = 50.dp,
                             isDanger = true,
                             onClick = {
                                 codeText = ""
@@ -1272,13 +1295,15 @@ fun CodePasteScreen(
                         validationResult = null
                     },
                     placeholder = { Text("Paste HTML code here...", color = RawColors.TextMuted) },
-                    textStyle = RawTypography.labelMedium.copy(
+                    textStyle = TextStyle(
                         fontFamily = JetBrainsMonoFamily,
-                        fontSize = 12.sp,
-                        lineHeight = 19.sp,
+                        fontWeight = FontWeight.Medium,
+                        fontSize = 14.sp,
+                        lineHeight = 23.sp,
+                        fontFeatureSettings = "tnum",
                         color = RawColors.TextPrimary
                     ),
-                    shape = RoundedCornerShape(16.dp),
+                    shape = RoundedCornerShape(12.dp),
                     colors = OutlinedTextFieldDefaults.colors(
                         focusedBorderColor = RawColors.MintFocus,
                         unfocusedBorderColor = RawColors.Divider,
@@ -1312,9 +1337,9 @@ fun CodePasteScreen(
                         Row(
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .clip(RoundedCornerShape(16.dp))
+                                .clip(RoundedCornerShape(12.dp))
                                 .background(RawColors.RaisedCard)
-                                .border(1.dp, RawColors.Divider, RoundedCornerShape(16.dp))
+                                .border(1.dp, RawColors.Divider, RoundedCornerShape(12.dp))
                                 .padding(horizontal = 16.dp, vertical = 14.dp),
                             verticalAlignment = Alignment.CenterVertically,
                             horizontalArrangement = Arrangement.spacedBy(12.dp)
@@ -1326,7 +1351,10 @@ fun CodePasteScreen(
                             )
                             Text(
                                 text = "Testing code in offline sandbox...",
-                                style = RawTypography.bodyLarge.copy(fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
+                                fontFamily = BricolageFamily,
+                                fontWeight = FontWeight.SemiBold,
+                                fontSize = 15.5.sp,
+                                color = RawColors.TextPrimary
                             )
                         }
                     }
@@ -1338,30 +1366,35 @@ fun CodePasteScreen(
                         Row(
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .clip(RoundedCornerShape(16.dp))
+                                .clip(RoundedCornerShape(12.dp))
                                 .background(bg)
-                                .border(1.dp, bd, RoundedCornerShape(16.dp))
+                                .border(1.dp, bd, RoundedCornerShape(12.dp))
                                 .padding(horizontal = 16.dp, vertical = 14.dp),
                             verticalAlignment = Alignment.CenterVertically,
                             horizontalArrangement = Arrangement.spacedBy(12.dp)
                         ) {
                             RawIcon(
                                 type = if (res.isValid) RawIconType.CHECK else RawIconType.WARN,
-                                size = 20.dp,
+                                size = 22.dp,
                                 tint = fg
                             )
                             Column(modifier = Modifier.weight(1f)) {
                                 Text(
                                     text = res.summaryMessage,
-                                    style = RawTypography.bodyLarge.copy(fontSize = 13.sp, fontWeight = FontWeight.SemiBold),
+                                    fontFamily = BricolageFamily,
+                                    fontWeight = FontWeight.SemiBold,
+                                    fontSize = 15.5.sp,
+                                    lineHeight = 21.sp,
                                     color = fg
                                 )
                                 res.warning?.let { w ->
-                                    Spacer(modifier = Modifier.height(3.dp))
+                                    Spacer(modifier = Modifier.height(4.dp))
                                     Text(
                                         text = w,
-                                        fontSize = 12.sp,
-                                        color = fg.copy(alpha = 0.78f)
+                                        fontFamily = BricolageFamily,
+                                        fontWeight = FontWeight.SemiBold,
+                                        fontSize = 14.sp,
+                                        color = fg.copy(alpha = 0.85f)
                                     )
                                 }
                             }
@@ -1397,10 +1430,10 @@ fun CodePasteScreen(
                         Row(
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .height(46.dp)
-                                .clip(RoundedCornerShape(99.dp))
+                                .height(56.dp)
+                                .clip(RoundedCornerShape(16.dp))
                                 .background(RawColors.RaisedCard)
-                                .border(1.dp, RawColors.DividerStrong, RoundedCornerShape(99.dp)),
+                                .border(1.dp, RawColors.DividerStrong, RoundedCornerShape(16.dp)),
                             horizontalArrangement = Arrangement.Center,
                             verticalAlignment = Alignment.CenterVertically
                         ) {
@@ -1414,7 +1447,10 @@ fun CodePasteScreen(
                             Spacer(modifier = Modifier.width(8.dp))
                             Text(
                                 text = "Contact sheet (auto-fit & PDF)",
-                                style = RawTypography.labelLarge.copy(fontSize = 13.5.sp)
+                                fontFamily = BricolageFamily,
+                                fontWeight = FontWeight.SemiBold,
+                                fontSize = 17.sp,
+                                color = RawColors.TextPrimary
                             )
                         }
                     }
@@ -1425,7 +1461,7 @@ fun CodePasteScreen(
                     ) {
                         RawSecondaryButton(
                             text = "Save",
-                            height = 52.dp,
+                            height = 60.dp,
                             onClick = {
                                 scope.launch {
                                     onValidatedAndSaved(buildUpdatedProject(valid))
@@ -1435,6 +1471,7 @@ fun CodePasteScreen(
                         )
                         BigPrimaryButton(
                             text = if (project.audioUri.isNotBlank()) "Create video" else "Use code",
+                            height = 60.dp,
                             onClick = {
                                 scope.launch {
                                     val updated = buildUpdatedProject(valid)
@@ -1469,7 +1506,7 @@ fun CodePasteScreen(
             modifier = Modifier
                 .align(Alignment.BottomCenter)
                 .navigationBarsPadding()
-                .padding(bottom = if (valid != null) 144.dp else 86.dp)
+                .padding(bottom = if (valid != null) 156.dp else 94.dp)
         )
     }
 }

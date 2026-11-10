@@ -52,6 +52,7 @@ import androidx.compose.ui.graphics.PathEffect
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -65,7 +66,8 @@ import com.rawedit.app.ui.motion.RawEasings
 import com.rawedit.app.ui.motion.RawPressButton
 import com.rawedit.app.ui.motion.SplitFlapText
 import com.rawedit.app.ui.motion.rememberAnimationsEnabled
-import com.rawedit.app.ui.theme.InterFontFamily
+import com.rawedit.app.ui.theme.BricolageCondensedFamily
+import com.rawedit.app.ui.theme.BricolageFamily
 import com.rawedit.app.ui.theme.JetBrainsMonoFamily
 import com.rawedit.app.ui.theme.RawColors
 import com.rawedit.app.ui.theme.RawTypography
@@ -94,7 +96,7 @@ private val ONBOARDING_PAGES = listOf(
         chipBottom = "552 KB zip"
     ),
     OnboardingPageData(
-        titleWords = listOf("Paste", "and", "create!"),
+        titleWords = listOf("Paste", "and", "create"),
         subtitle = "Paste the code back. Get a sharp 1080p typography reel - free and offline.",
         chipTop = "1080p MP4",
         chipBottom = "offline"
@@ -199,10 +201,10 @@ fun OnboardingScreen(
                     ) {
                         Text(
                             text = "RAW",
-                            fontFamily = InterFontFamily,
+                            fontFamily = BricolageCondensedFamily,
                             fontWeight = FontWeight.ExtraBold,
-                            fontSize = 30.sp,
-                            letterSpacing = (-1.5).sp,
+                            fontSize = 28.sp,
+                            letterSpacing = (-1.2).sp,
                             color = Color.White
                         )
                     }
@@ -260,10 +262,11 @@ fun OnboardingScreen(
             KineticHeading(
                 words = current.titleWords,
                 style = RawTypography.displayLarge,
+                highlightLastWord = true,
                 triggerKey = pagerState.currentPage
             )
-            Spacer(modifier = Modifier.height(12.dp))
-            Box(modifier = Modifier.height(54.dp)) {
+            Spacer(modifier = Modifier.height(14.dp))
+            Box(modifier = Modifier.defaultMinSize(minHeight = 72.dp)) {
                 AnimatedContent(
                     targetState = current.subtitle,
                     transitionSpec = {
@@ -274,7 +277,7 @@ fun OnboardingScreen(
                 ) { sub ->
                     Text(
                         text = sub,
-                        style = RawTypography.bodyLarge.copy(fontSize = 14.sp, lineHeight = 20.sp),
+                        style = RawTypography.bodyLarge.copy(fontSize = 16.5.sp, lineHeight = 24.5.sp),
                         color = RawColors.TextMuted
                     )
                 }
@@ -295,8 +298,10 @@ fun OnboardingScreen(
             ) {
                 Text(
                     text = "Skip",
-                    style = RawTypography.titleMedium.copy(fontSize = 15.sp),
-                    color = RawColors.TextMuted,
+                    fontFamily = BricolageFamily,
+                    fontWeight = FontWeight.SemiBold,
+                    fontSize = 17.sp,
+                    color = RawColors.TextPrimary,
                     modifier = Modifier
                         .clip(RoundedCornerShape(12.dp))
                         .clickable(
@@ -304,7 +309,7 @@ fun OnboardingScreen(
                             indication = null,
                             onClick = onFinished
                         )
-                        .padding(horizontal = 6.dp, vertical = 10.dp)
+                        .padding(horizontal = 4.dp, vertical = 12.dp)
                 )
 
                 RawPressButton(
@@ -321,8 +326,8 @@ fun OnboardingScreen(
                     Box(
                         modifier = Modifier
                             .defaultMinSize(minWidth = 150.dp)
-                            .height(52.dp)
-                            .clip(RoundedCornerShape(99.dp))
+                            .height(58.dp)
+                            .clip(RoundedCornerShape(16.dp))
                             .background(RawColors.Mint)
                             .animateContentSize(
                                 animationSpec = if (animEnabled) spring(dampingRatio = 0.78f, stiffness = 360f) else tween(0)
@@ -332,7 +337,7 @@ fun OnboardingScreen(
                     ) {
                         SplitFlapText(
                             text = if (isLast) "Get started" else "Next",
-                            style = RawTypography.labelLarge,
+                            style = RawTypography.labelLarge.copy(fontSize = 18.5.sp),
                             color = RawColors.PrimaryBtnText
                         )
                     }
@@ -358,8 +363,9 @@ private fun OnboardingFloatingChip(
         Text(
             text = text,
             fontFamily = JetBrainsMonoFamily,
-            fontWeight = FontWeight.SemiBold,
-            fontSize = 11.sp,
+            fontWeight = FontWeight.Medium,
+            fontSize = 13.sp,
+            style = TextStyle(fontFeatureSettings = "tnum"),
             color = textColor,
             maxLines = 1,
             softWrap = false

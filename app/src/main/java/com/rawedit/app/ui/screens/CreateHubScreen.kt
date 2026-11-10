@@ -47,6 +47,7 @@ import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.StrokeJoin
 import androidx.compose.ui.graphics.drawscope.Fill
 import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -67,7 +68,7 @@ import com.rawedit.app.ui.motion.RawEasings
 import com.rawedit.app.ui.motion.RawPressButton
 import com.rawedit.app.ui.motion.SwipeToCreateSlider
 import com.rawedit.app.ui.motion.rememberAnimationsEnabled
-import com.rawedit.app.ui.theme.InterFontFamily
+import com.rawedit.app.ui.theme.BricolageFamily
 import com.rawedit.app.ui.theme.JetBrainsMonoFamily
 import com.rawedit.app.ui.theme.RawColors
 import com.rawedit.app.ui.theme.RawTypography
@@ -167,19 +168,19 @@ fun CreateHubScreen(
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .height(58.dp),
+                        .height(62.dp),
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     CircleActionButton(
                         icon = RawIconType.BACK,
                         onClick = onBack,
-                        size = 42.dp
+                        size = 50.dp
                     )
                     CircleActionButton(
                         icon = RawIconType.TRASH,
                         onClick = { showDeleteConfirm = true },
-                        size = 42.dp,
+                        size = 50.dp,
                         iconTint = RawColors.ErrorCoral
                     )
                 }
@@ -282,17 +283,16 @@ fun CreateHubScreen(
                 ) {
                     Text(
                         text = "Reel Steps",
-                        fontFamily = InterFontFamily,
-                        fontWeight = FontWeight.Bold,
-                        fontSize = 19.sp,
-                        letterSpacing = (-0.5).sp,
+                        fontFamily = BricolageFamily,
+                        fontWeight = FontWeight.SemiBold,
+                        fontSize = 23.sp,
                         color = RawColors.TextPrimary
                     )
                     Box(
                         modifier = Modifier
-                            .clip(RoundedCornerShape(99.dp))
+                            .clip(RoundedCornerShape(6.dp))
                             .background(badgeBg)
-                            .padding(horizontal = 11.dp, vertical = 6.dp)
+                            .padding(horizontal = 12.dp, vertical = 8.dp)
                     ) {
                         AnimatedContent(
                             targetState = canCreate,
@@ -304,11 +304,11 @@ fun CreateHubScreen(
                             label = "hub_ready_pill"
                         ) { ready ->
                             Text(
-                                text = if (ready) "READY TO CREATE" else "STEPS 1 & 3 NEEDED",
+                                text = if (ready) "Ready to create" else "Steps 1 & 3 needed",
                                 fontFamily = JetBrainsMonoFamily,
-                                fontWeight = FontWeight.SemiBold,
-                                fontSize = 10.sp,
-                                letterSpacing = 0.6.sp,
+                                fontWeight = FontWeight.Medium,
+                                fontSize = 12.sp,
+                                style = TextStyle(fontFeatureSettings = "tnum"),
                                 color = if (ready) RawColors.Mint else RawColors.TextMuted
                             )
                         }
@@ -327,23 +327,26 @@ fun CreateHubScreen(
                         Row(
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .clip(RoundedCornerShape(22.dp))
+                                .clip(RoundedCornerShape(20.dp))
                                 .background(RawColors.CardSurface)
-                                .border(1.dp, Color.White, RoundedCornerShape(22.dp))
-                                .padding(14.dp),
+                                .border(1.dp, Color.White, RoundedCornerShape(20.dp))
+                                .padding(17.dp),
                             verticalAlignment = Alignment.CenterVertically,
                             horizontalArrangement = Arrangement.spacedBy(12.dp)
                         ) {
                             RawPixelMascot(
                                 kind = PixelMascotKind.LENS_BOT,
-                                size = 34.dp,
+                                size = 38.dp,
                                 interactive = false,
                                 noBob = true,
                                 noBlink = true
                             )
                             Text(
                                 text = "Preview contact sheet (auto-fit & PDF)",
-                                style = RawTypography.titleMedium.copy(fontWeight = FontWeight.Bold),
+                                fontFamily = BricolageFamily,
+                                fontWeight = FontWeight.SemiBold,
+                                fontSize = 18.sp,
+                                color = RawColors.TextPrimary,
                                 modifier = Modifier.weight(1f)
                             )
                             RawIcon(
@@ -383,7 +386,7 @@ fun CreateHubScreen(
             modifier = Modifier
                 .align(Alignment.BottomCenter)
                 .navigationBarsPadding()
-                .padding(bottom = 86.dp)
+                .padding(bottom = 94.dp)
         )
     }
 
@@ -471,18 +474,19 @@ private fun HubStatPill(
     Row(
         modifier = modifier
             .clip(RoundedCornerShape(14.dp))
-            .border(1.dp, RawColors.Divider, RoundedCornerShape(14.dp))
-            .padding(horizontal = 14.dp, vertical = 12.dp),
+            .border(1.dp, RawColors.DividerStrong, RoundedCornerShape(14.dp))
+            .padding(horizontal = 15.dp, vertical = 15.dp),
         verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(8.dp)
+        horizontalArrangement = Arrangement.spacedBy(10.dp)
     ) {
-        RawIcon(type = icon, size = 18.dp, tint = RawColors.TextMuted)
+        RawIcon(type = icon, size = 18.dp, tint = RawColors.TextPrimary)
         Text(
             text = text,
             fontFamily = JetBrainsMonoFamily,
-            fontWeight = FontWeight.SemiBold,
-            fontSize = 11.5.sp,
-            color = RawColors.TextMuted,
+            fontWeight = FontWeight.Medium,
+            fontSize = 13.5.sp,
+            style = TextStyle(fontFeatureSettings = "tnum"),
+            color = RawColors.TextPrimary,
             maxLines = 1,
             overflow = TextOverflow.Ellipsis
         )
@@ -507,24 +511,24 @@ private fun StepActionCard(
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .clip(RoundedCornerShape(22.dp))
+                .clip(RoundedCornerShape(20.dp))
                 .background(RawColors.CardSurface)
-                .border(1.dp, RawColors.Divider, RoundedCornerShape(22.dp))
-                .padding(14.dp),
+                .border(1.dp, RawColors.Divider, RoundedCornerShape(20.dp))
+                .padding(horizontal = 17.dp, vertical = 18.dp),
             verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(12.dp)
+            horizontalArrangement = Arrangement.spacedBy(14.dp)
         ) {
             Box(
                 modifier = Modifier
-                    .size(44.dp)
-                    .clip(RoundedCornerShape(14.dp))
+                    .size(48.dp)
+                    .clip(RoundedCornerShape(12.dp))
                     .background(RawColors.RaisedCard)
-                    .border(1.dp, RawColors.Divider, RoundedCornerShape(14.dp)),
+                    .border(1.dp, RawColors.Divider, RoundedCornerShape(12.dp)),
                 contentAlignment = Alignment.Center
             ) {
                 RawIcon(
                     type = step.icon,
-                    size = 20.dp,
+                    size = 22.dp,
                     tint = if (step.enabled) RawColors.TextPrimary else RawColors.TextMuted
                 )
             }
@@ -532,16 +536,20 @@ private fun StepActionCard(
             Column(modifier = Modifier.weight(1f)) {
                 Text(
                     text = "${step.number}. ${step.title}",
-                    style = RawTypography.titleMedium.copy(fontSize = 15.5.sp, fontWeight = FontWeight.Bold),
+                    fontFamily = BricolageFamily,
+                    fontWeight = FontWeight.SemiBold,
+                    fontSize = 19.sp,
                     color = if (step.enabled) RawColors.TextPrimary else RawColors.TextMuted,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis
                 )
-                Spacer(modifier = Modifier.height(3.dp))
+                Spacer(modifier = Modifier.height(4.dp))
                 Text(
                     text = step.subtitle,
-                    fontSize = 12.sp,
-                    lineHeight = 16.sp,
+                    fontFamily = BricolageFamily,
+                    fontWeight = FontWeight.Medium,
+                    fontSize = 14.sp,
+                    lineHeight = 19.sp,
                     color = RawColors.TextMuted,
                     maxLines = 2,
                     overflow = TextOverflow.Ellipsis
@@ -550,16 +558,16 @@ private fun StepActionCard(
 
             Box(
                 modifier = Modifier
-                    .clip(RoundedCornerShape(99.dp))
+                    .clip(RoundedCornerShape(6.dp))
                     .background(badgeBg)
-                    .padding(horizontal = 9.dp, vertical = 5.dp)
+                    .padding(horizontal = 10.dp, vertical = 6.dp)
             ) {
                 Text(
-                    text = step.statusText.uppercase(),
+                    text = step.statusText,
                     fontFamily = JetBrainsMonoFamily,
-                    fontWeight = FontWeight.SemiBold,
-                    fontSize = 9.5.sp,
-                    letterSpacing = 0.7.sp,
+                    fontWeight = FontWeight.Medium,
+                    fontSize = 12.sp,
+                    style = TextStyle(fontFeatureSettings = "tnum"),
                     color = if (step.statusDone) RawColors.Mint else RawColors.TextMuted,
                     maxLines = 1,
                     softWrap = false

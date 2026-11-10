@@ -184,27 +184,6 @@ private fun MainAuthenticatedHost(
         }
     }
 
-    fun openQuickStep(buildStep: (Long) -> AppRoute) {
-        if (navigatingNewDraft) return
-        navigatingNewDraft = true
-        scope.launch {
-            try {
-                val activeDraft = projects.firstOrNull { it.state == ProjectEntity.STATE_IN_PROGRESS }
-                val projectId = activeDraft?.id ?: container.repository.createEmptyProject()
-                val hub = AppRoute.CreateHub(projectId)
-                val step = buildStep(projectId)
-                isForward = true
-                backStack = if (backStack.lastOrNull() == hub) {
-                    backStack + step
-                } else {
-                    backStack + hub + step
-                }
-            } finally {
-                navigatingNewDraft = false
-            }
-        }
-    }
-
     BackHandler(enabled = backStack.size > 1 || (currentRoute == AppRoute.Tabs && currentTab != MainTab.HOME)) {
         if (backStack.size > 1) {
             popRoute()
@@ -231,10 +210,9 @@ private fun MainAuthenticatedHost(
                         ) { tab ->
                             when (tab) {
                                 MainTab.HOME -> {
-                                    val recentVideos = remember(videos) { videos.take(2) }
                                     HomeScreen(
                                         userProfile = userProfile,
-                                        recentVideos = recentVideos,
+                                        reelsCount = videos.size,
                                         onStartNewReel = { _ ->
                                             if (!navigatingNewDraft) {
                                                 navigatingNewDraft = true
@@ -247,11 +225,7 @@ private fun MainAuthenticatedHost(
                                                     }
                                                 }
                                             }
-                                        },
-                                        onOpenVoiceStep = { openQuickStep { AppRoute.AddVoice(it) } },
-                                        onOpenPromptStep = { openQuickStep { AppRoute.CopyPrompt(it) } },
-                                        onOpenCodeStep = { openQuickStep { AppRoute.CodePaste(it) } },
-                                        onOpenReel = { vid -> pushRoute(AppRoute.Result(vid, celebrate = false)) }
+                                        }
                                     )
                                 }
 

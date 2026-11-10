@@ -27,9 +27,9 @@ import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.wrapContentSize
@@ -55,10 +55,9 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.draw.rotate
-import androidx.compose.ui.graphics.Brush
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -84,10 +83,11 @@ import com.rawedit.app.ui.icons.RawPixelMascot
 import com.rawedit.app.ui.motion.RawEasings
 import com.rawedit.app.ui.motion.RawPressButton
 import com.rawedit.app.ui.motion.rememberAnimationsEnabled
-import com.rawedit.app.ui.theme.InterFontFamily
+import com.rawedit.app.ui.theme.BricolageCondensedFamily
+import com.rawedit.app.ui.theme.BricolageFamily
+import com.rawedit.app.ui.theme.InstrumentSerifFamily
 import com.rawedit.app.ui.theme.JetBrainsMonoFamily
 import com.rawedit.app.ui.theme.RawColors
-import com.rawedit.app.ui.theme.RawTypography
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
@@ -167,37 +167,31 @@ fun ProfileScreen(
     ) {
         LazyColumn(
             modifier = Modifier.fillMaxSize(),
-            contentPadding = PaddingValues(bottom = 112.dp)
+            contentPadding = PaddingValues(bottom = 120.dp)
         ) {
-            // Mint Radial Hero (.ph) + Overlapping Straight ID Card (.idc)
+            // Solid CardSurface Hero (.ph) + Overlapping Straight ID Card (.idc)
             item {
                 Column(modifier = Modifier.fillMaxWidth()) {
                     Box(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .defaultMinSize(minHeight = 180.dp)
+                            .defaultMinSize(minHeight = 174.dp)
                             .clipToBounds()
-                            .background(
-                                Brush.radialGradient(
-                                    colors = listOf(
-                                        RawColors.Mint.copy(alpha = 0.11f),
-                                        Color.Transparent
-                                    )
-                                )
-                            )
+                            .background(RawColors.HeroSurface)
                     ) {
-                        // Watermark "ID" kept inside matchParentSize so long names can wrap safely
+                        // Serif watermark "ID" inside matchParentSize
                         Box(modifier = Modifier.matchParentSize()) {
                             Text(
                                 text = "ID",
-                                fontFamily = InterFontFamily,
-                                fontWeight = FontWeight.ExtraBold,
-                                fontSize = 176.sp,
-                                letterSpacing = (-10).sp,
-                                color = RawColors.TextPrimary.copy(alpha = 0.04f),
+                                fontFamily = InstrumentSerifFamily,
+                                fontWeight = FontWeight.Normal,
+                                fontSize = 210.sp,
+                                lineHeight = 210.sp,
+                                letterSpacing = (-5).sp,
+                                color = RawColors.TextPrimary.copy(alpha = 0.045f),
                                 modifier = Modifier
                                     .align(Alignment.TopEnd)
-                                    .offset(x = 6.dp, y = (-12).dp)
+                                    .offset(x = (-2).dp, y = (-16).dp)
                             )
                         }
 
@@ -214,12 +208,12 @@ fun ProfileScreen(
                             modifier = Modifier
                                 .fillMaxWidth()
                                 .statusBarsPadding()
-                                .padding(start = 18.dp, end = 18.dp, top = 8.dp, bottom = 36.dp)
+                                .padding(start = 18.dp, end = 18.dp, top = 6.dp, bottom = 38.dp)
                         ) {
                             Row(
                                 modifier = Modifier
                                     .fillMaxWidth()
-                                    .height(52.dp),
+                                    .height(54.dp),
                                 horizontalArrangement = Arrangement.SpaceBetween,
                                 verticalAlignment = Alignment.CenterVertically
                             ) {
@@ -230,10 +224,15 @@ fun ProfileScreen(
                                     noBlink = true
                                 )
                             }
-                            Spacer(modifier = Modifier.height(6.dp))
+                            Spacer(modifier = Modifier.height(10.dp))
                             Text(
-                                text = "Hello again, $displayName!",
-                                style = RawTypography.headlineLarge.copy(fontSize = 29.sp)
+                                text = "Profile",
+                                fontFamily = InstrumentSerifFamily,
+                                fontWeight = FontWeight.Normal,
+                                fontSize = 40.sp,
+                                lineHeight = 42.sp,
+                                letterSpacing = (-0.8).sp,
+                                color = RawColors.TextPrimary
                             )
                         }
                     }
@@ -265,11 +264,11 @@ fun ProfileScreen(
                                     verticalAlignment = Alignment.CenterVertically
                                 ) {
                                     Text(
-                                        text = "PROFILE  •  REEL MAKER",
+                                        text = "Profile  \u2022  reel maker",
                                         fontFamily = JetBrainsMonoFamily,
-                                        fontWeight = FontWeight.ExtraBold,
-                                        fontSize = 10.5.sp,
-                                        letterSpacing = 1.0.sp,
+                                        fontWeight = FontWeight.Medium,
+                                        fontSize = 13.sp,
+                                        letterSpacing = 0.2.sp,
                                         color = RawColors.TextPrimary
                                     )
                                     RawPixelMascot(kind = PixelMascotKind.PHANTOM_BUDDY, size = 30.dp)
@@ -311,18 +310,18 @@ fun ProfileScreen(
                                         ) {
                                             Text(
                                                 text = displayName,
-                                                fontFamily = InterFontFamily,
-                                                fontWeight = FontWeight.Black,
-                                                fontSize = 24.sp,
-                                                letterSpacing = (-1.0).sp,
+                                                fontFamily = BricolageFamily,
+                                                fontWeight = FontWeight.SemiBold,
+                                                fontSize = 28.sp,
+                                                lineHeight = 32.sp,
                                                 color = RawColors.TextPrimary,
-                                                maxLines = 1,
+                                                maxLines = 2,
                                                 overflow = TextOverflow.Ellipsis,
                                                 modifier = Modifier.weight(1f, fill = false)
                                             )
                                             RawIcon(
                                                 type = RawIconType.EDIT,
-                                                size = 15.dp,
+                                                size = 16.dp,
                                                 tint = RawColors.TextMuted
                                             )
                                         }
@@ -330,7 +329,9 @@ fun ProfileScreen(
                                         Text(
                                             text = "joined ${FormatHelpers.formatDate(userProfile.joinDateMillis)}",
                                             fontFamily = JetBrainsMonoFamily,
-                                            fontSize = 11.sp,
+                                            fontWeight = FontWeight.Medium,
+                                            fontSize = 13.sp,
+                                            style = TextStyle(fontFeatureSettings = "tnum"),
                                             color = RawColors.TextMuted
                                         )
                                     }
@@ -351,11 +352,25 @@ fun ProfileScreen(
                                                 }
                                             },
                                             singleLine = true,
-                                            placeholder = { Text("Your name", color = RawColors.TextMuted) },
+                                            textStyle = TextStyle(
+                                                fontFamily = BricolageFamily,
+                                                fontWeight = FontWeight.SemiBold,
+                                                fontSize = 19.sp,
+                                                color = RawColors.TextPrimary
+                                            ),
+                                            placeholder = {
+                                                Text(
+                                                    text = "Your name",
+                                                    fontFamily = BricolageFamily,
+                                                    fontWeight = FontWeight.Medium,
+                                                    fontSize = 17.sp,
+                                                    color = RawColors.TextMuted
+                                                )
+                                            },
                                             shape = RoundedCornerShape(14.dp),
                                             colors = OutlinedTextFieldDefaults.colors(
                                                 focusedBorderColor = RawColors.MintFocus,
-                                                unfocusedBorderColor = RawColors.Divider,
+                                                unfocusedBorderColor = RawColors.DividerStrong,
                                                 focusedContainerColor = RawColors.RaisedCard,
                                                 unfocusedContainerColor = RawColors.RaisedCard,
                                                 focusedTextColor = RawColors.TextPrimary,
@@ -376,15 +391,17 @@ fun ProfileScreen(
                                         ) {
                                             Box(
                                                 modifier = Modifier
-                                                    .height(34.dp)
-                                                    .clip(RoundedCornerShape(99.dp))
+                                                    .height(36.dp)
+                                                    .clip(RoundedCornerShape(16.dp))
                                                     .background(RawColors.Mint)
                                                     .padding(horizontal = 16.dp),
                                                 contentAlignment = Alignment.Center
                                             ) {
                                                 Text(
                                                     text = "Done",
-                                                    style = RawTypography.labelLarge.copy(fontSize = 13.sp, fontWeight = FontWeight.SemiBold),
+                                                    fontFamily = BricolageFamily,
+                                                    fontWeight = FontWeight.SemiBold,
+                                                    fontSize = 15.sp,
                                                     color = RawColors.PrimaryBtnText
                                                 )
                                             }
@@ -393,7 +410,7 @@ fun ProfileScreen(
                                 }
                             }
 
-                            // Right vertical "ID CARD" spine (.spine)
+                            // Right vertical "ID card" spine (.spine)
                             Box(
                                 modifier = Modifier
                                     .width(42.dp)
@@ -402,11 +419,11 @@ fun ProfileScreen(
                                 contentAlignment = Alignment.Center
                             ) {
                                 Text(
-                                    text = "ID CARD",
+                                    text = "ID card",
                                     fontFamily = JetBrainsMonoFamily,
-                                    fontWeight = FontWeight.SemiBold,
+                                    fontWeight = FontWeight.Medium,
                                     fontSize = 11.sp,
-                                    letterSpacing = 3.5.sp,
+                                    letterSpacing = 0.7.sp,
                                     color = RawColors.TextMuted,
                                     maxLines = 1,
                                     softWrap = false,
@@ -420,16 +437,16 @@ fun ProfileScreen(
                 }
             }
 
-            // Stats card (.card.pad)
+            // Stats card (.card.pad) with tabular condensed numerals
             item {
                 Column(
                     modifier = Modifier
                         .padding(horizontal = 18.dp)
-                        .offset(y = (-6).dp)
+                        .offset(y = (-8).dp)
                         .fillMaxWidth()
-                        .clip(RoundedCornerShape(22.dp))
+                        .clip(RoundedCornerShape(20.dp))
                         .background(RawColors.CardSurface)
-                        .border(1.dp, RawColors.Divider, RoundedCornerShape(22.dp))
+                        .border(1.dp, RawColors.Divider, RoundedCornerShape(20.dp))
                         .padding(16.dp)
                 ) {
                     Row(
@@ -440,30 +457,39 @@ fun ProfileScreen(
                         Column {
                             Text(
                                 text = "${videos.size}",
-                                fontFamily = InterFontFamily,
-                                fontWeight = FontWeight.ExtraBold,
-                                fontSize = 48.sp,
-                                lineHeight = 48.sp,
-                                letterSpacing = (-2.4).sp,
+                                fontFamily = BricolageCondensedFamily,
+                                fontWeight = FontWeight.Medium,
+                                fontSize = 58.sp,
+                                lineHeight = 58.sp,
+                                letterSpacing = (-1.6).sp,
+                                style = TextStyle(fontFeatureSettings = "tnum"),
                                 color = RawColors.TextPrimary
                             )
                             Text(
                                 text = "reels made",
-                                style = RawTypography.labelMedium
+                                fontFamily = JetBrainsMonoFamily,
+                                fontWeight = FontWeight.Medium,
+                                fontSize = 13.sp,
+                                color = RawColors.TextMuted
                             )
                         }
                         Column(horizontalAlignment = Alignment.End) {
                             Text(
-                                text = FormatHelpers.formatDurationLong(totalVideoSec),
-                                fontFamily = InterFontFamily,
-                                fontWeight = FontWeight.ExtraBold,
-                                fontSize = 32.sp,
-                                letterSpacing = (-1.4).sp,
+                                text = FormatHelpers.formatDuration(totalVideoSec),
+                                fontFamily = BricolageCondensedFamily,
+                                fontWeight = FontWeight.Medium,
+                                fontSize = 42.sp,
+                                lineHeight = 44.sp,
+                                letterSpacing = (-1.1).sp,
+                                style = TextStyle(fontFeatureSettings = "tnum"),
                                 color = RawColors.TextPrimary
                             )
                             Text(
                                 text = "Total video time",
-                                style = RawTypography.labelMedium
+                                fontFamily = JetBrainsMonoFamily,
+                                fontWeight = FontWeight.Medium,
+                                fontSize = 13.sp,
+                                color = RawColors.TextMuted
                             )
                         }
                     }
@@ -477,12 +503,18 @@ fun ProfileScreen(
                         horizontalArrangement = Arrangement.SpaceBetween,
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Text(text = "Last reel date", style = RawTypography.labelMedium)
+                        Text(
+                            text = "Last reel date",
+                            fontFamily = JetBrainsMonoFamily,
+                            fontWeight = FontWeight.Medium,
+                            fontSize = 13.sp,
+                            color = RawColors.TextMuted
+                        )
                         Text(
                             text = lastReelDate,
-                            fontFamily = InterFontFamily,
-                            fontWeight = FontWeight.Bold,
-                            fontSize = 13.sp,
+                            fontFamily = BricolageFamily,
+                            fontWeight = FontWeight.SemiBold,
+                            fontSize = 15.5.sp,
                             color = RawColors.TextPrimary
                         )
                     }
@@ -496,27 +528,33 @@ fun ProfileScreen(
                     modifier = Modifier
                         .padding(horizontal = 18.dp)
                         .fillMaxWidth()
-                        .clip(RoundedCornerShape(22.dp))
+                        .clip(RoundedCornerShape(20.dp))
                         .background(RawColors.CardSurface)
-                        .border(1.dp, RawColors.Divider, RoundedCornerShape(22.dp))
-                        .padding(16.dp),
+                        .border(1.dp, RawColors.Divider, RoundedCornerShape(20.dp))
+                        .padding(horizontal = 18.dp, vertical = 20.dp),
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Column {
+                    Column(modifier = Modifier.weight(1f).padding(end = 12.dp)) {
                         Text(
-                            text = "Version & about app",
-                            style = RawTypography.titleMedium.copy(fontWeight = FontWeight.Bold)
+                            text = "Version ${BuildConfig.VERSION_NAME}",
+                            fontFamily = BricolageFamily,
+                            fontWeight = FontWeight.SemiBold,
+                            fontSize = 19.sp,
+                            color = RawColors.TextPrimary
                         )
                         Spacer(modifier = Modifier.height(3.dp))
                         Text(
-                            text = BuildConfig.VERSION_NAME,
-                            style = RawTypography.labelMedium
+                            text = "offline  \u2022  no ads",
+                            fontFamily = JetBrainsMonoFamily,
+                            fontWeight = FontWeight.Medium,
+                            fontSize = 13.sp,
+                            color = RawColors.TextMuted
                         )
                     }
                     RawSecondaryButton(
                         text = "About app",
-                        height = 42.dp,
+                        height = 50.dp,
                         leadingIcon = RawIconType.INFO,
                         fillWidth = false,
                         onClick = { showAboutSheet = true }
@@ -526,27 +564,34 @@ fun ProfileScreen(
 
             // Clear cache (.card.pr + coral TRASH squircle)
             item {
-                Spacer(modifier = Modifier.height(10.dp))
+                Spacer(modifier = Modifier.height(12.dp))
                 Row(
                     modifier = Modifier
                         .padding(horizontal = 18.dp)
                         .fillMaxWidth()
-                        .clip(RoundedCornerShape(22.dp))
+                        .clip(RoundedCornerShape(20.dp))
                         .background(RawColors.CardSurface)
-                        .border(1.dp, RawColors.Divider, RoundedCornerShape(22.dp))
-                        .padding(16.dp),
+                        .border(1.dp, RawColors.Divider, RoundedCornerShape(20.dp))
+                        .padding(horizontal = 18.dp, vertical = 20.dp),
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     Column {
                         Text(
                             text = "Clear cache",
-                            style = RawTypography.titleMedium.copy(fontWeight = FontWeight.Bold)
+                            fontFamily = BricolageFamily,
+                            fontWeight = FontWeight.SemiBold,
+                            fontSize = 19.sp,
+                            color = RawColors.TextPrimary
                         )
                         Spacer(modifier = Modifier.height(3.dp))
                         Text(
                             text = "Temp files: ${FormatHelpers.formatFileSize(cacheSizeBytes)}",
-                            style = RawTypography.labelMedium
+                            fontFamily = JetBrainsMonoFamily,
+                            fontWeight = FontWeight.Medium,
+                            fontSize = 13.sp,
+                            style = TextStyle(fontFeatureSettings = "tnum"),
+                            color = RawColors.TextMuted
                         )
                     }
                     CircleActionButton(
@@ -569,13 +614,15 @@ fun ProfileScreen(
             message = toastMsg,
             modifier = Modifier
                 .align(Alignment.BottomCenter)
-                .padding(bottom = 96.dp)
+                .navigationBarsPadding()
+                .padding(bottom = 104.dp)
         )
     }
 
     if (showPhotoMenu) {
         ModalBottomSheet(
             onDismissRequest = { showPhotoMenu = false },
+            shape = RoundedCornerShape(topStart = 20.dp, topEnd = 20.dp),
             containerColor = RawColors.CardSurface,
             contentColor = RawColors.TextPrimary
         ) {
@@ -586,7 +633,10 @@ fun ProfileScreen(
             ) {
                 Text(
                     text = "Profile photo",
-                    style = RawTypography.titleLarge.copy(fontWeight = FontWeight.ExtraBold)
+                    fontFamily = BricolageFamily,
+                    fontWeight = FontWeight.SemiBold,
+                    fontSize = 22.sp,
+                    color = RawColors.TextPrimary
                 )
                 Spacer(modifier = Modifier.height(8.dp))
                 SheetActionRow(
@@ -629,6 +679,7 @@ fun ProfileScreen(
     if (showAboutSheet) {
         ModalBottomSheet(
             onDismissRequest = { showAboutSheet = false },
+            shape = RoundedCornerShape(topStart = 20.dp, topEnd = 20.dp),
             containerColor = RawColors.CardSurface,
             contentColor = RawColors.TextPrimary
         ) {
@@ -642,18 +693,24 @@ fun ProfileScreen(
                 PixelRawEditLogo(width = 42.dp, height = 33.dp)
                 Text(
                     text = "About raw_edit",
-                    style = RawTypography.headlineMedium.copy(fontWeight = FontWeight.Black)
+                    fontFamily = BricolageFamily,
+                    fontWeight = FontWeight.SemiBold,
+                    fontSize = 27.sp,
+                    color = RawColors.TextPrimary
                 )
                 Text(
-                    text = "Version ${BuildConfig.VERSION_NAME}  •  100% offline  •  no ads",
-                    style = RawTypography.labelMedium
+                    text = "Version ${BuildConfig.VERSION_NAME}  \u2022  100% offline  \u2022  no ads",
+                    fontFamily = JetBrainsMonoFamily,
+                    fontWeight = FontWeight.Medium,
+                    fontSize = 13.sp,
+                    color = RawColors.TextMuted
                 )
                 Spacer(modifier = Modifier.height(4.dp))
                 Text(
-                    text = "LICENSES",
+                    text = "Licenses",
                     fontFamily = JetBrainsMonoFamily,
-                    fontWeight = FontWeight.Bold,
-                    fontSize = 11.sp,
+                    fontWeight = FontWeight.Medium,
+                    fontSize = 13.sp,
                     color = RawColors.TextPrimary
                 )
                 listOf(
@@ -661,15 +718,17 @@ fun ProfileScreen(
                     "Kotlin standard library - Apache-2.0",
                     "AndroidX Media3 - Apache-2.0",
                     "Coil image loading - Apache-2.0",
-                    "Bundled Google Fonts - SIL OFL 1.1"
+                    "Instrument Serif & Bricolage Grotesque - SIL OFL 1.1",
+                    "JetBrains Mono - SIL OFL 1.1"
                 ).forEachIndexed { i, lic ->
                     if (i > 0) {
                         Box(modifier = Modifier.fillMaxWidth().height(1.dp).background(RawColors.Divider))
                     }
                     Text(
                         text = lic,
-                        fontSize = 13.sp,
+                        fontFamily = BricolageFamily,
                         fontWeight = FontWeight.SemiBold,
+                        fontSize = 15.5.sp,
                         color = RawColors.TextPrimary,
                         modifier = Modifier.padding(vertical = 8.dp)
                     )
@@ -677,6 +736,7 @@ fun ProfileScreen(
                 Spacer(modifier = Modifier.height(6.dp))
                 BigPrimaryButton(
                     text = "Close",
+                    height = 60.dp,
                     onClick = { showAboutSheet = false }
                 )
                 Spacer(modifier = Modifier.height(20.dp))

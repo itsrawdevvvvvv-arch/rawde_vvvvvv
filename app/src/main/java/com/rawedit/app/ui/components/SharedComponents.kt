@@ -56,7 +56,8 @@ import com.rawedit.app.ui.icons.RawPixelMascot
 import com.rawedit.app.ui.motion.RawEasings
 import com.rawedit.app.ui.motion.RawPressButton
 import com.rawedit.app.ui.motion.rememberAnimationsEnabled
-import com.rawedit.app.ui.theme.InterFontFamily
+import com.rawedit.app.ui.theme.BricolageFamily
+import com.rawedit.app.ui.theme.InstrumentSerifFamily
 import com.rawedit.app.ui.theme.RawColors
 import com.rawedit.app.ui.theme.RawTypography
 import java.io.File
@@ -90,7 +91,7 @@ fun RawEditLogoBadge(
             Spacer(modifier = Modifier.width(10.dp))
             Text(
                 text = "raw_edit",
-                style = RawTypography.titleLarge.copy(fontWeight = FontWeight.ExtraBold),
+                style = RawTypography.titleLarge.copy(fontWeight = FontWeight.SemiBold),
                 color = RawColors.TextPrimary
             )
         }
@@ -142,9 +143,8 @@ fun UserAvatarView(
 }
 
 /**
- * Compact floating obsidian dock (#dock + #cap) matching raw_edit.html:
- * - Gliding Mint #8CE3A8 capsule behind [Home] / [Reels] / [Profile] driven via graphicsLayer
- * - Dedicated Mint rounded-square [+] Create button beside Home
+ * Floating obsidian dock (#dock + #cap) matching the updated typography mockup:
+ * - Rounded-rectangle 14dp active Mint indicator & 50dp Create + tile
  */
 @Composable
 fun RawBottomNavBar(
@@ -158,12 +158,12 @@ fun RawBottomNavBar(
         modifier = modifier
             .fillMaxWidth()
             .navigationBarsPadding()
-            .padding(bottom = 14.dp),
+            .padding(bottom = 16.dp),
         contentAlignment = Alignment.Center
     ) {
         Row(
             modifier = Modifier
-                .height(58.dp)
+                .height(62.dp)
                 .clip(RoundedCornerShape(30.dp))
                 .background(RawColors.DockBg)
                 .border(1.dp, RawColors.Divider, RoundedCornerShape(30.dp))
@@ -179,16 +179,16 @@ fun RawBottomNavBar(
                     ) {
                         Box(
                             modifier = Modifier
-                                .size(46.dp)
-                                .clip(RoundedCornerShape(16.dp))
+                                .size(50.dp)
+                                .clip(RoundedCornerShape(14.dp))
                                 .background(RawColors.Mint),
                             contentAlignment = Alignment.Center
                         ) {
                             RawIcon(
                                 type = RawIconType.PLUS,
-                                size = 20.dp,
+                                size = 24.dp,
                                 tint = RawColors.PrimaryBtnText,
-                                strokeWidth = 2.4.dp
+                                strokeWidth = 2.2.dp
                             )
                         }
                     }
@@ -206,23 +206,23 @@ fun RawBottomNavBar(
                     )
                     Row(
                         modifier = Modifier
-                            .defaultMinSize(minWidth = 46.dp)
-                            .height(46.dp)
-                            .clip(RoundedCornerShape(23.dp))
+                            .defaultMinSize(minWidth = 50.dp)
+                            .height(50.dp)
+                            .clip(RoundedCornerShape(14.dp))
                             .background(pillBg)
                             .clickable(
                                 interactionSource = remember { MutableInteractionSource() },
                                 indication = null
                             ) { onSelectTab(tab) }
-                            .padding(horizontal = 13.dp),
+                            .padding(horizontal = 14.dp),
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.Center
                     ) {
                         RawIcon(
                             type = tab.icon,
-                            size = 19.dp,
+                            size = 21.dp,
                             tint = iconTint,
-                            strokeWidth = 1.9.dp
+                            strokeWidth = 2.1.dp
                         )
                         AnimatedVisibility(
                             visible = selected,
@@ -232,12 +232,12 @@ fun RawBottomNavBar(
                                 shrinkHorizontally(tween(140, easing = RawEasings.Morph))
                         ) {
                             Row(verticalAlignment = Alignment.CenterVertically) {
-                                Spacer(modifier = Modifier.width(7.dp))
+                                Spacer(modifier = Modifier.width(8.dp))
                                 Text(
                                     text = tab.label,
-                                    fontFamily = InterFontFamily,
-                                    fontWeight = FontWeight.Bold,
-                                    fontSize = 12.5.sp,
+                                    fontFamily = BricolageFamily,
+                                    fontWeight = FontWeight.SemiBold,
+                                    fontSize = 14.5.sp,
                                     color = RawColors.PrimaryBtnText,
                                     maxLines = 1,
                                     softWrap = false
@@ -252,20 +252,20 @@ fun RawBottomNavBar(
 }
 
 /**
- * Blocky squircle action button (.ib / .ib.s / .ib.bad from raw_edit.html).
+ * Blocky squircle action button (.ib / .ib.s / .ib.bad from mockup: 12dp radius).
  */
 @Composable
 fun CircleActionButton(
     icon: RawIconType,
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
-    size: Dp = 42.dp,
+    size: Dp = 50.dp,
     backgroundColor: Color = RawColors.CardSurface,
     iconTint: Color = RawColors.TextPrimary,
     borderColor: Color = if (iconTint == RawColors.ErrorCoral) RawColors.ErrorBorder else RawColors.Divider,
     enabled: Boolean = true
 ) {
-    val corner = if (size <= 38.dp) 12.dp else 14.dp
+    val corner = if (size <= 32.dp) 10.dp else 12.dp
     val effectiveBg = if (iconTint == RawColors.ErrorCoral && backgroundColor == RawColors.CardSurface) {
         RawColors.ErrorSoft
     } else {
@@ -286,9 +286,9 @@ fun CircleActionButton(
         ) {
             RawIcon(
                 type = icon,
-                size = size * 0.48f,
+                size = if (size >= 48.dp) 22.dp else size * 0.48f,
                 tint = iconTint,
-                strokeWidth = if (size <= 36.dp) 1.7.dp else 2.dp
+                strokeWidth = if (size <= 36.dp) 1.8.dp else 2.2.dp
             )
         }
     }
@@ -318,7 +318,7 @@ fun MorphingFilterChips(
                 label = "chip_bg_$idx"
             )
             val border by animateColorAsState(
-                targetValue = if (selected) RawColors.Mint else RawColors.Divider,
+                targetValue = if (selected) RawColors.Mint else RawColors.DividerStrong,
                 animationSpec = tween(if (animEnabled) 220 else 0, easing = RawEasings.Morph),
                 label = "chip_bd_$idx"
             )
@@ -331,17 +331,19 @@ fun MorphingFilterChips(
             RawPressButton(onClick = { onSelect(idx) }) {
                 Row(
                     modifier = Modifier
-                        .height(36.dp)
-                        .clip(RoundedCornerShape(99.dp))
+                        .height(44.dp)
+                        .clip(RoundedCornerShape(10.dp))
                         .background(bg)
-                        .border(1.dp, border, RoundedCornerShape(99.dp))
-                        .padding(horizontal = 15.dp),
+                        .border(1.dp, border, RoundedCornerShape(10.dp))
+                        .padding(horizontal = 18.dp),
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(6.dp)
                 ) {
                     Text(
                         text = if (count != null) "$label $count" else label,
-                        style = RawTypography.labelLarge.copy(fontSize = 13.sp, fontWeight = FontWeight.SemiBold),
+                        fontFamily = BricolageFamily,
+                        fontWeight = FontWeight.SemiBold,
+                        fontSize = 15.5.sp,
                         color = fg,
                         maxLines = 1,
                         softWrap = false
@@ -357,6 +359,7 @@ fun BigPrimaryButton(
     text: String,
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
+    height: Dp = 60.dp,
     enabled: Boolean = true,
     leadingIcon: RawIconType? = null
 ) {
@@ -368,9 +371,9 @@ fun BigPrimaryButton(
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .height(52.dp)
+                .height(height)
                 .graphicsLayer { alpha = if (enabled) 1f else 0.30f }
-                .clip(RoundedCornerShape(99.dp))
+                .clip(RoundedCornerShape(16.dp))
                 .background(RawColors.Mint)
                 .padding(horizontal = 22.dp),
             horizontalArrangement = Arrangement.Center,
@@ -379,14 +382,16 @@ fun BigPrimaryButton(
             if (leadingIcon != null) {
                 RawIcon(
                     type = leadingIcon,
-                    size = 18.dp,
+                    size = if (height <= 52.dp) 16.dp else 18.dp,
                     tint = RawColors.PrimaryBtnText
                 )
                 Spacer(modifier = Modifier.width(8.dp))
             }
             Text(
                 text = text,
-                style = RawTypography.labelLarge,
+                fontFamily = BricolageFamily,
+                fontWeight = FontWeight.SemiBold,
+                fontSize = if (height <= 52.dp) 15.5.sp else 18.5.sp,
                 color = RawColors.PrimaryBtnText,
                 maxLines = 1,
                 softWrap = false
@@ -400,7 +405,7 @@ fun RawSecondaryButton(
     text: String,
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
-    height: Dp = 52.dp,
+    height: Dp = 60.dp,
     enabled: Boolean = true,
     leadingIcon: RawIconType? = null,
     isDanger: Boolean = false,
@@ -420,23 +425,22 @@ fun RawSecondaryButton(
                 .then(if (fillWidth) Modifier.fillMaxWidth() else Modifier)
                 .height(height)
                 .graphicsLayer { alpha = if (enabled) 1f else 0.4f }
-                .clip(RoundedCornerShape(99.dp))
+                .clip(RoundedCornerShape(16.dp))
                 .background(bg)
-                .border(1.dp, border, RoundedCornerShape(99.dp))
-                .padding(horizontal = if (height <= 44.dp) 14.dp else 20.dp),
+                .border(1.dp, border, RoundedCornerShape(16.dp))
+                .padding(horizontal = if (height <= 52.dp) 16.dp else 20.dp),
             horizontalArrangement = Arrangement.Center,
             verticalAlignment = Alignment.CenterVertically
         ) {
             if (leadingIcon != null) {
-                RawIcon(type = leadingIcon, size = if (height <= 44.dp) 16.dp else 18.dp, tint = fg)
+                RawIcon(type = leadingIcon, size = if (height <= 52.dp) 16.dp else 18.dp, tint = fg)
                 Spacer(modifier = Modifier.width(7.dp))
             }
             Text(
                 text = text,
-                style = RawTypography.labelLarge.copy(
-                    fontSize = if (height <= 44.dp) 13.sp else 14.5.sp,
-                    fontWeight = if (height <= 44.dp) FontWeight.SemiBold else FontWeight.Bold
-                ),
+                fontFamily = BricolageFamily,
+                fontWeight = FontWeight.SemiBold,
+                fontSize = if (height <= 42.dp) 14.sp else if (height <= 52.dp) 15.5.sp else 18.5.sp,
                 color = fg,
                 maxLines = 1,
                 softWrap = false
@@ -446,7 +450,7 @@ fun RawSecondaryButton(
 }
 
 /**
- * Custom dark obsidian dialog matching .pn.dlg from raw_edit.html.
+ * Custom dark obsidian dialog matching .pn.dlg (20dp radius, Instrument Serif header, 16dp buttons).
  */
 @Composable
 fun RawConfirmDialog(
@@ -466,59 +470,51 @@ fun RawConfirmDialog(
             modifier = Modifier
                 .fillMaxWidth()
                 .padding(horizontal = 26.dp)
-                .clip(RoundedCornerShape(24.dp))
+                .clip(RoundedCornerShape(20.dp))
                 .background(RawColors.CardSurface)
-                .border(1.dp, RawColors.DividerStrong, RoundedCornerShape(24.dp))
+                .border(1.dp, RawColors.DividerStrong, RoundedCornerShape(20.dp))
                 .padding(24.dp)
         ) {
             Text(
                 text = title,
-                style = RawTypography.headlineMedium.copy(fontWeight = FontWeight.ExtraBold)
+                fontFamily = InstrumentSerifFamily,
+                fontWeight = FontWeight.Normal,
+                fontSize = 29.sp,
+                lineHeight = 32.sp,
+                color = RawColors.TextPrimary
             )
-            Spacer(modifier = Modifier.height(8.dp))
+            Spacer(modifier = Modifier.height(10.dp))
             Text(
                 text = body,
-                style = RawTypography.bodyMedium
+                style = RawTypography.bodyLarge.copy(fontSize = 16.sp, lineHeight = 23.sp),
+                color = RawColors.TextMuted
             )
-            Spacer(modifier = Modifier.height(20.dp))
+            Spacer(modifier = Modifier.height(22.dp))
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.spacedBy(10.dp)
             ) {
                 RawSecondaryButton(
                     text = cancelLabel,
-                    height = 42.dp,
+                    height = 50.dp,
                     onClick = onDismiss,
                     modifier = Modifier.weight(1f)
                 )
                 if (isDanger) {
                     RawSecondaryButton(
                         text = confirmLabel,
-                        height = 42.dp,
+                        height = 50.dp,
                         isDanger = true,
                         onClick = onConfirm,
                         modifier = Modifier.weight(1f)
                     )
                 } else {
-                    RawPressButton(
+                    BigPrimaryButton(
+                        text = confirmLabel,
+                        height = 50.dp,
                         onClick = onConfirm,
                         modifier = Modifier.weight(1f)
-                    ) {
-                        Box(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .height(42.dp)
-                                .clip(RoundedCornerShape(99.dp))
-                                .background(RawColors.Mint),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Text(
-                                text = confirmLabel,
-                                style = RawTypography.labelLarge.copy(fontSize = 13.sp, fontWeight = FontWeight.SemiBold),
-                                color = RawColors.PrimaryBtnText
-                            )
-                        }
-                    }
+                    )
                 }
             }
         }
@@ -526,7 +522,7 @@ fun RawConfirmDialog(
 }
 
 /**
- * Floating dark capsule toast banner (#toast in raw_edit.html).
+ * Floating dark rounded-rectangle toast banner (#toast: 14dp radius).
  */
 @Composable
 fun RawToastBanner(
@@ -541,16 +537,16 @@ fun RawToastBanner(
     ) {
         Box(
             modifier = Modifier
-                .clip(RoundedCornerShape(99.dp))
+                .clip(RoundedCornerShape(14.dp))
                 .background(RawColors.RaisedCard)
-                .border(1.dp, RawColors.DividerStrong, RoundedCornerShape(99.dp))
-                .padding(horizontal = 18.dp, vertical = 10.dp)
+                .border(1.dp, RawColors.DividerStrong, RoundedCornerShape(14.dp))
+                .padding(horizontal = 20.dp, vertical = 13.dp)
         ) {
             Text(
                 text = message.orEmpty(),
-                fontFamily = InterFontFamily,
+                fontFamily = BricolageFamily,
                 fontWeight = FontWeight.SemiBold,
-                fontSize = 13.sp,
+                fontSize = 15.sp,
                 color = RawColors.TextPrimary,
                 maxLines = 1,
                 softWrap = false
