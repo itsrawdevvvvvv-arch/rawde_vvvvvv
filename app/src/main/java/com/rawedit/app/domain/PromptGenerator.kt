@@ -1,5 +1,6 @@
 package com.rawedit.app.domain
 
+import com.rawedit.app.data.local.LocalAssetEntity
 import java.util.Locale
 
 object PromptGenerator {
@@ -8,7 +9,9 @@ object PromptGenerator {
         fileName: String,
         durationSeconds: Double,
         topic: String,
-        srtText: String
+        srtText: String,
+        assets: List<LocalAssetEntity> = emptyList(),
+        palette: PaletteState? = null
     ): String {
         val cleanFile = fileName.trim().ifEmpty { "voiceover.mp3" }
         val durationFormatted = String.format(Locale.US, "%.2f", durationSeconds)
@@ -28,20 +31,66 @@ object PromptGenerator {
             ""
         }
 
+        val assetsBlock = if (assets.isNotEmpty()) {
+            buildString {
+                appendLine()
+                appendLine("LOCAL ASSETS (intercepted offline from `assets/` by raw_edit — ZERO external URLs):")
+                assets.forEach { a ->
+                    val kindTag = when (a.kind) {
+                        LocalAssetEntity.KIND_CLIP -> "VIDEO CLIP (${String.format(Locale.US, "%.1f", a.durationSec)}s)"
+                        LocalAssetEntity.KIND_CUTOUT -> "TRANSPARENT PNG CUTOUT"
+                        else -> "IMAGE"
+                    }
+                    val desc = a.description.ifBlank { "Local user media" }
+                    val safe = a.safeZone.ifBlank { "Keep overlay typography away from central subject." }
+                    appendLine("  - `${a.relativePath}` (${a.width}x${a.height}, $kindTag)")
+                    appendLine("    Visual: $desc")
+                    appendLine("    Safe text zone: $safe")
+                }
+            }
+        } else {
+            "\nLOCAL ASSETS:\n  - None attached (pure kinetic typography & vector cards).\n"
+        }
+
+        val paletteLine = if (palette != null && palette.colors.size >= 3) {
+            val hexList = palette.colors.joinToString(" / ") { "${it.hex} (${it.name})" }
+            "- Current Studio Palette (#${palette.numFormatted}, ${palette.mood}): #0D0D0D dark + $hexList — ${palette.pairing}"
+        } else {
+            "- Palette option: Kinetic Cream & Crimson from ZIP (or attached Palette PNG)"
+        }
+
+        val hasClips = assets.any { it.kind == LocalAssetEntity.KIND_CLIP }
+        val videoSyncRule = if (hasClips) {
+            """
+5. **DETERMINISTIC `<video>` CLIP SYNC VIA `RAW.syncVideo`**:
+   - Put `<video src="assets/..." muted playsinline preload="auto"></video>` cleanly inside its scene container.
+   - NEVER call `videoEl.play()`, `requestAnimationFrame`, or timers.
+   - Inside `window.RAW.seek(t)`, tie playback deterministically using `RAW.syncVideo(videoEl, t, start, end, speed)` (bundled in `engine/raw-helpers.js` inside the ZIP and injected automatically by the app):
+     `if (clipEl && t >= sceneStart && t <= sceneEnd) return RAW.syncVideo(clipEl, t, sceneStart, sceneEnd, 1);`
+   - Place titles strictly in the safe text zone noted above for each asset!
+            """.trimIndent()
+        } else {
+            """
+5. **LOCAL ASSET REFERENCES**:
+   - Reference any attached `assets/...` files cleanly via relative paths (`<img src="assets/...">`, `RAW.syncVideo(videoEl, t, start, end, speed)` for clips).
+   - Never fabricate or invent `assets/...` paths that were not listed above.
+            """.trimIndent()
+        }
+
         return """
 You are an expert motion designer and creative coder. Using the attached `kinetic-explainer-style.zip` skill pack (which I uploaded with this prompt), build ONE complete, self-contained HTML file rendering a 1920x1080 (16:9, 30 fps) kinetic-typography explainer synced to my voiceover.
 
 FIRST READ THE ATTACHED ZIP (`kinetic-explainer-style.zip`):
-- Read `kinetic-explainer-style/SKILL.md`, `docs/STYLE_BIBLE.md`, `docs/BEAT_SHEETS.md`.
-- Inspect `style/tokens.css`, `style/components.css`, `engine/engine.js`, and `template/scenes.js`.
-- If you can view images, look at `reference/*.jpg` and `reference/reference_fullframe_step01.png` to match the exact visual proportions, margins, cards, viewfinder brackets, and polish.
+- Read `kinetic-explainer-style/SKILL.md`, `docs/STYLE_BIBLE.md`, `docs/BEAT_SHEETS.md`, and `docs/ASSETS_GUIDE.md`.
+- Inspect `style/tokens.css`, `style/components.css`, `engine/engine.js`, `engine/raw-helpers.js`, and `template/scenes.js`.
+- If you can view images, look at `reference/*.jpg` and `reference/reference_fullframe_step01.png` (and any attached Palette PNG card) to match exact visual proportions, margins, cards, viewfinder brackets, and polish.
 
 ================================================================================
 STEP 1 - ASK BRIEF QUESTIONS FIRST (DO NOT WRITE HTML CODE YET)
 ================================================================================
 Send ONE short message asking only what is missing, then WAIT for my reply:
 $q1Line
-2. Palette & fonts: Reply "default" to use the signature Kinetic Cream & Crimson palette + Poppins font from the ZIP, OR give custom dark/light/accent hex codes and font names from the bundled font list below.
+2. Palette & fonts: Reply "default" to use the Studio Palette or ZIP Cream & Crimson palette + Poppins font, OR give custom dark/light/accent hex codes and font names from the bundled font list below.
 3. CTA & language: Confirm language style (English / Hinglish / etc.) and any social handle, keyword, or hook idea (optional — or say "default").
 
 If I reply "default", "you decide", or answer these questions, immediately proceed to STEP 2 without running Python/Playwright tools (`tools/render.py` is NOT needed because the `raw_edit` Android app renders your HTML on-device).
@@ -59,8 +108,8 @@ Do NOT split output into separate `.css`/`.js` files. Combine CSS, declarative `
 PROJECT INPUTS:
 - Voiceover file: $cleanFile
 - Voiceover length: $durationFormatted seconds (`window.PROJECT.duration` and `window.RAW.duration` MUST equal $durationFormatted).
-- Script / topic notes: $cleanTopic$srtBlock
-
+$paletteLine
+- Script / topic notes: $cleanTopic$srtBlock$assetsBlock
 BUNDLED OFL FONTS ALREADY LOADED LOCALLY BY THE APP:
 - `Poppins` (weights: 400, 600, 700, 800, 900)  [ZIP default]
 - `Montserrat` (weights: 600, 700, 800, 900)
@@ -87,7 +136,7 @@ When combining `tokens.css`, `components.css`, and `engine.js` from the ZIP into
 2. **FIX ZERO EXTERNAL REQUESTS & BROKEN FONT URLS**:
    - Do NOT include `<link rel="stylesheet">`, `<script src="...">`, `@import`, `fetch()`, `XMLHttpRequest`, `WebSocket`, `import()`, or `localStorage`.
    - Do NOT copy `@font-face { src: url("../fonts/...") }` from `tokens.css` — fonts above are ALREADY injected locally at `100%` reliability.
-   - NEVER use external image URLs in `{ t: 'phone', img: 'https://...' }`. For `phone` elements, render crisp inline HTML/SVG mockups inside `.phone .screen` (zero `http://` or `https://` URLs anywhere except SVG namespace `http://www.w3.org/2000/svg`).
+   - NEVER use external image URLs in `{ t: 'phone', img: 'https://...' }`. Use relative `assets/...` paths for user media or crisp inline HTML/SVG mockups (zero `http://` or `https://` URLs anywhere except SVG namespace `http://www.w3.org/2000/svg`).
 
 3. **FIX END-OF-VIDEO BLANK FRAME & JS ERRORS**:
    - In `engine.js`, `t >= s.start && t < s.end` goes blank at `t === duration`. Update the last scene condition to:
@@ -111,6 +160,8 @@ When combining `tokens.css`, `components.css`, and `engine.js` from the ZIP into
      window.RAW.seek(0);
      ```
    - Guard all DOM queries and math (`clamp`, null checks) so calling `RAW.seek(0)`, `RAW.seek(duration * 0.25)`, `RAW.seek(duration / 2)`, and `RAW.seek(duration)` twice identically produces zero JS errors and identical DOM output.
+
+$videoSyncRule
 """.trimIndent()
     }
 }

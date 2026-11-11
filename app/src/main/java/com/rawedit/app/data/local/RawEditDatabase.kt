@@ -10,6 +10,8 @@ import androidx.room.Query
 import androidx.room.Room
 import androidx.room.RoomDatabase
 import androidx.room.Update
+import androidx.room.migration.Migration
+import androidx.sqlite.db.SupportSQLiteDatabase
 import kotlinx.coroutines.flow.Flow
 
 @Dao
@@ -60,16 +62,60 @@ interface VideoDao {
     suspend fun delete(video: VideoEntity)
 }
 
+@Dao
+interface LocalAssetDao {
+    @Query("SELECT * FROM assets ORDER BY createdAt DESC")
+    fun observeAll(): Flow<List<LocalAssetEntity>>
+
+    @Query("SELECT * FROM assets WHERE id = :id")
+    suspend fun getById(id: Long): LocalAssetEntity?
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun insert(asset: LocalAssetEntity): Long
+
+    @Query("UPDATE assets SET description = :description, safeZone = :safeZone WHERE id = :id")
+    suspend fun updateDescription(id: Long, description: String, safeZone: String)
+
+    @Delete
+    suspend fun delete(asset: LocalAssetEntity)
+}
+
 @Database(
-    entities = [ProjectEntity::class, VideoEntity::class],
-    version = 1,
+    entities = [ProjectEntity::class, VideoEntity::class, LocalAssetEntity::class],
+    version = 2,
     exportSchema = false
 )
 abstract class RawEditDatabase : RoomDatabase() {
     abstract fun projectDao(): ProjectDao
     abstract fun videoDao(): VideoDao
+    abstract fun localAssetDao(): LocalAssetDao
 
     companion object {
+        val MIGRATION_1_2 = object : Migration(1, 2) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE projects ADD COLUMN attachedAssetIds TEXT NOT NULL DEFAULT ''")
+                db.execSQL(
+                    """
+                    CREATE TABLE IF NOT EXISTS assets (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
+                        fileName TEXT NOT NULL,
+                        relativePath TEXT NOT NULL,
+                        kind TEXT NOT NULL,
+                        mimeType TEXT NOT NULL,
+                        width INTEGER NOT NULL,
+                        height INTEGER NOT NULL,
+                        durationSec REAL NOT NULL,
+                        sizeBytes INTEGER NOT NULL,
+                        thumbPath TEXT NOT NULL,
+                        description TEXT NOT NULL,
+                        safeZone TEXT NOT NULL,
+                        createdAt INTEGER NOT NULL
+                    )
+                    """.trimIndent()
+                )
+            }
+        }
+
         @Volatile
         private var INSTANCE: RawEditDatabase? = null
 
@@ -79,7 +125,10 @@ abstract class RawEditDatabase : RoomDatabase() {
                     context.applicationContext,
                     RawEditDatabase::class.java,
                     "raw_edit.db"
-                ).build().also { INSTANCE = it }
+                )
+                    .addMigrations(MIGRATION_1_2)
+                    .build()
+                    .also { INSTANCE = it }
             }
         }
     }

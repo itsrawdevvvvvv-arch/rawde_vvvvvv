@@ -62,7 +62,11 @@ enum class RawIconType {
     BACKWARD,
     TO_FRONT,
     TO_BACK,
-    DUPLICATE
+    DUPLICATE,
+    PALETTE,
+    BOX,
+    KEY,
+    SPARK
 }
 
 // Pre-allocated immutable 24x24 paths so Canvas draws trigger ZERO per-frame Path allocations.
@@ -309,6 +313,57 @@ private val PATH_TO_BACK = Path().apply {
     moveTo(7f, 11.5f); lineTo(12f, 16f); lineTo(17f, 11.5f)
 }
 
+private val PATH_PALETTE = Path().apply {
+    moveTo(12f, 3f)
+    arcTo(
+        rect = Rect(3f, 3f, 21f, 21f),
+        startAngleDegrees = -90f,
+        sweepAngleDegrees = -180f,
+        forceMoveTo = false
+    )
+    lineTo(13.5f, 21f)
+    arcTo(
+        rect = Rect(11f, 16f, 16f, 21f),
+        startAngleDegrees = 90f,
+        sweepAngleDegrees = -180f,
+        forceMoveTo = false
+    )
+    lineTo(12f, 16f)
+    arcTo(
+        rect = Rect(10f, 12f, 14f, 16f),
+        startAngleDegrees = 90f,
+        sweepAngleDegrees = 180f,
+        forceMoveTo = false
+    )
+    lineTo(16.5f, 12f)
+    cubicTo(19.5f, 12f, 21f, 3f, 12f, 3f)
+    close()
+}
+
+private val PATH_BOX = Path().apply {
+    moveTo(4f, 7f); lineTo(12f, 3f); lineTo(20f, 7f); lineTo(20f, 17f); lineTo(12f, 21f); lineTo(4f, 17f); close()
+    moveTo(4f, 7f); lineTo(12f, 11f); lineTo(20f, 7f)
+    moveTo(12f, 11f); lineTo(12f, 21f)
+}
+
+private val PATH_KEY_STEM = Path().apply {
+    moveTo(10.8f, 11.2f); lineTo(19.8f, 2.5f)
+    moveTo(16f, 6.2f); lineTo(19f, 9.2f)
+    moveTo(18.5f, 3.8f); lineTo(21f, 6.3f)
+}
+
+private val PATH_SPARK = Path().apply {
+    moveTo(12f, 2.5f)
+    lineTo(14.4f, 9.6f)
+    lineTo(21.5f, 12f)
+    lineTo(14.4f, 14.4f)
+    lineTo(12f, 21.5f)
+    lineTo(9.6f, 14.4f)
+    lineTo(2.5f, 12f)
+    lineTo(9.6f, 9.6f)
+    close()
+}
+
 @Composable
 fun RawIcon(
     type: RawIconType,
@@ -391,6 +446,18 @@ fun RawIcon(
                 RawIconType.TO_FRONT -> drawPath(PATH_TO_FRONT, tint, style = stroke)
                 RawIconType.TO_BACK -> drawPath(PATH_TO_BACK, tint, style = stroke)
                 RawIconType.DUPLICATE -> drawPath(PATH_COPY, tint, style = stroke)
+                RawIconType.PALETTE -> {
+                    drawPath(PATH_PALETTE, tint, style = stroke)
+                    drawCircle(tint, radius = 1.25f, center = Offset(7.5f, 10.5f))
+                    drawCircle(tint, radius = 1.25f, center = Offset(10.5f, 7f))
+                    drawCircle(tint, radius = 1.25f, center = Offset(14.8f, 7.6f))
+                }
+                RawIconType.BOX -> drawPath(PATH_BOX, tint, style = stroke)
+                RawIconType.KEY -> {
+                    drawCircle(tint, radius = 3.8f, center = Offset(8f, 14f), style = stroke)
+                    drawPath(PATH_KEY_STEM, tint, style = stroke)
+                }
+                RawIconType.SPARK -> drawPath(PATH_SPARK, tint, style = stroke)
             }
         }
     }

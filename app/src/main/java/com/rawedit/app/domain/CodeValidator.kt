@@ -50,6 +50,7 @@ object CodeValidator {
 
     private val URL_REGEX = Regex("""https?://[^\s"'`<>()\\]+""", RegexOption.IGNORE_CASE)
     private val HTML_COMMENT_REGEX = Regex("""<!--[\s\S]*?-->""")
+    private val ASSETS_REF_REGEX = Regex("""(?:src|href|url)\s*[=(]\s*["']?assets/([A-Za-z0-9._-]+)""", RegexOption.IGNORE_CASE)
 
     private val jsonParser = Json {
         ignoreUnknownKeys = true
@@ -70,7 +71,6 @@ object CodeValidator {
                 .maxByOrNull { it.length }
             text = bestHtmlMatch ?: allMatches.maxByOrNull { it.length } ?: text
         } else if (text.startsWith("```")) {
-            // Handle unclosed opening fence if AI output ended right after </html>
             text = text.removePrefix("```html").removePrefix("```HTML").removePrefix("```").trim()
             if (text.endsWith("```")) {
                 text = text.removeSuffix("```").trim()
@@ -141,6 +141,12 @@ object CodeValidator {
         }
         val cleanHtml = staticPayload
 
+        val missingAssets = ASSETS_REF_REGEX.findAll(cleanHtml)
+            .map { it.groupValues[1] }
+            .distinct()
+            .filter { cacheManager.getAssetFile(it) == null }
+            .toList()
+
         val dryRun = withTimeoutOrNull(DRY_RUN_TIMEOUT_MS) {
             runSandboxedDryRun(context, cacheManager, cleanHtml)
         } ?: return CodeValidationResult(
@@ -160,10 +166,12 @@ object CodeValidator {
             )
         }
 
-        val warning = if (dryRun.nonDeterministic) {
-            "Note: repeated seek() calls slightly altered DOM markup; visual frame output may still work fine."
-        } else {
-            null
+        val warnParts = mutableListOf<String>()
+        if (missingAssets.isNotEmpty()) {
+            warnParts.add("Missing local asset(s) in Locker: ${missingAssets.joinToString { "assets/$it" }}")
+        }
+        if (dryRun.nonDeterministic) {
+            warnParts.add("Repeated seek() altered DOM markup; verify keyframe contact sheet before rendering.")
         }
 
         val durStr = String.format(java.util.Locale.US, "%.1f", dryRun.duration)
@@ -171,7 +179,7 @@ object CodeValidator {
             isValid = true,
             cleanedHtml = cleanHtml,
             durationSec = dryRun.duration,
-            warning = warning,
+            warning = warnParts.takeIf { it.isNotEmpty() }?.joinToString(" "),
             summaryMessage = "Code verified  •  $durStr s ready to render."
         )
     }

@@ -59,12 +59,12 @@ enum class PixelMascotKind {
     PIXEL_CURSOR
 }
 
-private const val COL_WHITE = 0xFFFFFFFF.toInt()
-private const val COL_GREY = 0xFF8D8D8D.toInt()
-private const val COL_EYE = 0xFF0A0A0A.toInt()
+private const val COL_CREAM = 0xFFF7ECE6.toInt()
+private const val COL_GREY = 0xFFA99D95.toInt()
+private const val COL_EYE = 0xFF0D0D0F.toInt()
 private const val COL_DARK = 0xFF3A3A3A.toInt()
-private const val COL_OFF = 0xFFCFCFCF.toInt()
-private const val COL_MINT = 0xFF8CE3A8.toInt()
+private const val COL_OFF = 0xFF202023.toInt()
+private const val COL_TAN = 0xFFCAA07D.toInt()
 private const val COL_CORAL = 0xFFFF8F80.toInt()
 
 // Every grid strictly maintains uniform row lengths so pixel baking never skews.
@@ -354,7 +354,7 @@ private object SpriteBitmapCache {
                     'e' -> COL_EYE
                     'd' -> COL_DARK
                     'o' -> COL_OFF
-                    'm' -> COL_MINT
+                    'm' -> COL_TAN
                     'r' -> COL_CORAL
                     else -> 0
                 }
@@ -380,15 +380,15 @@ private object SpriteBitmapCache {
             }
         }
         val antennae = arrayOf(6 to 1, 7 to 2, 8 to 3, 21 to 1, 20 to 2, 19 to 3)
-        antennae.forEach { (ax, ay) -> r(ax, ay, 1, 1, 0xFFBBBBBB.toInt()) }
-        r(11, 2, 6, 2, 0xFF555555.toInt())
-        r(1, 4, 26, 17, 0xFF9A9A9A.toInt())
-        r(2, 5, 24, 15, 0xFF262626.toInt())
-        r(3, 6, 18, 13, 0xFF000000.toInt())
-        r(22, 8, 3, 3, 0xFFCCCCCC.toInt())
-        r(22, 13, 3, 3, 0xFFCCCCCC.toInt())
-        r(4, 21, 3, 1, 0xFF555555.toInt())
-        r(21, 21, 3, 1, 0xFF555555.toInt())
+        antennae.forEach { (ax, ay) -> r(ax, ay, 1, 1, COL_GREY) }
+        r(11, 2, 6, 2, COL_DARK)
+        r(1, 4, 26, 17, COL_TAN)
+        r(2, 5, 24, 15, COL_OFF)
+        r(3, 6, 18, 13, COL_EYE)
+        r(22, 8, 3, 3, COL_CREAM)
+        r(22, 13, 3, 3, COL_CREAM)
+        r(4, 21, 3, 1, COL_DARK)
+        r(21, 21, 3, 1, COL_DARK)
 
         val font = mapOf(
             'R' to "110101110101101",
@@ -404,7 +404,7 @@ private object SpriteBitmapCache {
                 val f = font[ch] ?: return@forEachIndexed
                 for (i in 0 until 15) {
                     if (f[i] == '1') {
-                        r(x0 + idx * 4 + (i % 3), y0 + (i / 3), 1, 1, COL_WHITE)
+                        r(x0 + idx * 4 + (i % 3), y0 + (i / 3), 1, 1, COL_CREAM)
                     }
                 }
             }
@@ -475,7 +475,6 @@ fun RawPixelMascot(
 
     val staticSprite = kind == PixelMascotKind.AVATAR_FACE || kind == PixelMascotKind.PIXEL_CURSOR
 
-    // Lightweight periodic eye blink (sleeps 3.8s, blinks 150ms -> 0 unnecessary idle recompositions)
     LaunchedEffect(kind, animEnabled, noBlink) {
         if (!animEnabled || staticSprite || noBlink) {
             isBlinking = false
@@ -489,7 +488,6 @@ fun RawPixelMascot(
         }
     }
 
-    // GPU-only float bobbing via graphicsLayer (ZERO composition recompositions per frame!)
     val bobPhaseState: State<Float>? = if (animEnabled && !noBob && !staticSprite && kind != PixelMascotKind.PEEKING_CAT) {
         val inf = rememberInfiniteTransition(label = "pixel_bob_${kind.name}")
         inf.animateFloat(
@@ -583,9 +581,6 @@ fun RawPixelMascot(
     }
 }
 
-/**
- * Pixel pointer cursor badge for Hero CTA Card ("Start creating") matching raw_edit.html curb animation.
- */
 @Composable
 fun PixelTypeMarqueeBadge(
     modifier: Modifier = Modifier,
@@ -604,7 +599,7 @@ fun PixelTypeMarqueeBadge(
         null
     }
 
-    val bmp = remember { SpriteBitmapCache.get("cur_marq", CURSOR_0, COL_WHITE) }
+    val bmp = remember { SpriteBitmapCache.get("cur_marq", CURSOR_0, COL_CREAM) }
 
     Canvas(
         modifier = modifier
@@ -654,16 +649,15 @@ fun PixelTypeMarqueeBadge(
     }
 }
 
-/**
- * Twinkling white 4-point retro pixel sparkle star using cached ImageBitmap + GPU layer scaling.
- */
 @Composable
 fun PixelSparkle(
     modifier: Modifier = Modifier,
     size: Dp = 15.dp,
+    tint: Color = RawColors.Cream,
     phaseOffsetMs: Int = 0
 ) {
     val animEnabled = rememberAnimationsEnabled()
+    val tintArgb = remember(tint) { tint.toArgb() }
     val phaseState: State<Float>? = if (animEnabled) {
         val inf = rememberInfiniteTransition(label = "spark_$phaseOffsetMs")
         inf.animateFloat(
@@ -678,7 +672,7 @@ fun PixelSparkle(
     } else {
         null
     }
-    val bmp = remember { SpriteBitmapCache.get("spk_white", SPARKLE_5, COL_WHITE) }
+    val bmp = remember(tintArgb) { SpriteBitmapCache.get("spk", SPARKLE_5, tintArgb) }
 
     Canvas(
         modifier = modifier

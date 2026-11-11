@@ -12,7 +12,6 @@ import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -25,7 +24,6 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
@@ -68,8 +66,9 @@ import com.rawedit.app.ui.icons.PixelMascotKind
 import com.rawedit.app.ui.icons.RawIcon
 import com.rawedit.app.ui.icons.RawIconType
 import com.rawedit.app.ui.icons.RawPixelMascot
+import com.rawedit.app.ui.motion.FeatheredScrollEdges
 import com.rawedit.app.ui.theme.BricolageCondensedFamily
-import com.rawedit.app.ui.theme.InstrumentSerifFamily
+import com.rawedit.app.ui.theme.BricolageFamily
 import com.rawedit.app.ui.theme.JetBrainsMonoFamily
 import com.rawedit.app.ui.theme.RawColors
 import com.rawedit.app.ui.theme.RawTypography
@@ -82,6 +81,7 @@ fun RenderingScreen(
 ) {
     val context = LocalContext.current
     val state by RenderStateHolder.state.collectAsState()
+    val scrollState = rememberScrollState()
     var showCancelConfirm by remember { mutableStateOf(false) }
     var readyForCompletion by remember(projectId) { mutableStateOf(false) }
 
@@ -149,11 +149,11 @@ fun RenderingScreen(
         Column(
             modifier = Modifier
                 .fillMaxSize()
-                .verticalScroll(rememberScrollState())
-                .padding(start = 18.dp, end = 18.dp, bottom = 104.dp),
+                .verticalScroll(scrollState)
+                .padding(start = 18.dp, end = 18.dp, bottom = 108.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
-            // Header (.bar + .hi)
+            // Header
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -163,18 +163,17 @@ fun RenderingScreen(
             ) {
                 Text(
                     text = "Creating your reel",
-                    fontFamily = InstrumentSerifFamily,
-                    fontWeight = FontWeight.Normal,
+                    fontFamily = BricolageFamily,
+                    fontWeight = FontWeight.Bold,
                     fontSize = 31.sp,
                     lineHeight = 33.sp,
-                    letterSpacing = (-0.3).sp,
+                    letterSpacing = (-0.9).sp,
                     color = RawColors.TextPrimary
                 )
                 RawPixelMascot(kind = PixelMascotKind.TV_BOT, size = 40.dp)
             }
 
             if (isFailed) {
-                // Error empty state matching R.render err
                 Column(
                     modifier = Modifier
                         .fillMaxWidth()
@@ -185,16 +184,18 @@ fun RenderingScreen(
                     RawPixelMascot(kind = PixelMascotKind.CODE_BOT, size = 86.dp)
                     Text(
                         text = if (state.stage == RenderStage.CANCELLED) "Render cancelled" else "Render failed",
-                        fontFamily = InstrumentSerifFamily,
-                        fontWeight = FontWeight.Normal,
+                        fontFamily = BricolageFamily,
+                        fontWeight = FontWeight.Bold,
                         fontSize = 34.sp,
                         lineHeight = 36.sp,
+                        letterSpacing = (-1.0).sp,
                         color = RawColors.TextPrimary
                     )
                     Text(
                         text = state.errorMessage ?: "Your files are safe on your phone.",
                         style = RawTypography.bodyLarge.copy(fontSize = 16.sp),
-                        color = RawColors.TextMuted
+                        color = RawColors.TextMuted,
+                        textAlign = TextAlign.Center
                     )
                     Spacer(modifier = Modifier.height(16.dp))
                     Row(
@@ -203,7 +204,7 @@ fun RenderingScreen(
                     ) {
                         BigPrimaryButton(
                             text = "Try again",
-                            height = 60.dp,
+                            height = 58.dp,
                             onClick = {
                                 RenderStateHolder.resetForNewRender(projectId)
                                 RenderService.start(context, projectId)
@@ -212,21 +213,20 @@ fun RenderingScreen(
                         )
                         RawSecondaryButton(
                             text = "Back to steps",
-                            height = 60.dp,
+                            height = 58.dp,
                             onClick = onCancelledOrBack,
                             modifier = Modifier.weight(1f)
                         )
                     }
                 }
             } else {
-                // Live 16:9 frame preview (.fr)
+                // Live 16:9 frame preview (24dp borderless)
                 Box(
                     modifier = Modifier
                         .fillMaxWidth()
                         .aspectRatio(16f / 9f)
-                        .clip(RoundedCornerShape(12.dp))
-                        .background(Color.Black)
-                        .border(1.dp, RawColors.Divider, RoundedCornerShape(12.dp)),
+                        .clip(RoundedCornerShape(24.dp))
+                        .background(Color.Black),
                     contentAlignment = Alignment.Center
                 ) {
                     val bmp = state.previewBitmap
@@ -243,7 +243,7 @@ fun RenderingScreen(
                     }
                 }
 
-                // Giant condensed "REN / DER / ING" + 4dp Mint progress underline (.gi:after)
+                // Giant condensed "REN / DER / ING" + 4dp Tan progress underline (28dp borderless)
                 val targetFraction = (state.progressPercent / 100f).coerceIn(0f, 1f)
                 val smoothFractionState = animateFloatAsState(
                     targetValue = targetFraction,
@@ -254,9 +254,8 @@ fun RenderingScreen(
                     modifier = Modifier
                         .fillMaxWidth()
                         .height(250.dp)
-                        .clip(RoundedCornerShape(20.dp))
-                        .background(RawColors.CardSurface)
-                        .border(1.dp, RawColors.Divider, RoundedCornerShape(20.dp)),
+                        .clip(RoundedCornerShape(28.dp))
+                        .background(RawColors.CardSurface),
                     contentAlignment = Alignment.Center
                 ) {
                     Column(
@@ -289,7 +288,7 @@ fun RenderingScreen(
                             val fillW = (size.width * smoothFractionState.value).coerceIn(0f, size.width)
                             if (fillW > 0f) {
                                 drawRoundRect(
-                                    color = RawColors.Mint,
+                                    color = RawColors.Tan,
                                     topLeft = Offset.Zero,
                                     size = Size(fillW, size.height),
                                     cornerRadius = r
@@ -299,14 +298,13 @@ fun RenderingScreen(
                     }
                 }
 
-                // Telemetry card (.tele) with PHANTOM_BUDDY top-right
+                // Telemetry card (28dp borderless) with PHANTOM_BUDDY top-right
                 Box(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .clip(RoundedCornerShape(20.dp))
+                        .clip(RoundedCornerShape(28.dp))
                         .background(RawColors.CardSurface)
-                        .border(1.dp, RawColors.Divider, RoundedCornerShape(20.dp))
-                        .padding(16.dp)
+                        .padding(18.dp)
                 ) {
                     RawPixelMascot(
                         kind = PixelMascotKind.PHANTOM_BUDDY,
@@ -331,8 +329,8 @@ fun RenderingScreen(
                         Text(
                             text = "${state.progressPercent}%",
                             fontFamily = JetBrainsMonoFamily,
-                            fontWeight = FontWeight.Medium,
-                            fontSize = 22.sp,
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 24.sp,
                             style = TextStyle(fontFeatureSettings = "tnum"),
                             color = RawColors.TextPrimary
                         )
@@ -352,6 +350,13 @@ fun RenderingScreen(
             }
         }
 
+        FeatheredScrollEdges(
+            scrollState = scrollState,
+            topHeight = 40.dp,
+            bottomHeight = 112.dp,
+            alwaysShowBottom = true
+        )
+
         if (!isFailed) {
             Box(
                 modifier = Modifier
@@ -367,7 +372,7 @@ fun RenderingScreen(
             ) {
                 RawSecondaryButton(
                     text = "Cancel",
-                    height = 60.dp,
+                    height = 58.dp,
                     onClick = { showCancelConfirm = true }
                 )
             }

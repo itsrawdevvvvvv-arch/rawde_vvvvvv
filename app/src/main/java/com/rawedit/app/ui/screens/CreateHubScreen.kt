@@ -27,6 +27,8 @@ import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -40,8 +42,6 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
-import androidx.compose.ui.graphics.Brush
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.StrokeJoin
@@ -63,11 +63,14 @@ import com.rawedit.app.ui.icons.PixelTypeMarqueeBadge
 import com.rawedit.app.ui.icons.RawIcon
 import com.rawedit.app.ui.icons.RawIconType
 import com.rawedit.app.ui.icons.RawPixelMascot
+import com.rawedit.app.ui.motion.CascadeSkewCard
+import com.rawedit.app.ui.motion.FeatheredScrollEdges
 import com.rawedit.app.ui.motion.KineticHeading
 import com.rawedit.app.ui.motion.RawEasings
 import com.rawedit.app.ui.motion.RawPressButton
 import com.rawedit.app.ui.motion.SwipeToCreateSlider
 import com.rawedit.app.ui.motion.rememberAnimationsEnabled
+import com.rawedit.app.ui.motion.walletCardColors
 import com.rawedit.app.ui.theme.BricolageFamily
 import com.rawedit.app.ui.theme.JetBrainsMonoFamily
 import com.rawedit.app.ui.theme.RawColors
@@ -88,15 +91,18 @@ private data class StepRowModel(
 @Composable
 fun CreateHubScreen(
     project: ProjectEntity,
+    attachedAssetCount: Int,
     onBack: () -> Unit,
     onDeleteProject: () -> Unit,
     onOpenAddVoice: () -> Unit,
+    onOpenAssetLocker: () -> Unit,
     onOpenCopyPrompt: () -> Unit,
     onOpenCodePaste: () -> Unit,
     onOpenKeyframeSheet: () -> Unit,
     onSwipeCreate: (Offset) -> Unit
 ) {
     val animEnabled = rememberAnimationsEnabled()
+    val listState = rememberLazyListState()
     val hasAudio = project.audioUri.isNotBlank() && project.audioDurationSec > 0.0
     val hasCode = project.code.isNotBlank()
     val canCreate = hasAudio && hasCode
@@ -116,7 +122,7 @@ fun CreateHubScreen(
             icon = RawIconType.MIC,
             title = "Add voice",
             subtitle = if (hasAudio) {
-                val srtNote = if (project.srtCueCount > 0) " • ${project.srtCueCount} SRT cues" else ""
+                val srtNote = if (project.srtCueCount > 0) " \u2022 ${project.srtCueCount} SRT cues" else ""
                 "${project.audioName}$srtNote"
             } else {
                 "Pick MP3, M4A, WAV or AAC (optional SRT)"
@@ -128,6 +134,20 @@ fun CreateHubScreen(
         ),
         StepRowModel(
             number = 2,
+            icon = RawIconType.BOX,
+            title = "Asset locker",
+            subtitle = if (attachedAssetCount > 0) {
+                "$attachedAssetCount local media attached \u2022 offline"
+            } else {
+                "Images, PNG cutouts & video clips"
+            },
+            statusText = if (attachedAssetCount > 0) "Attached ($attachedAssetCount)" else "Optional",
+            statusDone = attachedAssetCount > 0,
+            enabled = true,
+            onClick = onOpenAssetLocker
+        ),
+        StepRowModel(
+            number = 3,
             icon = RawIconType.ZIP,
             title = "Copy prompt",
             subtitle = "Download style pack ZIP + copy prompt into Cloud AI",
@@ -137,11 +157,11 @@ fun CreateHubScreen(
             onClick = onOpenCopyPrompt
         ),
         StepRowModel(
-            number = 3,
+            number = 4,
             icon = RawIconType.CODE,
             title = "Paste code",
             subtitle = if (hasCode) {
-                "Validated • ${FormatHelpers.formatDuration(project.codeDurationSec)}"
+                "Validated \u2022 ${FormatHelpers.formatDuration(project.codeDurationSec)}"
             } else {
                 "Paste unlimited HTML code returned by Cloud AI"
             },
@@ -159,11 +179,11 @@ fun CreateHubScreen(
             .statusBarsPadding()
     ) {
         LazyColumn(
+            state = listState,
             modifier = Modifier.fillMaxSize(),
-            contentPadding = PaddingValues(start = 18.dp, end = 18.dp, top = 8.dp, bottom = 128.dp),
+            contentPadding = PaddingValues(start = 18.dp, end = 18.dp, top = 8.dp, bottom = 132.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
-            // Top bar with Back squircle + Trash squircle
             item {
                 Row(
                     modifier = Modifier
@@ -175,18 +195,18 @@ fun CreateHubScreen(
                     CircleActionButton(
                         icon = RawIconType.BACK,
                         onClick = onBack,
-                        size = 50.dp
+                        size = 48.dp
                     )
                     CircleActionButton(
                         icon = RawIconType.TRASH,
                         onClick = { showDeleteConfirm = true },
-                        size = 50.dp,
+                        size = 48.dp,
+                        backgroundColor = RawColors.ErrorSoft,
                         iconTint = RawColors.ErrorCoral
                     )
                 }
             }
 
-            // Title + peeking phantom mascot
             item {
                 Row(
                     modifier = Modifier.fillMaxWidth(),
@@ -196,6 +216,7 @@ fun CreateHubScreen(
                     KineticHeading(
                         words = listOf("Typography", "Reel"),
                         style = RawTypography.headlineLarge,
+                        highlightLastWord = true,
                         modifier = Modifier.weight(1f)
                     )
                     Spacer(modifier = Modifier.width(12.dp))
@@ -206,15 +227,14 @@ fun CreateHubScreen(
                 }
             }
 
-            // Mint line-art stage banner (.ban)
+            // Warm Tan line-art stage banner (.ban, 30dp borderless)
             item {
                 Box(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .height(130.dp)
-                        .clip(RoundedCornerShape(22.dp))
+                        .height(132.dp)
+                        .clip(RoundedCornerShape(30.dp))
                         .background(RawColors.CardSurface)
-                        .border(1.dp, RawColors.Divider, RoundedCornerShape(22.dp))
                 ) {
                     HubBannerLineArt(modifier = Modifier.fillMaxSize())
 
@@ -223,17 +243,18 @@ fun CreateHubScreen(
                         size = 44.dp,
                         modifier = Modifier
                             .align(Alignment.BottomStart)
-                            .padding(start = 10.dp, bottom = 6.dp)
+                            .padding(start = 12.dp, bottom = 8.dp)
                     )
                     RawPixelMascot(
                         kind = PixelMascotKind.LENS_BOT,
                         size = 44.dp,
                         modifier = Modifier
                             .align(Alignment.BottomEnd)
-                            .padding(end = 12.dp, bottom = 4.dp)
+                            .padding(end = 14.dp, bottom = 6.dp)
                     )
                     PixelSparkle(
                         size = 12.dp,
+                        tint = RawColors.Tan,
                         phaseOffsetMs = 260,
                         modifier = Modifier
                             .align(Alignment.TopEnd)
@@ -243,12 +264,12 @@ fun CreateHubScreen(
                         size = 24.dp,
                         modifier = Modifier
                             .align(Alignment.TopEnd)
-                            .padding(top = 10.dp, end = 14.dp)
+                            .padding(top = 10.dp, end = 16.dp)
                     )
                 }
             }
 
-            // Two outlined stat pills (.stats / .stat)
+            // Borderless stat pills (.stats / .stat 28dp)
             item {
                 Row(
                     modifier = Modifier.fillMaxWidth(),
@@ -267,10 +288,10 @@ fun CreateHubScreen(
                 }
             }
 
-            // Reel Steps heading + .sp readiness pill
+            // Reel Steps heading + pill readiness badge
             item {
                 val badgeBg by animateColorAsState(
-                    targetValue = if (canCreate) RawColors.MintSoft else RawColors.RaisedCard,
+                    targetValue = if (canCreate) RawColors.AccentSoft else RawColors.RaisedCard,
                     animationSpec = tween(if (animEnabled) 260 else 0, easing = RawEasings.Morph),
                     label = "hub_sp_bg"
                 )
@@ -284,15 +305,16 @@ fun CreateHubScreen(
                     Text(
                         text = "Reel Steps",
                         fontFamily = BricolageFamily,
-                        fontWeight = FontWeight.SemiBold,
+                        fontWeight = FontWeight.Bold,
                         fontSize = 23.sp,
+                        letterSpacing = (-0.5).sp,
                         color = RawColors.TextPrimary
                     )
                     Box(
                         modifier = Modifier
-                            .clip(RoundedCornerShape(6.dp))
+                            .clip(CircleShape)
                             .background(badgeBg)
-                            .padding(horizontal = 12.dp, vertical = 8.dp)
+                            .padding(horizontal = 13.dp, vertical = 7.dp)
                     ) {
                         AnimatedContent(
                             targetState = canCreate,
@@ -304,33 +326,35 @@ fun CreateHubScreen(
                             label = "hub_ready_pill"
                         ) { ready ->
                             Text(
-                                text = if (ready) "Ready to create" else "Steps 1 & 3 needed",
+                                text = if (ready) "Ready to create" else "Steps 1 & 4 needed",
                                 fontFamily = JetBrainsMonoFamily,
-                                fontWeight = FontWeight.Medium,
-                                fontSize = 12.sp,
+                                fontWeight = FontWeight.SemiBold,
+                                fontSize = 11.5.sp,
                                 style = TextStyle(fontFeatureSettings = "tnum"),
-                                color = if (ready) RawColors.Mint else RawColors.TextMuted
+                                color = if (ready) RawColors.Tan else RawColors.TextMuted
                             )
                         }
                     }
                 }
             }
 
-            itemsIndexed(steps, key = { _, s -> s.number }) { _, step ->
-                StepActionCard(step = step, animEnabled = animEnabled)
+            itemsIndexed(steps, key = { _, s -> s.number }) { idx, step ->
+                CascadeSkewCard(index = idx) {
+                    StepActionCard(step = step, index = idx)
+                }
             }
 
-            // Crisp white-bordered Contact Sheet step card when validated code is present
+            // Contact Sheet preview card when validated code is present
             if (hasCode) {
                 item {
                     RawPressButton(onClick = onOpenKeyframeSheet) {
                         Row(
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .clip(RoundedCornerShape(20.dp))
+                                .clip(RoundedCornerShape(28.dp))
                                 .background(RawColors.CardSurface)
-                                .border(1.dp, Color.White, RoundedCornerShape(20.dp))
-                                .padding(17.dp),
+                                .border(1.dp, RawColors.AccentBorder, RoundedCornerShape(28.dp))
+                                .padding(horizontal = 18.dp, vertical = 18.dp),
                             verticalAlignment = Alignment.CenterVertically,
                             horizontalArrangement = Arrangement.spacedBy(12.dp)
                         ) {
@@ -344,15 +368,15 @@ fun CreateHubScreen(
                             Text(
                                 text = "Preview contact sheet (auto-fit & PDF)",
                                 fontFamily = BricolageFamily,
-                                fontWeight = FontWeight.SemiBold,
-                                fontSize = 18.sp,
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 17.5.sp,
                                 color = RawColors.TextPrimary,
                                 modifier = Modifier.weight(1f)
                             )
                             RawIcon(
                                 type = RawIconType.CHEVRON_RIGHT,
                                 size = 18.dp,
-                                tint = RawColors.TextPrimary
+                                tint = RawColors.Tan
                             )
                         }
                     }
@@ -360,24 +384,26 @@ fun CreateHubScreen(
             }
         }
 
-        // Sticky gradient bottom footer (.stk) + SwipeToCreateSlider
+        FeatheredScrollEdges(
+            listState = listState,
+            topHeight = 46.dp,
+            bottomHeight = 124.dp,
+            alwaysShowBottom = true
+        )
+
+        // Sticky footer + SwipeToCreateSlider
         Box(
             modifier = Modifier
                 .align(Alignment.BottomCenter)
                 .fillMaxWidth()
-                .background(
-                    Brush.verticalGradient(
-                        listOf(Color.Transparent, RawColors.BgPrimary.copy(alpha = 0.94f), RawColors.BgPrimary)
-                    )
-                )
                 .navigationBarsPadding()
-                .padding(start = 18.dp, end = 18.dp, top = 20.dp, bottom = 18.dp)
+                .padding(start = 18.dp, end = 18.dp, bottom = 16.dp)
         ) {
             SwipeToCreateSlider(
                 unlocked = canCreate,
                 rightTag = if (hasAudio) FormatHelpers.formatDuration(project.audioDurationSec) else "1080p",
                 onTriggered = onSwipeCreate,
-                onLockedTap = { toastMsg = "Finish steps 1 and 3 first" }
+                onLockedTap = { toastMsg = "Finish steps 1 and 4 first" }
             )
         }
 
@@ -386,7 +412,7 @@ fun CreateHubScreen(
             modifier = Modifier
                 .align(Alignment.BottomCenter)
                 .navigationBarsPadding()
-                .padding(bottom = 94.dp)
+                .padding(bottom = 92.dp)
         )
     }
 
@@ -414,11 +440,10 @@ private fun HubBannerLineArt(modifier: Modifier = Modifier) {
     Canvas(modifier = modifier) {
         val w = size.width
         val h = size.height
-        val strokeCol = RawColors.Mint.copy(alpha = 0.45f)
-        val waveCol = RawColors.Mint.copy(alpha = 0.28f)
+        val strokeCol = RawColors.Tan.copy(alpha = 0.45f)
+        val waveCol = RawColors.Tan.copy(alpha = 0.28f)
         val sw = 2.dp.toPx()
 
-        // Centered 16:9 stage outline
         val rw = w * 0.35f
         val rh = h * 0.52f
         val rx = (w - rw) * 0.5f
@@ -430,7 +455,6 @@ private fun HubBannerLineArt(modifier: Modifier = Modifier) {
             style = Stroke(sw)
         )
 
-        // Filled Mint play triangle center
         playTri.reset()
         val cx = w * 0.5f
         val cy = ry + rh * 0.5f
@@ -439,9 +463,8 @@ private fun HubBannerLineArt(modifier: Modifier = Modifier) {
         playTri.lineTo(cx + pr, cy)
         playTri.lineTo(cx - pr * 0.65f, cy + pr)
         playTri.close()
-        drawPath(playTri, RawColors.Mint, style = Fill)
+        drawPath(playTri, RawColors.Tan, style = Fill)
 
-        // Crisp Mint waveform spikes left & right
         val by = h * 0.86f
         waveLeft.reset()
         waveLeft.moveTo(w * 0.06f, by)
@@ -473,17 +496,17 @@ private fun HubStatPill(
 ) {
     Row(
         modifier = modifier
-            .clip(RoundedCornerShape(14.dp))
-            .border(1.dp, RawColors.DividerStrong, RoundedCornerShape(14.dp))
-            .padding(horizontal = 15.dp, vertical = 15.dp),
+            .clip(RoundedCornerShape(28.dp))
+            .background(RawColors.CardSurface)
+            .padding(horizontal = 16.dp, vertical = 15.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(10.dp)
     ) {
-        RawIcon(type = icon, size = 18.dp, tint = RawColors.TextPrimary)
+        RawIcon(type = icon, size = 18.dp, tint = RawColors.Tan)
         Text(
             text = text,
             fontFamily = JetBrainsMonoFamily,
-            fontWeight = FontWeight.Medium,
+            fontWeight = FontWeight.SemiBold,
             fontSize = 13.5.sp,
             style = TextStyle(fontFeatureSettings = "tnum"),
             color = RawColors.TextPrimary,
@@ -496,13 +519,24 @@ private fun HubStatPill(
 @Composable
 private fun StepActionCard(
     step: StepRowModel,
-    animEnabled: Boolean
+    index: Int
 ) {
-    val badgeBg by animateColorAsState(
-        targetValue = if (step.statusDone) RawColors.MintSoft else RawColors.RaisedCard,
-        animationSpec = tween(if (animEnabled) 240 else 0, easing = RawEasings.Morph),
-        label = "step_bdg_${step.number}"
-    )
+    val palette = walletCardColors(index)
+    val isDarkCard = ((index % 3) + 3) % 3 == 2
+    val effectiveAlpha = if (step.enabled) 1f else 0.52f
+
+    val pillBg = when {
+        isDarkCard && step.statusDone -> RawColors.AccentSoft
+        isDarkCard -> RawColors.RaisedCard
+        step.statusDone -> RawColors.Ink
+        else -> palette.badgeBg
+    }
+    val pillText = when {
+        isDarkCard && step.statusDone -> RawColors.Tan
+        isDarkCard -> RawColors.TextMuted
+        step.statusDone -> RawColors.Cream
+        else -> palette.badgeText
+    }
 
     RawPressButton(
         onClick = step.onClick,
@@ -511,25 +545,23 @@ private fun StepActionCard(
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .clip(RoundedCornerShape(20.dp))
-                .background(RawColors.CardSurface)
-                .border(1.dp, RawColors.Divider, RoundedCornerShape(20.dp))
+                .clip(RoundedCornerShape(28.dp))
+                .background(palette.containerColor.copy(alpha = if (step.enabled) 1f else 0.65f))
                 .padding(horizontal = 17.dp, vertical = 18.dp),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(14.dp)
         ) {
             Box(
                 modifier = Modifier
-                    .size(48.dp)
-                    .clip(RoundedCornerShape(12.dp))
-                    .background(RawColors.RaisedCard)
-                    .border(1.dp, RawColors.Divider, RoundedCornerShape(12.dp)),
+                    .size(46.dp)
+                    .clip(CircleShape)
+                    .background(palette.iconBoxBg),
                 contentAlignment = Alignment.Center
             ) {
                 RawIcon(
                     type = step.icon,
-                    size = 22.dp,
-                    tint = if (step.enabled) RawColors.TextPrimary else RawColors.TextMuted
+                    size = 21.dp,
+                    tint = palette.iconTint.copy(alpha = effectiveAlpha)
                 )
             }
 
@@ -537,20 +569,20 @@ private fun StepActionCard(
                 Text(
                     text = "${step.number}. ${step.title}",
                     fontFamily = BricolageFamily,
-                    fontWeight = FontWeight.SemiBold,
+                    fontWeight = FontWeight.Bold,
                     fontSize = 19.sp,
-                    color = if (step.enabled) RawColors.TextPrimary else RawColors.TextMuted,
+                    color = palette.titleColor.copy(alpha = effectiveAlpha),
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis
                 )
-                Spacer(modifier = Modifier.height(4.dp))
+                Spacer(modifier = Modifier.height(3.dp))
                 Text(
                     text = step.subtitle,
                     fontFamily = BricolageFamily,
                     fontWeight = FontWeight.Medium,
-                    fontSize = 14.sp,
-                    lineHeight = 19.sp,
-                    color = RawColors.TextMuted,
+                    fontSize = 13.5.sp,
+                    lineHeight = 18.sp,
+                    color = palette.subtitleColor.copy(alpha = effectiveAlpha),
                     maxLines = 2,
                     overflow = TextOverflow.Ellipsis
                 )
@@ -558,17 +590,17 @@ private fun StepActionCard(
 
             Box(
                 modifier = Modifier
-                    .clip(RoundedCornerShape(6.dp))
-                    .background(badgeBg)
-                    .padding(horizontal = 10.dp, vertical = 6.dp)
+                    .clip(CircleShape)
+                    .background(pillBg)
+                    .padding(horizontal = 11.dp, vertical = 6.dp)
             ) {
                 Text(
                     text = step.statusText,
                     fontFamily = JetBrainsMonoFamily,
-                    fontWeight = FontWeight.Medium,
-                    fontSize = 12.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    fontSize = 11.5.sp,
                     style = TextStyle(fontFeatureSettings = "tnum"),
-                    color = if (step.statusDone) RawColors.Mint else RawColors.TextMuted,
+                    color = pillText,
                     maxLines = 1,
                     softWrap = false
                 )

@@ -435,6 +435,45 @@ Return ONLY the updated self-contained `<!DOCTYPE html>...</html>` file with zer
         }
     }
 
+    suspend fun buildGeminiSheetImages(
+        samples: List<KeyframeSample>,
+        title: String,
+        outDir: File,
+        maxPages: Int = 2
+    ): List<File> = withContext(Dispatchers.IO) {
+        val pages = samples.chunked(FRAMES_PER_PAGE).take(maxPages.coerceAtLeast(1))
+        if (pages.isEmpty()) return@withContext emptyList()
+        outDir.mkdirs()
+
+        val pageBmp = Bitmap.createBitmap(SHEET_W, SHEET_H, Bitmap.Config.ARGB_8888)
+        val pageCanvas = Canvas(pageBmp)
+        val paintPack = SheetPaintPack()
+        val outFiles = mutableListOf<File>()
+        try {
+            pages.forEachIndexed { pageIdx, chunk ->
+                drawSheetPage(
+                    canvas = pageCanvas,
+                    chunk = chunk,
+                    pageIdx = pageIdx,
+                    totalPages = pages.size,
+                    totalFrames = samples.size,
+                    title = title,
+                    p = paintPack
+                )
+                val scaled = Bitmap.createScaledBitmap(pageBmp, 1120, 1440, true)
+                val outFile = File(outDir, "gemini_sheet_${pageIdx + 1}.jpg")
+                FileOutputStream(outFile).use { fos ->
+                    scaled.compress(Bitmap.CompressFormat.JPEG, 86, fos)
+                }
+                scaled.recycle()
+                outFiles.add(outFile)
+            }
+            outFiles
+        } finally {
+            pageBmp.recycle()
+        }
+    }
+
     private fun buildTextReport(
         samples: List<KeyframeSample>,
         title: String,
@@ -457,55 +496,55 @@ Return ONLY the updated self-contained `<!DOCTYPE html>...</html>` file with zer
     }
 
     private class SheetPaintPack {
-        val bgPaint = Paint().apply { color = Color.parseColor("#0F0F0F") }
-        val cardPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Color.parseColor("#1B1B1B") }
+        val bgPaint = Paint().apply { color = Color.parseColor("#0D0D0F") }
+        val cardPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Color.parseColor("#17171A") }
         val borderDefault = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-            color = Color.parseColor("#353535")
+            color = Color.parseColor("#2C2B2D")
             style = Paint.Style.STROKE
             strokeWidth = 2.5f
         }
         val borderWarn = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-            color = Color.parseColor("#FF6B6B")
+            color = Color.parseColor("#FF8F80")
             style = Paint.Style.STROKE
             strokeWidth = 4f
         }
         val borderFit = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-            color = Color.parseColor("#7BE0A0")
+            color = Color.parseColor("#CAA07D")
             style = Paint.Style.STROKE
             strokeWidth = 3f
         }
         val titlePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-            color = Color.WHITE
+            color = Color.parseColor("#F7ECE6")
             textSize = 38f
             typeface = Typeface.create(Typeface.SANS_SERIF, Typeface.BOLD)
         }
         val subPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-            color = Color.parseColor("#A0A0A0")
+            color = Color.parseColor("#A99D95")
             textSize = 21f
             typeface = Typeface.create(Typeface.MONOSPACE, Typeface.NORMAL)
         }
         val badgeTextPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-            color = Color.WHITE
+            color = Color.parseColor("#F7ECE6")
             textSize = 21f
             typeface = Typeface.create(Typeface.MONOSPACE, Typeface.BOLD)
         }
         val statusOkPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-            color = Color.parseColor("#888888")
+            color = Color.parseColor("#A99D95")
             textSize = 18f
             typeface = Typeface.create(Typeface.MONOSPACE, Typeface.BOLD)
         }
         val statusFitPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-            color = Color.parseColor("#7BE0A0")
+            color = Color.parseColor("#CAA07D")
             textSize = 18f
             typeface = Typeface.create(Typeface.MONOSPACE, Typeface.BOLD)
         }
         val statusWarnPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-            color = Color.parseColor("#FF6B6B")
+            color = Color.parseColor("#FF8F80")
             textSize = 18f
             typeface = Typeface.create(Typeface.MONOSPACE, Typeface.BOLD)
         }
         val pillBgPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-            color = Color.argb(215, 14, 14, 14)
+            color = Color.argb(215, 13, 13, 15)
         }
         val imgPaint = Paint(Paint.FILTER_BITMAP_FLAG)
     }
@@ -582,7 +621,6 @@ Return ONLY the updated self-contained `<!DOCTYPE html>...</html>` file with zer
                 thumb.recycle()
             }
 
-            // Stamp high-contrast timestamp directly on frame bottom-left corner so cropped views still keep exact t=
             val overlayLabel = tsStr
             val ow = p.badgeTextPaint.measureText(overlayLabel)
             val pillRect = RectF(imgLeft + 6f, imgTop + targetH - 30f, imgLeft + ow + 18f, imgTop + targetH - 6f)

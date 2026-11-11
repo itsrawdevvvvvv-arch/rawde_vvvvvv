@@ -59,6 +59,7 @@ class AppContainer(application: Application) {
     val repository = RawEditRepository(
         projectDao = database.projectDao(),
         videoDao = database.videoDao(),
+        assetDao = database.localAssetDao(),
         cacheManager = cacheManager
     )
 }

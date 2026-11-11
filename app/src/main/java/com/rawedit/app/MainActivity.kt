@@ -9,8 +9,11 @@ import androidx.activity.enableEdgeToEdge
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.navigationBarsPadding
+import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -20,27 +23,41 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.toArgb
+import androidx.compose.ui.unit.dp
+import com.rawedit.app.data.local.LocalAssetEntity
 import com.rawedit.app.data.local.ProjectEntity
 import com.rawedit.app.data.local.UserProfile
+import com.rawedit.app.data.repository.RawEditRepository
+import com.rawedit.app.domain.GeminiClient
+import com.rawedit.app.domain.PaletteJsonCodec
+import com.rawedit.app.domain.PaletteState
 import com.rawedit.app.ui.components.MainTab
 import com.rawedit.app.ui.components.RawBottomNavBar
+import com.rawedit.app.ui.components.RawToastBanner
 import com.rawedit.app.ui.motion.RawScreenTransition
 import com.rawedit.app.ui.motion.RawTabMorphTransition
 import com.rawedit.app.ui.screens.AddVoiceScreen
+import com.rawedit.app.ui.screens.AssetLockerScreen
 import com.rawedit.app.ui.screens.CodePasteScreen
 import com.rawedit.app.ui.screens.CopyPromptScreen
 import com.rawedit.app.ui.screens.CreateHubScreen
+import com.rawedit.app.ui.screens.GeminiApiKeyDialog
 import com.rawedit.app.ui.screens.HomeScreen
 import com.rawedit.app.ui.screens.KeyframeSheetScreen
 import com.rawedit.app.ui.screens.MyReelsScreen
 import com.rawedit.app.ui.screens.OnboardingScreen
+import com.rawedit.app.ui.screens.PaletteScreen
 import com.rawedit.app.ui.screens.ProfileScreen
 import com.rawedit.app.ui.screens.ProfileSetupScreen
 import com.rawedit.app.ui.screens.RenderingScreen
 import com.rawedit.app.ui.screens.ResultScreen
 import com.rawedit.app.ui.theme.RawColors
 import com.rawedit.app.ui.theme.RawEditTheme
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+import java.io.File
 
 private enum class RootStage {
     ONBOARDING,
@@ -52,6 +69,7 @@ private sealed interface AppRoute {
     data object Tabs : AppRoute
     data class CreateHub(val projectId: Long) : AppRoute
     data class AddVoice(val projectId: Long) : AppRoute
+    data class AssetLocker(val projectId: Long) : AppRoute
     data class CopyPrompt(val projectId: Long) : AppRoute
     data class CodePaste(val projectId: Long) : AppRoute
     data class KeyframeSheet(val projectId: Long) : AppRoute
@@ -91,7 +109,7 @@ private fun RawEditAppRoot(container: AppContainer) {
                 .background(RawColors.BgPrimary),
             contentAlignment = Alignment.Center
         ) {
-            CircularProgressIndicator(color = RawColors.Mint)
+            CircularProgressIndicator(color = RawColors.Tan)
         }
         return
     }
@@ -140,12 +158,27 @@ private fun MainAuthenticatedHost(
     val scope = rememberCoroutineScope()
     val projects by container.repository.allProjects.collectAsState(initial = emptyList())
     val videos by container.repository.allVideos.collectAsState(initial = emptyList())
+    val allAssets by container.repository.allAssets.collectAsState(initial = emptyList())
+
+    val activePalette = remember(userProfile.paletteJson, userProfile.paletteCounter) {
+        PaletteJsonCodec.decode(userProfile.paletteJson)
+            ?: PaletteState.DEFAULT_01.copy(number = userProfile.paletteCounter.coerceAtLeast(1))
+    }
 
     var backStack by remember { mutableStateOf<List<AppRoute>>(listOf(AppRoute.Tabs)) }
     var currentTab by remember { mutableStateOf(MainTab.HOME) }
     var isForward by remember { mutableStateOf(true) }
     var navigatingNewDraft by remember { mutableStateOf(false) }
+    var showApiKeyDialog by remember { mutableStateOf(false) }
+    var hostToastMsg by remember { mutableStateOf<String?>(null) }
     val currentRoute = backStack.last()
+
+    LaunchedEffect(hostToastMsg) {
+        if (hostToastMsg != null) {
+            delay(2200)
+            hostToastMsg = null
+        }
+    }
 
     fun pushRoute(route: AppRoute) {
         if (backStack.lastOrNull() == route) return
@@ -229,6 +262,17 @@ private fun MainAuthenticatedHost(
                                     )
                                 }
 
+                                MainTab.PALETTE -> PaletteScreen(
+                                    userProfile = userProfile,
+                                    cacheManager = container.cacheManager,
+                                    onSavePaletteState = { counter, json ->
+                                        scope.launch {
+                                            container.userPreferences.savePaletteState(counter, json)
+                                        }
+                                    },
+                                    onOpenApiKey = { showApiKeyDialog = true }
+                                )
+
                                 MainTab.CREATE -> Unit
 
                                 MainTab.REELS -> MyReelsScreen(
@@ -260,7 +304,8 @@ private fun MainAuthenticatedHost(
                                     },
                                     onUpdatePhoto = { newPath ->
                                         scope.launch { container.userPreferences.updateProfilePhoto(newPath) }
-                                    }
+                                    },
+                                    onOpenApiKey = { showApiKeyDialog = true }
                                 )
                             }
                         }
@@ -277,8 +322,13 @@ private fun MainAuthenticatedHost(
                     val project by container.repository.observeProject(route.projectId)
                         .collectAsState(initial = null)
                     project?.let { proj ->
+                        val attachedCount = remember(proj.attachedAssetIds, allAssets) {
+                            val ids = RawEditRepository.parseAttachedAssetIds(proj.attachedAssetIds).toSet()
+                            allAssets.count { it.id in ids }
+                        }
                         CreateHubScreen(
                             project = proj,
+                            attachedAssetCount = attachedCount,
                             onBack = ::popRoute,
                             onDeleteProject = {
                                 scope.launch {
@@ -287,6 +337,7 @@ private fun MainAuthenticatedHost(
                                 }
                             },
                             onOpenAddVoice = { pushRoute(AppRoute.AddVoice(proj.id)) },
+                            onOpenAssetLocker = { pushRoute(AppRoute.AssetLocker(proj.id)) },
                             onOpenCopyPrompt = { pushRoute(AppRoute.CopyPrompt(proj.id)) },
                             onOpenCodePaste = { pushRoute(AppRoute.CodePaste(proj.id)) },
                             onOpenKeyframeSheet = { pushRoute(AppRoute.KeyframeSheet(proj.id)) },
@@ -315,12 +366,94 @@ private fun MainAuthenticatedHost(
                     }
                 }
 
+                is AppRoute.AssetLocker -> {
+                    val project by container.repository.observeProject(route.projectId)
+                        .collectAsState(initial = null)
+                    project?.let { proj ->
+                        AssetLockerScreen(
+                            project = proj,
+                            allAssets = allAssets,
+                            apiKey = userProfile.geminiApiKey,
+                            cacheManager = container.cacheManager,
+                            onBack = ::popRoute,
+                            onImportAsset = { uri, isVideo ->
+                                scope.launch {
+                                    val res = container.cacheManager.importLockerAsset(uri, isVideo)
+                                    res.onSuccess { imp ->
+                                        val entity = LocalAssetEntity(
+                                            fileName = imp.fileName,
+                                            relativePath = imp.relativePath,
+                                            kind = imp.kind,
+                                            mimeType = imp.mimeType,
+                                            width = imp.width,
+                                            height = imp.height,
+                                            durationSec = imp.durationSec,
+                                            sizeBytes = imp.sizeBytes,
+                                            thumbPath = imp.thumbPath,
+                                            description = imp.defaultDescription,
+                                            safeZone = imp.defaultSafeZone
+                                        )
+                                        val newId = container.repository.insertAsset(entity)
+                                        container.repository.attachAssetToProject(proj.id, newId)
+                                        if (userProfile.geminiApiKey.isNotBlank()) {
+                                            val visionFile = if (imp.kind == LocalAssetEntity.KIND_CLIP) {
+                                                imp.thumbPath.takeIf { it.isNotBlank() }?.let(::File)
+                                            } else {
+                                                container.cacheManager.getAssetFile(imp.fileName)
+                                            }
+                                            if (visionFile != null && visionFile.exists()) {
+                                                val descRes = GeminiClient.describeAsset(
+                                                    userProfile.geminiApiKey,
+                                                    entity.copy(id = newId),
+                                                    visionFile
+                                                )
+                                                descRes.onSuccess { (desc, safe) ->
+                                                    container.repository.updateAssetDescription(newId, desc, safe)
+                                                    hostToastMsg = "Added & described ${imp.relativePath}"
+                                                }.onFailure {
+                                                    hostToastMsg = "Added ${imp.relativePath} (Gemini note skipped)"
+                                                }
+                                            } else {
+                                                hostToastMsg = "Added ${imp.relativePath}"
+                                            }
+                                        } else {
+                                            hostToastMsg = "Added ${imp.relativePath}"
+                                        }
+                                    }.onFailure { err ->
+                                        hostToastMsg = err.message ?: "Could not import asset"
+                                    }
+                                }
+                            },
+                            onUpdateAssetNotes = { assetId, desc, safe ->
+                                scope.launch {
+                                    container.repository.updateAssetDescription(assetId, desc, safe)
+                                }
+                            },
+                            onToggleAttach = { assetId ->
+                                scope.launch {
+                                    container.repository.toggleAssetForProject(proj.id, assetId)
+                                }
+                            },
+                            onDeleteAsset = { asset ->
+                                scope.launch { container.repository.deleteAsset(asset) }
+                            },
+                            onOpenApiKey = { showApiKeyDialog = true }
+                        )
+                    }
+                }
+
                 is AppRoute.CopyPrompt -> {
                     val project by container.repository.observeProject(route.projectId)
                         .collectAsState(initial = null)
                     project?.let { proj ->
+                        val attachedAssets = remember(proj.attachedAssetIds, allAssets) {
+                            val ids = RawEditRepository.parseAttachedAssetIds(proj.attachedAssetIds).toSet()
+                            allAssets.filter { it.id in ids }
+                        }
                         CopyPromptScreen(
                             project = proj,
+                            attachedAssets = attachedAssets,
+                            palette = activePalette,
                             cacheManager = container.cacheManager,
                             onBack = ::popRoute
                         )
@@ -365,6 +498,7 @@ private fun MainAuthenticatedHost(
                         KeyframeSheetScreen(
                             project = proj,
                             cacheManager = container.cacheManager,
+                            geminiApiKey = userProfile.geminiApiKey,
                             onBack = ::popRoute,
                             onEditCode = {
                                 if (backStack.getOrNull(backStack.lastIndex - 1) is AppRoute.CodePaste) {
@@ -374,6 +508,22 @@ private fun MainAuthenticatedHost(
                                     backStack = backStack.dropLast(1) + AppRoute.CodePaste(proj.id)
                                 }
                             },
+                            onApplyFixedHtml = { fixedHtml, durationSec ->
+                                scope.launch {
+                                    val stored = withContext(Dispatchers.IO) {
+                                        container.cacheManager.persistHtmlCode(proj.id, fixedHtml)
+                                    }
+                                    container.repository.saveProject(
+                                        proj.copy(
+                                            code = stored,
+                                            layersJson = "",
+                                            codeDurationSec = durationSec,
+                                            hasEditableLayers = false
+                                        )
+                                    )
+                                }
+                            },
+                            onOpenApiKey = { showApiKeyDialog = true },
                             onRenderNow = {
                                 isForward = true
                                 backStack = backStack.dropLast(1) + AppRoute.Rendering(proj.id)
@@ -445,5 +595,27 @@ private fun MainAuthenticatedHost(
                 }
             }
         }
+
+        RawToastBanner(
+            message = hostToastMsg,
+            modifier = Modifier
+                .align(Alignment.BottomCenter)
+                .navigationBarsPadding()
+                .padding(bottom = if (currentRoute == AppRoute.Tabs) 104.dp else 94.dp)
+        )
+    }
+
+    if (showApiKeyDialog) {
+        GeminiApiKeyDialog(
+            currentKey = userProfile.geminiApiKey,
+            onSaveKey = { key ->
+                scope.launch {
+                    container.userPreferences.saveGeminiApiKey(key)
+                    showApiKeyDialog = false
+                    hostToastMsg = if (key.isBlank()) "API key removed" else "Google AI Studio key saved"
+                }
+            },
+            onDismiss = { showApiKeyDialog = false }
+        )
     }
 }

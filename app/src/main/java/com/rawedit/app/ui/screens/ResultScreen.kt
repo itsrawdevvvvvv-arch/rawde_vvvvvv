@@ -12,7 +12,6 @@ import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -27,6 +26,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Text
@@ -70,6 +70,7 @@ import com.rawedit.app.ui.icons.PixelMascotKind
 import com.rawedit.app.ui.icons.RawIcon
 import com.rawedit.app.ui.icons.RawIconType
 import com.rawedit.app.ui.icons.RawPixelMascot
+import com.rawedit.app.ui.motion.FeatheredScrollEdges
 import com.rawedit.app.ui.motion.KineticHeading
 import com.rawedit.app.ui.motion.RawEasings
 import com.rawedit.app.ui.motion.RawPressButton
@@ -97,6 +98,7 @@ fun ResultScreen(
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val animEnabled = rememberAnimationsEnabled()
+    val scrollState = rememberScrollState()
 
     var saving by remember { mutableStateOf(false) }
     var toastMsg by remember { mutableStateOf<String?>(null) }
@@ -152,11 +154,11 @@ fun ResultScreen(
         Column(
             modifier = Modifier
                 .fillMaxSize()
-                .verticalScroll(rememberScrollState())
-                .padding(start = 18.dp, end = 18.dp, bottom = 118.dp),
+                .verticalScroll(scrollState)
+                .padding(start = 18.dp, end = 18.dp, bottom = 122.dp),
             verticalArrangement = Arrangement.spacedBy(14.dp)
         ) {
-            // Top bar matching R.result
+            // Top bar
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -164,13 +166,13 @@ fun ResultScreen(
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                CircleActionButton(icon = RawIconType.BACK, onClick = onBack, size = 50.dp)
+                CircleActionButton(icon = RawIconType.BACK, onClick = onBack, size = 48.dp)
 
                 Box(
                     modifier = Modifier
-                        .clip(RoundedCornerShape(6.dp))
+                        .clip(CircleShape)
                         .background(RawColors.RaisedCard)
-                        .padding(horizontal = 10.dp, vertical = 6.dp)
+                        .padding(horizontal = 12.dp, vertical = 6.dp)
                 ) {
                     Text(
                         text = "1920x1080  \u2022  30 fps",
@@ -185,7 +187,8 @@ fun ResultScreen(
                 CircleActionButton(
                     icon = RawIconType.TRASH,
                     onClick = { showDeleteConfirm = true },
-                    size = 50.dp,
+                    size = 48.dp,
+                    backgroundColor = RawColors.ErrorSoft,
                     iconTint = RawColors.ErrorCoral
                 )
             }
@@ -198,7 +201,8 @@ fun ResultScreen(
             ) {
                 KineticHeading(
                     words = listOf("Your", "reel", "is", "ready"),
-                    style = RawTypography.headlineLarge.copy(fontSize = 48.sp, lineHeight = 50.sp),
+                    style = RawTypography.headlineLarge.copy(fontSize = 44.sp, lineHeight = 46.sp),
+                    highlightLastWord = true,
                     modifier = Modifier.weight(1f)
                 )
                 RawPixelMascot(
@@ -207,7 +211,7 @@ fun ResultScreen(
                 )
             }
 
-            // Native hardware ExoPlayer 16:9 stage (.vid)
+            // Native hardware ExoPlayer 16:9 stage (24dp borderless)
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -217,9 +221,8 @@ fun ResultScreen(
                         scaleY = 0.88f + 0.12f * p
                         alpha = p
                     }
-                    .clip(RoundedCornerShape(14.dp))
+                    .clip(RoundedCornerShape(24.dp))
                     .background(Color.Black)
-                    .border(1.dp, RawColors.Divider, RoundedCornerShape(14.dp))
             ) {
                 AndroidView(
                     factory = { ctx ->
@@ -236,20 +239,19 @@ fun ResultScreen(
                 )
             }
 
-            // Video metadata card (.card.pad)
+            // Video metadata card (28dp borderless)
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .clip(RoundedCornerShape(20.dp))
+                    .clip(RoundedCornerShape(28.dp))
                     .background(RawColors.CardSurface)
-                    .border(1.dp, RawColors.Divider, RoundedCornerShape(20.dp))
-                    .padding(16.dp)
+                    .padding(18.dp)
             ) {
                 Text(
                     text = video.title,
                     fontFamily = BricolageFamily,
-                    fontWeight = FontWeight.SemiBold,
-                    fontSize = 23.sp,
+                    fontWeight = FontWeight.Bold,
+                    fontSize = 22.sp,
                     color = RawColors.TextPrimary
                 )
                 Spacer(modifier = Modifier.height(4.dp))
@@ -259,14 +261,14 @@ fun ResultScreen(
                 )
             }
 
-            // .row2 Save to phone (morphs Mint -> secondary grey after saved) + Share
+            // Save to phone (morphs Cream -> RaisedCard pill) + Share
             val isSaved = video.savedToGalleryUri != null
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.spacedBy(10.dp)
             ) {
                 val saveBg by animateColorAsState(
-                    targetValue = if (isSaved) RawColors.RaisedCard else RawColors.Mint,
+                    targetValue = if (isSaved) RawColors.RaisedCard else RawColors.Cream,
                     animationSpec = tween(if (animEnabled) 220 else 0, easing = RawEasings.Morph),
                     label = "res_save_bg"
                 )
@@ -292,14 +294,10 @@ fun ResultScreen(
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .height(60.dp)
-                            .clip(RoundedCornerShape(16.dp))
+                            .height(58.dp)
+                            .clip(CircleShape)
                             .background(saveBg)
-                            .then(
-                                if (isSaved) Modifier.border(1.dp, RawColors.Divider, RoundedCornerShape(16.dp))
-                                else Modifier
-                            )
-                            .padding(horizontal = 12.dp),
+                            .padding(horizontal = 14.dp),
                         horizontalArrangement = Arrangement.Center,
                         verticalAlignment = Alignment.CenterVertically
                     ) {
@@ -325,8 +323,8 @@ fun ResultScreen(
                             Text(
                                 text = t,
                                 fontFamily = BricolageFamily,
-                                fontWeight = FontWeight.SemiBold,
-                                fontSize = 16.5.sp,
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 16.sp,
                                 color = saveFg,
                                 maxLines = 1,
                                 softWrap = false
@@ -337,7 +335,7 @@ fun ResultScreen(
 
                 RawSecondaryButton(
                     text = "Share",
-                    height = 60.dp,
+                    height = 58.dp,
                     leadingIcon = RawIconType.SHARE,
                     onClick = {
                         val file = File(video.fileUri)
@@ -360,7 +358,14 @@ fun ResultScreen(
             }
         }
 
-        // Sticky gradient bottom CTA (.stk)
+        FeatheredScrollEdges(
+            scrollState = scrollState,
+            topHeight = 40.dp,
+            bottomHeight = 114.dp,
+            alwaysShowBottom = true
+        )
+
+        // Sticky gradient bottom CTA
         Box(
             modifier = Modifier
                 .align(Alignment.BottomCenter)
@@ -375,7 +380,7 @@ fun ResultScreen(
         ) {
             BigPrimaryButton(
                 text = "Make another",
-                height = 62.dp,
+                height = 60.dp,
                 leadingIcon = RawIconType.PLUS,
                 onClick = onMakeAnother
             )

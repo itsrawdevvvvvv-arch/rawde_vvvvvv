@@ -53,6 +53,7 @@ import com.rawedit.app.ui.icons.PixelMascotKind
 import com.rawedit.app.ui.icons.PixelRawEditLogo
 import com.rawedit.app.ui.icons.RawIconType
 import com.rawedit.app.ui.icons.RawPixelMascot
+import com.rawedit.app.ui.motion.FeatheredScrollEdges
 import com.rawedit.app.ui.motion.KineticHeading
 import com.rawedit.app.ui.theme.BricolageFamily
 import com.rawedit.app.ui.theme.JetBrainsMonoFamily
@@ -67,6 +68,7 @@ fun ProfileSetupScreen(
 ) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
+    val scrollState = rememberScrollState()
 
     var name by remember { mutableStateOf("") }
     var savedPhotoPath by remember { mutableStateOf<String?>(null) }
@@ -104,10 +106,10 @@ fun ProfileSetupScreen(
         Column(
             modifier = Modifier
                 .fillMaxSize()
-                .verticalScroll(rememberScrollState())
+                .verticalScroll(scrollState)
                 .padding(start = 18.dp, end = 18.dp, bottom = 120.dp)
         ) {
-            // Top bar matching R.setup
+            // Top bar
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -122,31 +124,31 @@ fun ProfileSetupScreen(
             Spacer(modifier = Modifier.height(6.dp))
             KineticHeading(
                 words = listOf("Set", "up", "profile"),
-                style = RawTypography.headlineLarge
+                style = RawTypography.headlineLarge,
+                highlightLastWord = true
             )
             Spacer(modifier = Modifier.height(10.dp))
             Text(
                 text = "Everything stays locally on your phone",
-                style = RawTypography.bodyLarge.copy(fontSize = 16.5.sp),
+                style = RawTypography.bodyLarge.copy(fontSize = 16.sp),
                 color = RawColors.TextMuted
             )
 
             Spacer(modifier = Modifier.height(22.dp))
 
-            // Avatar card (.card.pad with .ava-w Mint halo)
+            // Avatar card (28dp borderless with subtle Tan halo)
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .clip(RoundedCornerShape(20.dp))
+                    .clip(RoundedCornerShape(28.dp))
                     .background(RawColors.CardSurface)
-                    .border(1.dp, RawColors.Divider, RoundedCornerShape(20.dp))
-                    .padding(16.dp),
+                    .padding(18.dp),
                 horizontalAlignment = Alignment.CenterHorizontally
             ) {
                 Box(
                     modifier = Modifier
                         .size(126.dp)
-                        .border(1.dp, RawColors.Mint.copy(alpha = 0.28f), CircleShape),
+                        .border(1.5.dp, RawColors.Tan.copy(alpha = 0.35f), CircleShape),
                     contentAlignment = Alignment.Center
                 ) {
                     UserAvatarView(
@@ -214,7 +216,7 @@ fun ProfileSetupScreen(
 
             Spacer(modifier = Modifier.height(24.dp))
 
-            // Your name + live N/32 mono counter (.lbl)
+            // Your name + live N/32 mono counter
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -225,7 +227,7 @@ fun ProfileSetupScreen(
                 Text(
                     text = "Your name",
                     fontFamily = BricolageFamily,
-                    fontWeight = FontWeight.SemiBold,
+                    fontWeight = FontWeight.Bold,
                     fontSize = 15.sp,
                     color = RawColors.TextPrimary
                 )
@@ -258,15 +260,15 @@ fun ProfileSetupScreen(
                     color = RawColors.TextPrimary
                 ),
                 singleLine = true,
-                shape = RoundedCornerShape(14.dp),
+                shape = RoundedCornerShape(20.dp),
                 colors = OutlinedTextFieldDefaults.colors(
-                    focusedBorderColor = RawColors.MintFocus,
-                    unfocusedBorderColor = RawColors.DividerStrong,
+                    focusedBorderColor = RawColors.AccentFocus,
+                    unfocusedBorderColor = Color.Transparent,
                     focusedContainerColor = RawColors.RaisedCard,
                     unfocusedContainerColor = RawColors.RaisedCard,
                     focusedTextColor = RawColors.TextPrimary,
                     unfocusedTextColor = RawColors.TextPrimary,
-                    cursorColor = RawColors.Mint
+                    cursorColor = RawColors.Tan
                 ),
                 modifier = Modifier.fillMaxWidth()
             )
@@ -284,7 +286,14 @@ fun ProfileSetupScreen(
             }
         }
 
-        // Sticky gradient CTA footer (.stk)
+        FeatheredScrollEdges(
+            scrollState = scrollState,
+            topHeight = 40.dp,
+            bottomHeight = 114.dp,
+            alwaysShowBottom = true
+        )
+
+        // Sticky gradient CTA footer
         Box(
             modifier = Modifier
                 .align(Alignment.BottomCenter)
@@ -299,7 +308,7 @@ fun ProfileSetupScreen(
         ) {
             BigPrimaryButton(
                 text = "Continue to raw_edit",
-                height = 62.dp,
+                height = 60.dp,
                 enabled = name.trim().isNotEmpty(),
                 onClick = { onComplete(name.trim(), savedPhotoPath) }
             )

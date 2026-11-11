@@ -13,7 +13,6 @@ import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.shrinkVertically
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -34,7 +33,9 @@ import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.wrapContentSize
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -55,6 +56,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.draw.rotate
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.TextStyle
@@ -80,12 +82,12 @@ import com.rawedit.app.ui.icons.PixelRawEditLogo
 import com.rawedit.app.ui.icons.RawIcon
 import com.rawedit.app.ui.icons.RawIconType
 import com.rawedit.app.ui.icons.RawPixelMascot
+import com.rawedit.app.ui.motion.FeatheredScrollEdges
 import com.rawedit.app.ui.motion.RawEasings
 import com.rawedit.app.ui.motion.RawPressButton
 import com.rawedit.app.ui.motion.rememberAnimationsEnabled
 import com.rawedit.app.ui.theme.BricolageCondensedFamily
 import com.rawedit.app.ui.theme.BricolageFamily
-import com.rawedit.app.ui.theme.InstrumentSerifFamily
 import com.rawedit.app.ui.theme.JetBrainsMonoFamily
 import com.rawedit.app.ui.theme.RawColors
 import kotlinx.coroutines.delay
@@ -98,11 +100,13 @@ fun ProfileScreen(
     videos: List<VideoEntity>,
     cacheManager: CacheManager,
     onUpdateName: (String) -> Unit,
-    onUpdatePhoto: (String?) -> Unit
+    onUpdatePhoto: (String?) -> Unit,
+    onOpenApiKey: () -> Unit
 ) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val animEnabled = rememberAnimationsEnabled()
+    val listState = rememberLazyListState()
 
     var editingName by remember { mutableStateOf(false) }
     var nameDraft by remember(userProfile.userName) { mutableStateOf(userProfile.userName) }
@@ -166,10 +170,11 @@ fun ProfileScreen(
             .background(RawColors.BgPrimary)
     ) {
         LazyColumn(
+            state = listState,
             modifier = Modifier.fillMaxSize(),
-            contentPadding = PaddingValues(bottom = 120.dp)
+            contentPadding = PaddingValues(bottom = 128.dp)
         ) {
-            // Solid CardSurface Hero (.ph) + Overlapping Straight ID Card (.idc)
+            // Hero (.ph) + Overlapping Straight ID Card (.idc)
             item {
                 Column(modifier = Modifier.fillMaxWidth()) {
                     Box(
@@ -179,23 +184,21 @@ fun ProfileScreen(
                             .clipToBounds()
                             .background(RawColors.HeroSurface)
                     ) {
-                        // Serif watermark "ID" inside matchParentSize
                         Box(modifier = Modifier.matchParentSize()) {
                             Text(
                                 text = "ID",
-                                fontFamily = InstrumentSerifFamily,
-                                fontWeight = FontWeight.Normal,
-                                fontSize = 210.sp,
-                                lineHeight = 210.sp,
-                                letterSpacing = (-5).sp,
+                                fontFamily = BricolageFamily,
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 196.sp,
+                                lineHeight = 196.sp,
+                                letterSpacing = (-6).sp,
                                 color = RawColors.TextPrimary.copy(alpha = 0.045f),
                                 modifier = Modifier
                                     .align(Alignment.TopEnd)
-                                    .offset(x = (-2).dp, y = (-16).dp)
+                                    .offset(x = (-4).dp, y = (-14).dp)
                             )
                         }
 
-                        // Bottom hairline separator
                         Box(
                             modifier = Modifier
                                 .align(Alignment.BottomCenter)
@@ -227,26 +230,25 @@ fun ProfileScreen(
                             Spacer(modifier = Modifier.height(10.dp))
                             Text(
                                 text = "Profile",
-                                fontFamily = InstrumentSerifFamily,
-                                fontWeight = FontWeight.Normal,
-                                fontSize = 40.sp,
-                                lineHeight = 42.sp,
-                                letterSpacing = (-0.8).sp,
+                                fontFamily = BricolageFamily,
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 42.sp,
+                                lineHeight = 44.sp,
+                                letterSpacing = (-1.4).sp,
                                 color = RawColors.TextPrimary
                             )
                         }
                     }
 
-                    // Straight Overlapping ID Card (.idc + .spine)
+                    // Straight Overlapping ID Card (.idc 28dp borderless + .spine)
                     Box(
                         modifier = Modifier
                             .zIndex(2f)
                             .offset(y = (-24).dp)
                             .padding(horizontal = 18.dp)
                             .fillMaxWidth()
-                            .clip(RoundedCornerShape(24.dp))
+                            .clip(RoundedCornerShape(28.dp))
                             .background(RawColors.CardSurface)
-                            .border(1.dp, RawColors.DividerStrong, RoundedCornerShape(24.dp))
                     ) {
                         Row(
                             modifier = Modifier
@@ -256,7 +258,7 @@ fun ProfileScreen(
                             Column(
                                 modifier = Modifier
                                     .weight(1f)
-                                    .padding(16.dp)
+                                    .padding(18.dp)
                             ) {
                                 Row(
                                     modifier = Modifier.fillMaxWidth(),
@@ -269,7 +271,7 @@ fun ProfileScreen(
                                         fontWeight = FontWeight.Medium,
                                         fontSize = 13.sp,
                                         letterSpacing = 0.2.sp,
-                                        color = RawColors.TextPrimary
+                                        color = RawColors.Tan
                                     )
                                     RawPixelMascot(kind = PixelMascotKind.PHANTOM_BUDDY, size = 30.dp)
                                 }
@@ -311,9 +313,9 @@ fun ProfileScreen(
                                             Text(
                                                 text = displayName,
                                                 fontFamily = BricolageFamily,
-                                                fontWeight = FontWeight.SemiBold,
-                                                fontSize = 28.sp,
-                                                lineHeight = 32.sp,
+                                                fontWeight = FontWeight.Bold,
+                                                fontSize = 27.sp,
+                                                lineHeight = 31.sp,
                                                 color = RawColors.TextPrimary,
                                                 maxLines = 2,
                                                 overflow = TextOverflow.Ellipsis,
@@ -367,15 +369,15 @@ fun ProfileScreen(
                                                     color = RawColors.TextMuted
                                                 )
                                             },
-                                            shape = RoundedCornerShape(14.dp),
+                                            shape = RoundedCornerShape(20.dp),
                                             colors = OutlinedTextFieldDefaults.colors(
-                                                focusedBorderColor = RawColors.MintFocus,
-                                                unfocusedBorderColor = RawColors.DividerStrong,
+                                                focusedBorderColor = RawColors.AccentFocus,
+                                                unfocusedBorderColor = Color.Transparent,
                                                 focusedContainerColor = RawColors.RaisedCard,
                                                 unfocusedContainerColor = RawColors.RaisedCard,
                                                 focusedTextColor = RawColors.TextPrimary,
                                                 unfocusedTextColor = RawColors.TextPrimary,
-                                                cursorColor = RawColors.Mint
+                                                cursorColor = RawColors.Tan
                                             ),
                                             modifier = Modifier.fillMaxWidth()
                                         )
@@ -391,18 +393,18 @@ fun ProfileScreen(
                                         ) {
                                             Box(
                                                 modifier = Modifier
-                                                    .height(36.dp)
-                                                    .clip(RoundedCornerShape(16.dp))
-                                                    .background(RawColors.Mint)
-                                                    .padding(horizontal = 16.dp),
+                                                    .height(38.dp)
+                                                    .clip(CircleShape)
+                                                    .background(RawColors.Cream)
+                                                    .padding(horizontal = 18.dp),
                                                 contentAlignment = Alignment.Center
                                             ) {
                                                 Text(
                                                     text = "Done",
                                                     fontFamily = BricolageFamily,
-                                                    fontWeight = FontWeight.SemiBold,
-                                                    fontSize = 15.sp,
-                                                    color = RawColors.PrimaryBtnText
+                                                    fontWeight = FontWeight.Bold,
+                                                    fontSize = 14.5.sp,
+                                                    color = RawColors.Ink
                                                 )
                                             }
                                         }
@@ -410,7 +412,6 @@ fun ProfileScreen(
                                 }
                             }
 
-                            // Right vertical "ID card" spine (.spine)
                             Box(
                                 modifier = Modifier
                                     .width(42.dp)
@@ -437,17 +438,16 @@ fun ProfileScreen(
                 }
             }
 
-            // Stats card (.card.pad) with tabular condensed numerals
+            // Stats card (28dp borderless)
             item {
                 Column(
                     modifier = Modifier
                         .padding(horizontal = 18.dp)
                         .offset(y = (-8).dp)
                         .fillMaxWidth()
-                        .clip(RoundedCornerShape(20.dp))
+                        .clip(RoundedCornerShape(28.dp))
                         .background(RawColors.CardSurface)
-                        .border(1.dp, RawColors.Divider, RoundedCornerShape(20.dp))
-                        .padding(16.dp)
+                        .padding(18.dp)
                 ) {
                     Row(
                         modifier = Modifier.fillMaxWidth(),
@@ -482,7 +482,7 @@ fun ProfileScreen(
                                 lineHeight = 44.sp,
                                 letterSpacing = (-1.1).sp,
                                 style = TextStyle(fontFeatureSettings = "tnum"),
-                                color = RawColors.TextPrimary
+                                color = RawColors.Tan
                             )
                             Text(
                                 text = "Total video time",
@@ -513,7 +513,7 @@ fun ProfileScreen(
                         Text(
                             text = lastReelDate,
                             fontFamily = BricolageFamily,
-                            fontWeight = FontWeight.SemiBold,
+                            fontWeight = FontWeight.Bold,
                             fontSize = 15.5.sp,
                             color = RawColors.TextPrimary
                         )
@@ -521,16 +521,83 @@ fun ProfileScreen(
                 }
             }
 
-            // Version & about app (.card.pr)
+            // Google AI Studio Key card (F5)
             item {
                 Spacer(modifier = Modifier.height(4.dp))
+                val hasKey = userProfile.geminiApiKey.isNotBlank()
+                val keySubtitle = if (hasKey) {
+                    val tail = userProfile.geminiApiKey.takeLast(4)
+                    "Saved (\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022$tail)  \u2022  Gemini 2.0 Flash"
+                } else {
+                    "Not set  \u2022  optional for Gemini features"
+                }
                 Row(
                     modifier = Modifier
                         .padding(horizontal = 18.dp)
                         .fillMaxWidth()
-                        .clip(RoundedCornerShape(20.dp))
+                        .clip(RoundedCornerShape(28.dp))
                         .background(RawColors.CardSurface)
-                        .border(1.dp, RawColors.Divider, RoundedCornerShape(20.dp))
+                        .clickable(onClick = onOpenApiKey)
+                        .padding(horizontal = 18.dp, vertical = 18.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Row(
+                        modifier = Modifier.weight(1f).padding(end = 12.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(12.dp)
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .size(42.dp)
+                                .clip(CircleShape)
+                                .background(if (hasKey) RawColors.AccentSoft else RawColors.RaisedCard),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            RawIcon(
+                                type = RawIconType.KEY,
+                                size = 19.dp,
+                                tint = if (hasKey) RawColors.Tan else RawColors.TextMuted
+                            )
+                        }
+                        Column {
+                            Text(
+                                text = "Google AI Studio Key",
+                                fontFamily = BricolageFamily,
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 18.sp,
+                                color = RawColors.TextPrimary
+                            )
+                            Spacer(modifier = Modifier.height(2.dp))
+                            Text(
+                                text = keySubtitle,
+                                fontFamily = JetBrainsMonoFamily,
+                                fontWeight = FontWeight.Medium,
+                                fontSize = 12.5.sp,
+                                color = if (hasKey) RawColors.Tan else RawColors.TextMuted,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                        }
+                    }
+                    RawSecondaryButton(
+                        text = if (hasKey) "Manage" else "Add key",
+                        height = 46.dp,
+                        fillWidth = false,
+                        onClick = onOpenApiKey
+                    )
+                }
+            }
+
+            // Version & about app (28dp borderless)
+            item {
+                Spacer(modifier = Modifier.height(12.dp))
+                Row(
+                    modifier = Modifier
+                        .padding(horizontal = 18.dp)
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(28.dp))
+                        .background(RawColors.CardSurface)
                         .padding(horizontal = 18.dp, vertical = 20.dp),
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically
@@ -539,13 +606,13 @@ fun ProfileScreen(
                         Text(
                             text = "Version ${BuildConfig.VERSION_NAME}",
                             fontFamily = BricolageFamily,
-                            fontWeight = FontWeight.SemiBold,
+                            fontWeight = FontWeight.Bold,
                             fontSize = 19.sp,
                             color = RawColors.TextPrimary
                         )
                         Spacer(modifier = Modifier.height(3.dp))
                         Text(
-                            text = "offline  \u2022  no ads",
+                            text = "offline stage  \u2022  no ads",
                             fontFamily = JetBrainsMonoFamily,
                             fontWeight = FontWeight.Medium,
                             fontSize = 13.sp,
@@ -554,7 +621,7 @@ fun ProfileScreen(
                     }
                     RawSecondaryButton(
                         text = "About app",
-                        height = 50.dp,
+                        height = 48.dp,
                         leadingIcon = RawIconType.INFO,
                         fillWidth = false,
                         onClick = { showAboutSheet = true }
@@ -562,16 +629,15 @@ fun ProfileScreen(
                 }
             }
 
-            // Clear cache (.card.pr + coral TRASH squircle)
+            // Clear cache (28dp borderless)
             item {
                 Spacer(modifier = Modifier.height(12.dp))
                 Row(
                     modifier = Modifier
                         .padding(horizontal = 18.dp)
                         .fillMaxWidth()
-                        .clip(RoundedCornerShape(20.dp))
+                        .clip(RoundedCornerShape(28.dp))
                         .background(RawColors.CardSurface)
-                        .border(1.dp, RawColors.Divider, RoundedCornerShape(20.dp))
                         .padding(horizontal = 18.dp, vertical = 20.dp),
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically
@@ -580,7 +646,7 @@ fun ProfileScreen(
                         Text(
                             text = "Clear cache",
                             fontFamily = BricolageFamily,
-                            fontWeight = FontWeight.SemiBold,
+                            fontWeight = FontWeight.Bold,
                             fontSize = 19.sp,
                             color = RawColors.TextPrimary
                         )
@@ -596,7 +662,8 @@ fun ProfileScreen(
                     }
                     CircleActionButton(
                         icon = RawIconType.TRASH,
-                        size = 36.dp,
+                        size = 40.dp,
+                        backgroundColor = RawColors.ErrorSoft,
                         iconTint = RawColors.ErrorCoral,
                         onClick = {
                             scope.launch {
@@ -610,6 +677,13 @@ fun ProfileScreen(
             }
         }
 
+        FeatheredScrollEdges(
+            listState = listState,
+            topHeight = 40.dp,
+            bottomHeight = 124.dp,
+            alwaysShowBottom = true
+        )
+
         RawToastBanner(
             message = toastMsg,
             modifier = Modifier
@@ -622,7 +696,7 @@ fun ProfileScreen(
     if (showPhotoMenu) {
         ModalBottomSheet(
             onDismissRequest = { showPhotoMenu = false },
-            shape = RoundedCornerShape(topStart = 20.dp, topEnd = 20.dp),
+            shape = RoundedCornerShape(topStart = 32.dp, topEnd = 32.dp),
             containerColor = RawColors.CardSurface,
             contentColor = RawColors.TextPrimary
         ) {
@@ -634,7 +708,7 @@ fun ProfileScreen(
                 Text(
                     text = "Profile photo",
                     fontFamily = BricolageFamily,
-                    fontWeight = FontWeight.SemiBold,
+                    fontWeight = FontWeight.Bold,
                     fontSize = 22.sp,
                     color = RawColors.TextPrimary
                 )
@@ -679,7 +753,7 @@ fun ProfileScreen(
     if (showAboutSheet) {
         ModalBottomSheet(
             onDismissRequest = { showAboutSheet = false },
-            shape = RoundedCornerShape(topStart = 20.dp, topEnd = 20.dp),
+            shape = RoundedCornerShape(topStart = 32.dp, topEnd = 32.dp),
             containerColor = RawColors.CardSurface,
             contentColor = RawColors.TextPrimary
         ) {
@@ -694,12 +768,13 @@ fun ProfileScreen(
                 Text(
                     text = "About raw_edit",
                     fontFamily = BricolageFamily,
-                    fontWeight = FontWeight.SemiBold,
+                    fontWeight = FontWeight.Bold,
                     fontSize = 27.sp,
+                    letterSpacing = (-0.7).sp,
                     color = RawColors.TextPrimary
                 )
                 Text(
-                    text = "Version ${BuildConfig.VERSION_NAME}  \u2022  100% offline  \u2022  no ads",
+                    text = "Version ${BuildConfig.VERSION_NAME}  \u2022  offline render stage  \u2022  no ads",
                     fontFamily = JetBrainsMonoFamily,
                     fontWeight = FontWeight.Medium,
                     fontSize = 13.sp,
@@ -718,7 +793,7 @@ fun ProfileScreen(
                     "Kotlin standard library - Apache-2.0",
                     "AndroidX Media3 - Apache-2.0",
                     "Coil image loading - Apache-2.0",
-                    "Instrument Serif & Bricolage Grotesque - SIL OFL 1.1",
+                    "Bricolage Grotesque - SIL OFL 1.1",
                     "JetBrains Mono - SIL OFL 1.1"
                 ).forEachIndexed { i, lic ->
                     if (i > 0) {
@@ -736,7 +811,7 @@ fun ProfileScreen(
                 Spacer(modifier = Modifier.height(6.dp))
                 BigPrimaryButton(
                     text = "Close",
-                    height = 60.dp,
+                    height = 56.dp,
                     onClick = { showAboutSheet = false }
                 )
                 Spacer(modifier = Modifier.height(20.dp))

@@ -10,6 +10,10 @@ import android.webkit.WebView
 import android.webkit.WebViewClient
 import com.rawedit.app.data.CacheManager
 import java.io.ByteArrayInputStream
+import java.io.File
+import java.io.InputStream
+import java.io.RandomAccessFile
+import java.util.Locale
 
 class LocalAssetServer(
     private val context: Context,
@@ -46,6 +50,9 @@ class LocalAssetServer(
             if (path.startsWith("/fonts/")) {
                 return serveBundledFont(path.removePrefix("/fonts/"))
             }
+            if (path.startsWith("/assets/")) {
+                return serveLocalLockerAsset(path.removePrefix("/assets/"), request.requestHeaders)
+            }
             if (path == "/index.html" || path == "/" || path.isEmpty()) {
                 val html = htmlProvider()
                 return WebResourceResponse(
@@ -63,29 +70,134 @@ class LocalAssetServer(
             if (path.startsWith("/fonts/")) {
                 return serveBundledFont(path.removePrefix("/fonts/"))
             } else {
-                val assetName = path.removePrefix("/")
-                val assetFile = cacheManager.getAssetFile(assetName)
-                if (assetFile != null) {
-                    val mime = when {
-                        assetName.endsWith(".png", ignoreCase = true) -> "image/png"
-                        assetName.endsWith(".webp", ignoreCase = true) -> "image/webp"
-                        else -> "image/jpeg"
-                    }
-                    return runCatching {
-                        WebResourceResponse(
-                            mime,
-                            null,
-                            200,
-                            "OK",
-                            CORS_HEADERS,
-                            assetFile.inputStream()
-                        )
-                    }.getOrElse { forbidden() }
-                }
+                val assetName = path.removePrefix("/assets/").removePrefix("/")
+                return serveLocalLockerAsset(assetName, request.requestHeaders)
             }
         }
 
         return forbidden()
+    }
+
+    private fun serveLocalLockerAsset(
+        assetName: String,
+        requestHeaders: Map<String, String>?
+    ): WebResourceResponse {
+        val assetFile = cacheManager.getAssetFile(assetName) ?: return forbidden()
+        val lowerName = assetFile.name.lowercase(Locale.US)
+        val mime = when {
+            lowerName.endsWith(".png") -> "image/png"
+            lowerName.endsWith(".webp") -> "image/webp"
+            lowerName.endsWith(".mp4") -> "video/mp4"
+            lowerName.endsWith(".mov") -> "video/quicktime"
+            lowerName.endsWith(".webm") -> "video/webm"
+            else -> "image/jpeg"
+        }
+        val rangeHeader = requestHeaders?.entries
+            ?.firstOrNull { it.key.equals("Range", ignoreCase = true) }
+            ?.value
+            ?.trim()
+
+        if (!rangeHeader.isNullOrBlank() && rangeHeader.startsWith("bytes=")) {
+            return runCatching {
+                servePartialRange(assetFile, mime, rangeHeader)
+            }.getOrElse { forbidden() }
+        }
+
+        val totalLen = assetFile.length()
+        val fullHeaders = CORS_HEADERS + mapOf(
+            "Accept-Ranges" to "bytes",
+            "Content-Length" to totalLen.toString()
+        )
+        return runCatching {
+            WebResourceResponse(
+                mime,
+                null,
+                200,
+                "OK",
+                fullHeaders,
+                assetFile.inputStream()
+            )
+        }.getOrElse { forbidden() }
+    }
+
+    private fun servePartialRange(
+        file: File,
+        mime: String,
+        rangeHeader: String
+    ): WebResourceResponse {
+        val total = file.length()
+        if (total <= 0L) return forbidden()
+
+        val spec = rangeHeader.removePrefix("bytes=").substringBefore(',').trim()
+        val dashIdx = spec.indexOf('-')
+        if (dashIdx < 0) return forbidden()
+
+        val startPart = spec.substring(0, dashIdx).trim()
+        val endPart = spec.substring(dashIdx + 1).trim()
+
+        val start: Long
+        val end: Long
+        if (startPart.isEmpty()) {
+            val suffix = endPart.toLongOrNull() ?: return forbidden()
+            start = (total - suffix).coerceAtLeast(0L)
+            end = total - 1L
+        } else {
+            start = startPart.toLongOrNull() ?: return forbidden()
+            end = (endPart.toLongOrNull() ?: (total - 1L)).coerceAtMost(total - 1L)
+        }
+        if (start < 0L || end < start || start >= total) {
+            return WebResourceResponse(
+                "text/plain",
+                "UTF-8",
+                416,
+                "Range Not Satisfiable",
+                CORS_HEADERS + mapOf("Content-Range" to "bytes */$total"),
+                ByteArrayInputStream(ByteArray(0))
+            )
+        }
+
+        val chunkLen = end - start + 1L
+        val headers = CORS_HEADERS + mapOf(
+            "Accept-Ranges" to "bytes",
+            "Content-Range" to "bytes $start-$end/$total",
+            "Content-Length" to chunkLen.toString()
+        )
+        val stream = BoundedRandomAccessInputStream(file, start, chunkLen)
+        return WebResourceResponse(
+            mime,
+            null,
+            206,
+            "Partial Content",
+            headers,
+            stream
+        )
+    }
+
+    private class BoundedRandomAccessInputStream(
+        file: File,
+        startOffset: Long,
+        private var remaining: Long
+    ) : InputStream() {
+        private val raf = RandomAccessFile(file, "r").apply { seek(startOffset) }
+
+        override fun read(): Int {
+            if (remaining <= 0L) return -1
+            val b = raf.read()
+            if (b >= 0) remaining--
+            return b
+        }
+
+        override fun read(b: ByteArray, off: Int, len: Int): Int {
+            if (remaining <= 0L) return -1
+            val toRead = minOf(len.toLong(), remaining).toInt()
+            val n = raf.read(b, off, toRead)
+            if (n > 0) remaining -= n.toLong()
+            return n
+        }
+
+        override fun close() {
+            runCatching { raf.close() }
+        }
     }
 
     private fun serveBundledFont(requestedFile: String): WebResourceResponse {
@@ -168,22 +280,110 @@ class LocalAssetServer(
             window.__rawLastError = (e && e.message) ? String(e.message) : 'Script error';
           }
         });
+        window.__rawSyncVideo = function(videoEl, t, start, end, speed) {
+          if (!videoEl) return Promise.resolve();
+          var s = Number.isFinite(start) ? start : 0;
+          var e = (end == null || !Number.isFinite(end)) ? Infinity : end;
+          var sp = (speed == null || !Number.isFinite(speed) || speed <= 0) ? 1 : speed;
+          videoEl.muted = true;
+          videoEl.playsInline = true;
+          videoEl.preload = 'auto';
+          if (!videoEl.paused) {
+            try { videoEl.pause(); } catch (_) {}
+          }
+          function computeTarget() {
+            var dur = (Number.isFinite(videoEl.duration) && videoEl.duration > 0) ? videoEl.duration : 60;
+            var clampedGlobal = Math.max(s, Math.min(t, e));
+            var localT = Math.max(0, (clampedGlobal - s) * sp);
+            return Math.min(localT, Math.max(0, dur - 0.033));
+          }
+          function performSeek() {
+            var target = computeTarget();
+            if (Math.abs((videoEl.currentTime || 0) - target) < 0.015 && videoEl.readyState >= 2) {
+              return Promise.resolve();
+            }
+            return new Promise(function(resolve) {
+              var done = false;
+              var timer = setTimeout(finish, 260);
+              function finish() {
+                if (done) return;
+                done = true;
+                clearTimeout(timer);
+                videoEl.removeEventListener('seeked', finish);
+                resolve();
+              }
+              videoEl.addEventListener('seeked', finish, { once: true });
+              try {
+                videoEl.currentTime = target;
+              } catch (_) {
+                finish();
+              }
+            });
+          }
+          var p;
+          if (videoEl.readyState < 1) {
+            p = new Promise(function(resolve) {
+              var settled = false;
+              var metaTimer = setTimeout(go, 340);
+              function go() {
+                if (settled) return;
+                settled = true;
+                clearTimeout(metaTimer);
+                videoEl.removeEventListener('loadedmetadata', go);
+                videoEl.removeEventListener('error', go);
+                performSeek().then(resolve);
+              }
+              videoEl.addEventListener('loadedmetadata', go, { once: true });
+              videoEl.addEventListener('error', go, { once: true });
+            });
+          } else {
+            p = performSeek();
+          }
+          videoEl.__rawSeekPromise = p;
+          return p;
+        };
+        function __attachRawHelpers(obj) {
+          if (!obj || typeof obj !== 'object') return obj;
+          if (typeof obj.syncVideo !== 'function') obj.syncVideo = window.__rawSyncVideo;
+          if (!obj.assets) obj.assets = window.__RAW_ASSETS__ || {};
+          if (typeof obj.asset !== 'function') {
+            obj.asset = function(p) { return String(p || '').replace(/^\.?\//, ''); };
+          }
+          return obj;
+        }
+        (function() {
+          var _store = __attachRawHelpers(window.RAW || {});
+          try {
+            Object.defineProperty(window, 'RAW', {
+              configurable: true,
+              enumerable: true,
+              get: function() { return _store; },
+              set: function(next) {
+                if (next && typeof next === 'object') {
+                  _store = __attachRawHelpers(next);
+                }
+              }
+            });
+          } catch (_) {
+            window.RAW = _store;
+          }
+        })();
         window.__ensureRawContract = function() {
           if (window.RAW && typeof window.RAW.seek === 'function' && typeof window.RAW.duration === 'number' && window.RAW.duration > 0) {
-            return window.RAW;
+            return __attachRawHelpers(window.RAW);
           }
           if (typeof window.seek === 'function') {
             var dur = (window.PROJECT && typeof window.PROJECT.duration === 'number' && window.PROJECT.duration > 0)
               ? window.PROJECT.duration
               : ((typeof window.PROJECT_DURATION === 'number' && window.PROJECT_DURATION > 0) ? window.PROJECT_DURATION : 0);
             if (dur > 0) {
-              window.RAW = {
+              window.RAW = __attachRawHelpers({
                 duration: dur,
                 width: 1920,
                 height: 1080,
                 fps: 30,
                 seek: function(t) { return window.seek(t); }
-              };
+              });
               return window.RAW;
             }
           }
@@ -232,7 +432,7 @@ class LocalAssetServer(
             if (cls.indexOf('dust') !== -1 || cls.indexOf('progress') !== -1 || cls.indexOf('brackets') !== -1) return true;
             if (cls === 'w' || cls === 'lab' || cls === 'bar' || cls === 'fill' || cls === 'seg') return true;
             var tag = (el.tagName || '').toUpperCase();
-            if (tag === 'SVG' || tag === 'PATH' || tag === 'CIRCLE' || tag === 'RECT' || tag === 'STYLE' || tag === 'SCRIPT') return true;
+            if (tag === 'SVG' || tag === 'PATH' || tag === 'CIRCLE' || tag === 'RECT' || tag === 'STYLE' || tag === 'SCRIPT' || tag === 'VIDEO' || tag === 'IMG') return true;
             if (el.offsetWidth >= 1750 && el.offsetHeight >= 900) return true;
             var baseOp = parseFloat(cs.opacity);
             if (!isNaN(baseOp) && baseOp > 0 && baseOp <= 0.25 && cls.indexOf('headline') === -1 && cls.indexOf('card') === -1) return true;
@@ -387,18 +587,42 @@ class LocalAssetServer(
             }
             var dur = (typeof raw.duration === 'number' && raw.duration > 0) ? raw.duration : t;
             var safeT = Math.max(0, Math.min(t, dur));
-            raw.seek(safeT);
+            var seekRet = raw.seek(safeT);
             window.__rawAutoFitStage();
+
+            var waitPromises = [];
+            if (seekRet && typeof seekRet.then === 'function') {
+              waitPromises.push(seekRet.catch(function(){}));
+            }
+
+            var vids = document.querySelectorAll('video');
+            for (var vi = 0; vi < vids.length; vi++) {
+              var v = vids[vi];
+              if (v.__rawSeekPromise && typeof v.__rawSeekPromise.then === 'function') {
+                waitPromises.push(v.__rawSeekPromise.catch(function(){}));
+              } else if (v.seeking) {
+                waitPromises.push(new Promise(function(resolve) {
+                  var timer = setTimeout(doneV, 280);
+                  function doneV() {
+                    clearTimeout(timer);
+                    v.removeEventListener('seeked', doneV);
+                    resolve();
+                  }
+                  v.addEventListener('seeked', doneV, { once: true });
+                }));
+              }
+            }
+
             var imgs = Array.prototype.slice.call(document.querySelectorAll('img')).filter(function(img) {
               return img && img.getAttribute('src') && img.style.display !== 'none' && (!img.complete || img.naturalWidth === 0);
             });
-            var decodeProms = imgs.map(function(img) {
-              if (typeof img.decode === 'function') {
-                return img.decode().catch(function(){});
+            for (var ii = 0; ii < imgs.length; ii++) {
+              if (typeof imgs[ii].decode === 'function') {
+                waitPromises.push(imgs[ii].decode().catch(function(){}));
               }
-              return Promise.resolve();
-            });
-            Promise.all(decodeProms).then(function() {
+            }
+
+            Promise.all(waitPromises).then(function() {
               requestAnimationFrame(function() {
                 requestAnimationFrame(function() {
                   window.__rawDoneId = reqId;
@@ -418,7 +642,7 @@ class LocalAssetServer(
         webView: WebView,
         onPageReady: (() -> Unit)? = null
     ) {
-        webView.setBackgroundColor(Color.parseColor("#0F0F0F"))
+        webView.setBackgroundColor(Color.parseColor("#0D0D0F"))
         webView.settings.apply {
             javaScriptEnabled = true
             blockNetworkLoads = true
@@ -431,7 +655,7 @@ class LocalAssetServer(
             useWideViewPort = false
             loadWithOverviewMode = false
             cacheMode = WebSettings.LOAD_NO_CACHE
-            mediaPlaybackRequiresUserGesture = true
+            mediaPlaybackRequiresUserGesture = false
         }
         webView.isHorizontalScrollBarEnabled = false
         webView.isVerticalScrollBarEnabled = false

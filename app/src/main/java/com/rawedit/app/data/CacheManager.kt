@@ -4,7 +4,10 @@ import android.content.ContentValues
 import android.content.Context
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
+import android.graphics.Canvas
 import android.graphics.Matrix
+import android.graphics.Paint
+import android.graphics.Rect
 import android.media.ExifInterface
 import android.media.MediaMetadataRetriever
 import android.net.Uri
@@ -12,10 +15,12 @@ import android.os.Build
 import android.os.Environment
 import android.provider.MediaStore
 import android.provider.OpenableColumns
+import com.rawedit.app.data.local.LocalAssetEntity
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import java.io.File
 import java.io.FileOutputStream
+import java.util.Locale
 import java.util.UUID
 
 data class AudioImportResult(
@@ -25,17 +30,27 @@ data class AudioImportResult(
     val durationSec: Double
 )
 
-data class ImageAssetResult(
-    val assetId: String,
+data class LocalAssetImportResult(
     val fileName: String,
+    val relativePath: String,
+    val kind: String,
+    val mimeType: String,
     val width: Int,
-    val height: Int
+    val height: Int,
+    val durationSec: Double,
+    val sizeBytes: Long,
+    val thumbPath: String,
+    val defaultDescription: String,
+    val defaultSafeZone: String
 )
 
 class CacheManager(private val context: Context) {
 
     val projectAssetsDir: File
         get() = File(context.filesDir, "project_assets").apply { mkdirs() }
+
+    val assetThumbsDir: File
+        get() = File(projectAssetsDir, "thumbs").apply { mkdirs() }
 
     val projectAudioDir: File
         get() = File(context.filesDir, "project_audio").apply { mkdirs() }
@@ -223,14 +238,312 @@ class CacheManager(private val context: Context) {
         return File(dir, "capture_${System.currentTimeMillis()}.jpg")
     }
 
-    fun getAssetFile(fileName: String): File? {
-        if (!ASSET_FILENAME_REGEX.matches(fileName)) return null
-        val file = File(projectAssetsDir, fileName)
+    fun getAssetFile(pathOrName: String): File? {
+        val normalized = pathOrName
+            .removePrefix("/")
+            .removePrefix("assets/")
+            .trim()
+        if (normalized.contains("..") || normalized.startsWith(".")) return null
+        if (!ASSET_FILENAME_REGEX.matches(normalized)) return null
+        val file = File(projectAssetsDir, normalized)
         return file.takeIf { it.exists() && it.isFile }
     }
 
-    fun countStoredAssets(): Int {
-        return projectAssetsDir.listFiles()?.count { ASSET_FILENAME_REGEX.matches(it.name) } ?: 0
+    fun deleteLockerAssetFiles(fileName: String, thumbPath: String) {
+        if (ASSET_FILENAME_REGEX.matches(fileName)) {
+            runCatching { File(projectAssetsDir, fileName).delete() }
+        }
+        if (thumbPath.isNotBlank()) {
+            runCatching { File(thumbPath).delete() }
+        }
+    }
+
+    suspend fun importLockerAsset(
+        uri: Uri,
+        isVideo: Boolean
+    ): Result<LocalAssetImportResult> = withContext(Dispatchers.IO) {
+        runCatching {
+            val resolver = context.contentResolver
+            val mimeRaw = resolver.getType(uri)?.lowercase(Locale.US).orEmpty()
+            val (origName, reportedSize) = queryDisplayNameAndSize(uri)
+            val fallbackBase = if (isVideo) "clip" else "image"
+
+            if (isVideo || mimeRaw.startsWith("video/")) {
+                if (reportedSize > MAX_VIDEO_BYTES) {
+                    throw IllegalArgumentException("Video clip exceeds 150 MB limit.")
+                }
+                val ext = origName.substringAfterLast('.', "mp4").lowercase(Locale.US)
+                    .takeIf { it in setOf("mp4", "mov", "webm") } ?: "mp4"
+                val uniqueName = allocateUniqueAssetName(
+                    origName.substringBeforeLast('.', fallbackBase),
+                    ext,
+                    fallbackBase
+                )
+                val destFile = File(projectAssetsDir, uniqueName)
+                resolver.openInputStream(uri)?.use { input ->
+                    FileOutputStream(destFile).use { output ->
+                        val buf = ByteArray(32 * 1024)
+                        var total = 0L
+                        while (true) {
+                            val r = input.read(buf)
+                            if (r <= 0) break
+                            total += r
+                            if (total > MAX_VIDEO_BYTES) {
+                                destFile.delete()
+                                throw IllegalArgumentException("Video clip exceeds 150 MB limit.")
+                            }
+                            output.write(buf, 0, r)
+                        }
+                    }
+                } ?: throw IllegalArgumentException("Could not open video clip.")
+
+                val actualSize = destFile.length()
+                if (actualSize <= 0L) {
+                    destFile.delete()
+                    throw IllegalArgumentException("Selected clip is empty.")
+                }
+
+                var vidW = 1080
+                var vidH = 1920
+                var durationSec = 5.0
+                val thumbFile = File(assetThumbsDir, "${uniqueName.substringBeforeLast('.')}_story.jpg")
+                val retriever = MediaMetadataRetriever()
+                try {
+                    retriever.setDataSource(destFile.absolutePath)
+                    vidW = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_VIDEO_WIDTH)
+                        ?.toIntOrNull()?.coerceAtLeast(1) ?: 1080
+                    vidH = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_VIDEO_HEIGHT)
+                        ?.toIntOrNull()?.coerceAtLeast(1) ?: 1920
+                    val durMs = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_DURATION)
+                        ?.toLongOrNull() ?: 5000L
+                    durationSec = (durMs / 1000.0).coerceAtLeast(0.5)
+
+                    val storyBmp = Bitmap.createBitmap(720, 405, Bitmap.Config.ARGB_8888)
+                    val storyCanvas = Canvas(storyBmp)
+                    storyCanvas.drawColor(android.graphics.Color.parseColor("#17171A"))
+                    val tileW = 240
+                    val paint = Paint(Paint.FILTER_BITMAP_FLAG)
+                    val pts = doubleArrayOf(0.1, 0.5, 0.85)
+                    for (i in 0 until 3) {
+                        val us = ((durMs * pts[i]).toLong()).coerceAtLeast(0L) * 1000L
+                        val frame = runCatching {
+                            retriever.getFrameAtTime(us, MediaMetadataRetriever.OPTION_CLOSEST_SYNC)
+                        }.getOrNull()
+                        if (frame != null) {
+                            val srcRect = Rect(0, 0, frame.width, frame.height)
+                            val dstRect = Rect(i * tileW, 0, (i + 1) * tileW, 405)
+                            storyCanvas.drawBitmap(frame, srcRect, dstRect, paint)
+                            frame.recycle()
+                        }
+                    }
+                    FileOutputStream(thumbFile).use { fos ->
+                        storyBmp.compress(Bitmap.CompressFormat.JPEG, 84, fos)
+                    }
+                    storyBmp.recycle()
+                } finally {
+                    runCatching { retriever.release() }
+                }
+
+                val clipMime = when (ext) {
+                    "webm" -> "video/webm"
+                    "mov" -> "video/quicktime"
+                    else -> "video/mp4"
+                }
+                LocalAssetImportResult(
+                    fileName = uniqueName,
+                    relativePath = "assets/$uniqueName",
+                    kind = LocalAssetEntity.KIND_CLIP,
+                    mimeType = clipMime,
+                    width = vidW,
+                    height = vidH,
+                    durationSec = durationSec,
+                    sizeBytes = actualSize,
+                    thumbPath = thumbFile.absolutePath,
+                    defaultDescription = "Local video clip ($vidW x $vidH, ${String.format(Locale.US, "%.1f", durationSec)}s). Tap Auto-describe with Gemini or edit note.",
+                    defaultSafeZone = "Place kinetic overlay text along opposite margin or clean dark band via RAW.syncVideo."
+                )
+            } else {
+                if (reportedSize > MAX_IMAGE_BYTES) {
+                    throw IllegalArgumentException("Image exceeds 15 MB limit.")
+                }
+                val rawBytes = resolver.openInputStream(uri)?.use { it.readBytes() }
+                    ?: throw IllegalArgumentException("Could not read image file.")
+                if (rawBytes.size > MAX_IMAGE_BYTES) {
+                    throw IllegalArgumentException("Image exceeds 15 MB limit.")
+                }
+
+                val isPng = mimeRaw.contains("png") || origName.lowercase(Locale.US).endsWith(".png")
+                val isWebp = mimeRaw.contains("webp") || origName.lowercase(Locale.US).endsWith(".webp")
+                val ext = when {
+                    isPng -> "png"
+                    isWebp -> "webp"
+                    else -> "jpg"
+                }
+
+                val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+                BitmapFactory.decodeByteArray(rawBytes, 0, rawBytes.size, bounds)
+                if (bounds.outWidth <= 0 || bounds.outHeight <= 0) {
+                    throw IllegalArgumentException("Unreadable image file.")
+                }
+
+                val sample = computeInSampleSize(bounds.outWidth, bounds.outHeight, MAX_LOCKER_IMAGE_DIM)
+                var bmp = BitmapFactory.decodeByteArray(
+                    rawBytes,
+                    0,
+                    rawBytes.size,
+                    BitmapFactory.Options().apply { inSampleSize = sample }
+                ) ?: throw IllegalArgumentException("Could not decode image.")
+
+                if (!isPng) {
+                    val orientation = runCatching {
+                        rawBytes.inputStream().use {
+                            ExifInterface(it).getAttributeInt(
+                                ExifInterface.TAG_ORIENTATION,
+                                ExifInterface.ORIENTATION_NORMAL
+                            )
+                        }
+                    }.getOrDefault(ExifInterface.ORIENTATION_NORMAL)
+                    val matrix = Matrix()
+                    when (orientation) {
+                        ExifInterface.ORIENTATION_ROTATE_90 -> matrix.postRotate(90f)
+                        ExifInterface.ORIENTATION_ROTATE_180 -> matrix.postRotate(180f)
+                        ExifInterface.ORIENTATION_ROTATE_270 -> matrix.postRotate(270f)
+                    }
+                    if (!matrix.isIdentity) {
+                        val rotated = Bitmap.createBitmap(bmp, 0, 0, bmp.width, bmp.height, matrix, true)
+                        if (rotated !== bmp) bmp.recycle()
+                        bmp = rotated
+                    }
+                }
+
+                val maxDim = maxOf(bmp.width, bmp.height)
+                if (maxDim > MAX_LOCKER_IMAGE_DIM) {
+                    val scale = MAX_LOCKER_IMAGE_DIM.toFloat() / maxDim.toFloat()
+                    val scaled = Bitmap.createScaledBitmap(
+                        bmp,
+                        (bmp.width * scale).toInt().coerceAtLeast(1),
+                        (bmp.height * scale).toInt().coerceAtLeast(1),
+                        true
+                    )
+                    if (scaled !== bmp) bmp.recycle()
+                    bmp = scaled
+                }
+
+                val hasAlpha = isPng && bmp.hasAlpha()
+                val kind = if (hasAlpha || isPng) LocalAssetEntity.KIND_CUTOUT else LocalAssetEntity.KIND_IMAGE
+                val uniqueName = allocateUniqueAssetName(
+                    origName.substringBeforeLast('.', if (isPng) "cutout" else "photo"),
+                    ext,
+                    if (isPng) "cutout" else "photo"
+                )
+                val outFile = File(projectAssetsDir, uniqueName)
+                FileOutputStream(outFile).use { fos ->
+                    val format = when (ext) {
+                        "png" -> Bitmap.CompressFormat.PNG
+                        "webp" -> if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                            Bitmap.CompressFormat.WEBP_LOSSLESS
+                        } else {
+                            @Suppress("DEPRECATION")
+                            Bitmap.CompressFormat.WEBP
+                        }
+                        else -> Bitmap.CompressFormat.JPEG
+                    }
+                    bmp.compress(format, 92, fos)
+                }
+
+                // Compact preview/Vision JPEG or PNG thumb (<= 512px)
+                val thumbScale = minOf(1f, 512f / maxOf(bmp.width, bmp.height).toFloat())
+                val thumbBmp = if (thumbScale < 1f) {
+                    Bitmap.createScaledBitmap(
+                        bmp,
+                        (bmp.width * thumbScale).toInt().coerceAtLeast(1),
+                        (bmp.height * thumbScale).toInt().coerceAtLeast(1),
+                        true
+                    )
+                } else {
+                    bmp
+                }
+                val thumbExt = if (isPng) "png" else "jpg"
+                val thumbFile = File(assetThumbsDir, "${uniqueName.substringBeforeLast('.')}_thumb.$thumbExt")
+                FileOutputStream(thumbFile).use { fos ->
+                    thumbBmp.compress(
+                        if (isPng) Bitmap.CompressFormat.PNG else Bitmap.CompressFormat.JPEG,
+                        86,
+                        fos
+                    )
+                }
+                if (thumbBmp !== bmp) thumbBmp.recycle()
+                val finalW = bmp.width
+                val finalH = bmp.height
+                bmp.recycle()
+
+                val imgMime = when (ext) {
+                    "png" -> "image/png"
+                    "webp" -> "image/webp"
+                    else -> "image/jpeg"
+                }
+                LocalAssetImportResult(
+                    fileName = uniqueName,
+                    relativePath = "assets/$uniqueName",
+                    kind = kind,
+                    mimeType = imgMime,
+                    width = finalW,
+                    height = finalH,
+                    durationSec = 0.0,
+                    sizeBytes = outFile.length(),
+                    thumbPath = thumbFile.absolutePath,
+                    defaultDescription = if (kind == LocalAssetEntity.KIND_CUTOUT) {
+                        "Transparent PNG cutout ($finalW x $finalH). Tap Auto-describe with Gemini or edit note."
+                    } else {
+                        "Local image ($finalW x $finalH). Tap Auto-describe with Gemini or edit note."
+                    },
+                    defaultSafeZone = "Keep headlines outside the subject center; pair with dark scrim if needed."
+                )
+            }
+        }
+    }
+
+    suspend fun saveProfileAvatar(bitmap: Bitmap): String = withContext(Dispatchers.IO) {
+        val scaled = if (bitmap.width != 512 || bitmap.height != 512) {
+            Bitmap.createScaledBitmap(bitmap, 512, 512, true)
+        } else {
+            bitmap
+        }
+        profileDir.listFiles()?.forEach { it.delete() }
+        val file = File(profileDir, "avatar_${System.currentTimeMillis()}.png")
+        FileOutputStream(file).use { fos ->
+            scaled.compress(Bitmap.CompressFormat.PNG, 95, fos)
+        }
+        if (scaled !== bitmap) scaled.recycle()
+        file.absolutePath
+    }
+
+    suspend fun loadBitmapWithExif(uri: Uri): Bitmap? = withContext(Dispatchers.IO) {
+        val bytes = context.contentResolver.openInputStream(uri)?.use { it.readBytes() } ?: return@withContext null
+        val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+        BitmapFactory.decodeByteArray(bytes, 0, bytes.size, bounds)
+        val sample = computeInSampleSize(bounds.outWidth, bounds.outHeight, 1024)
+        val bmp = BitmapFactory.decodeByteArray(
+            bytes,
+            0,
+            bytes.size,
+            BitmapFactory.Options().apply { inSampleSize = sample }
+        ) ?: return@withContext null
+
+        val orientation = runCatching {
+            bytes.inputStream().use { ExifInterface(it).getAttributeInt(ExifInterface.TAG_ORIENTATION, ExifInterface.ORIENTATION_NORMAL) }
+        }.getOrDefault(ExifInterface.ORIENTATION_NORMAL)
+
+        val matrix = Matrix()
+        when (orientation) {
+            ExifInterface.ORIENTATION_ROTATE_90 -> matrix.postRotate(90f)
+            ExifInterface.ORIENTATION_ROTATE_180 -> matrix.postRotate(180f)
+            ExifInterface.ORIENTATION_ROTATE_270 -> matrix.postRotate(270f)
+            else -> return@withContext bmp
+        }
+        val rotated = Bitmap.createBitmap(bmp, 0, 0, bmp.width, bmp.height, matrix, true)
+        if (rotated !== bmp) bmp.recycle()
+        rotated
     }
 
     suspend fun importAudio(uri: Uri): Result<AudioImportResult> = withContext(Dispatchers.IO) {
@@ -299,119 +612,6 @@ class CacheManager(private val context: Context) {
         }
     }
 
-    suspend fun importEditorImage(uri: Uri): Result<ImageAssetResult> = withContext(Dispatchers.IO) {
-        runCatching {
-            val mime = context.contentResolver.getType(uri)?.lowercase().orEmpty()
-            val meta = queryDisplayNameAndSize(uri)
-            if (meta.second > MAX_IMAGE_BYTES) {
-                throw IllegalArgumentException("Image is over 10 MB.")
-            }
-
-            val isPng = mime.contains("png") || meta.first.lowercase().endsWith(".png")
-            val isWebp = mime.contains("webp") || meta.first.lowercase().endsWith(".webp")
-            val ext = when {
-                isPng -> "png"
-                isWebp -> "webp"
-                else -> "jpg"
-            }
-
-            val rawBytes = context.contentResolver.openInputStream(uri)?.use { it.readBytes() }
-                ?: throw IllegalArgumentException("Could not read image.")
-            if (rawBytes.size > MAX_IMAGE_BYTES) {
-                throw IllegalArgumentException("Image is over 10 MB.")
-            }
-
-            val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
-            BitmapFactory.decodeByteArray(rawBytes, 0, rawBytes.size, bounds)
-            if (bounds.outWidth <= 0 || bounds.outHeight <= 0) {
-                throw IllegalArgumentException("Unreadable image file.")
-            }
-
-            val sampleSize = computeInSampleSize(bounds.outWidth, bounds.outHeight, MAX_IMAGE_DIM)
-            val decodeOpts = BitmapFactory.Options().apply { inSampleSize = sampleSize }
-            var bitmap = BitmapFactory.decodeByteArray(rawBytes, 0, rawBytes.size, decodeOpts)
-                ?: throw IllegalArgumentException("Could not decode image.")
-
-            val maxDim = maxOf(bitmap.width, bitmap.height)
-            if (maxDim > MAX_IMAGE_DIM) {
-                val scale = MAX_IMAGE_DIM.toFloat() / maxDim.toFloat()
-                val scaled = Bitmap.createScaledBitmap(
-                    bitmap,
-                    (bitmap.width * scale).toInt().coerceAtLeast(1),
-                    (bitmap.height * scale).toInt().coerceAtLeast(1),
-                    true
-                )
-                if (scaled !== bitmap) bitmap.recycle()
-                bitmap = scaled
-            }
-
-            val assetId = generateAssetId()
-            val fileName = "$assetId.$ext"
-            val outFile = File(projectAssetsDir, fileName)
-            FileOutputStream(outFile).use { fos ->
-                val format = when (ext) {
-                    "png" -> Bitmap.CompressFormat.PNG
-                    "webp" -> if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-                        Bitmap.CompressFormat.WEBP_LOSSLESS
-                    } else {
-                        @Suppress("DEPRECATION")
-                        Bitmap.CompressFormat.WEBP
-                    }
-                    else -> Bitmap.CompressFormat.JPEG
-                }
-                bitmap.compress(format, 92, fos)
-            }
-            val w = bitmap.width
-            val h = bitmap.height
-            bitmap.recycle()
-
-            ImageAssetResult(assetId = assetId, fileName = fileName, width = w, height = h)
-        }
-    }
-
-    suspend fun saveProfileAvatar(bitmap: Bitmap): String = withContext(Dispatchers.IO) {
-        val scaled = if (bitmap.width != 512 || bitmap.height != 512) {
-            Bitmap.createScaledBitmap(bitmap, 512, 512, true)
-        } else {
-            bitmap
-        }
-        profileDir.listFiles()?.forEach { it.delete() }
-        val file = File(profileDir, "avatar_${System.currentTimeMillis()}.png")
-        FileOutputStream(file).use { fos ->
-            scaled.compress(Bitmap.CompressFormat.PNG, 95, fos)
-        }
-        if (scaled !== bitmap) scaled.recycle()
-        file.absolutePath
-    }
-
-    suspend fun loadBitmapWithExif(uri: Uri): Bitmap? = withContext(Dispatchers.IO) {
-        val bytes = context.contentResolver.openInputStream(uri)?.use { it.readBytes() } ?: return@withContext null
-        val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
-        BitmapFactory.decodeByteArray(bytes, 0, bytes.size, bounds)
-        val sample = computeInSampleSize(bounds.outWidth, bounds.outHeight, 1024)
-        val bmp = BitmapFactory.decodeByteArray(
-            bytes,
-            0,
-            bytes.size,
-            BitmapFactory.Options().apply { inSampleSize = sample }
-        ) ?: return@withContext null
-
-        val orientation = runCatching {
-            bytes.inputStream().use { ExifInterface(it).getAttributeInt(ExifInterface.TAG_ORIENTATION, ExifInterface.ORIENTATION_NORMAL) }
-        }.getOrDefault(ExifInterface.ORIENTATION_NORMAL)
-
-        val matrix = Matrix()
-        when (orientation) {
-            ExifInterface.ORIENTATION_ROTATE_90 -> matrix.postRotate(90f)
-            ExifInterface.ORIENTATION_ROTATE_180 -> matrix.postRotate(180f)
-            ExifInterface.ORIENTATION_ROTATE_270 -> matrix.postRotate(270f)
-            else -> return@withContext bmp
-        }
-        val rotated = Bitmap.createBitmap(bmp, 0, 0, bmp.width, bmp.height, matrix, true)
-        if (rotated !== bmp) bmp.recycle()
-        rotated
-    }
-
     suspend fun saveVideoToPhoneGallery(mp4File: File, title: String): Result<Uri> = withContext(Dispatchers.IO) {
         runCatching {
             val safeName = title.replace(Regex("[^A-Za-z0-9_\\- ]"), "_").trim().ifBlank { "raw_edit_reel" }
@@ -473,6 +673,24 @@ class CacheManager(private val context: Context) {
         folderSize(tempDir) + folderSize(File(context.cacheDir, "camera_temp")) + folderSize(File(context.cacheDir, "sheet_temp"))
     }
 
+    private fun allocateUniqueAssetName(rawBase: String, ext: String, fallback: String): String {
+        val cleanBase = rawBase.lowercase(Locale.US)
+            .replace(Regex("[^a-z0-9_-]+"), "_")
+            .trim('_', '-')
+            .take(36)
+            .ifBlank { fallback }
+        var candidate = "$cleanBase.$ext"
+        var index = 1
+        while (File(projectAssetsDir, candidate).exists() && index < 500) {
+            candidate = "${cleanBase}_$index.$ext"
+            index++
+        }
+        if (File(projectAssetsDir, candidate).exists()) {
+            candidate = "${cleanBase}_${UUID.randomUUID().toString().take(6)}.$ext"
+        }
+        return candidate
+    }
+
     private fun folderSize(file: File): Long {
         if (!file.exists()) return 0L
         if (file.isFile) return file.length()
@@ -501,24 +719,14 @@ class CacheManager(private val context: Context) {
         return sample
     }
 
-    private fun generateAssetId(): String {
-        val chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789"
-        val raw = UUID.randomUUID().toString().replace("-", "")
-        val sb = StringBuilder(8)
-        for (i in 0 until 8) {
-            val idx = raw.substring(i * 2, i * 2 + 2).toInt(16) % chars.length
-            sb.append(chars[idx])
-        }
-        return sb.toString()
-    }
-
     companion object {
-        val ASSET_FILENAME_REGEX = Regex("^[A-Za-z0-9]{8}\\.(png|jpg|jpeg|webp)$")
+        val ASSET_FILENAME_REGEX = Regex("^[A-Za-z0-9._-]{1,80}\\.(png|jpg|jpeg|webp|mp4|mov|webm)$")
         private val ALLOWED_AUDIO_EXT = setOf("mp3", "m4a", "wav", "aac", "ogg")
         private const val MAX_AUDIO_BYTES = 100L * 1024L * 1024L
         private const val MAX_AUDIO_SEC = 20.0 * 60.0
-        private const val MAX_IMAGE_BYTES = 10L * 1024L * 1024L
-        private const val MAX_IMAGE_DIM = 2560
+        private const val MAX_IMAGE_BYTES = 15L * 1024L * 1024L
+        private const val MAX_VIDEO_BYTES = 150L * 1024L * 1024L
+        private const val MAX_LOCKER_IMAGE_DIM = 1920
         const val CODE_FILE_PREFIX = "@rawfile:"
         const val TOPIC_FILE_PREFIX = "@rawtxt:"
         const val SRT_FILE_PREFIX = "@rawsrt:"

@@ -2,13 +2,13 @@ package com.rawedit.app.ui.components
 
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
-import androidx.compose.animation.expandHorizontally
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.scaleIn
 import androidx.compose.animation.scaleOut
-import androidx.compose.animation.shrinkHorizontally
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -19,7 +19,6 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.defaultMinSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.navigationBarsPadding
@@ -36,10 +35,12 @@ import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
@@ -57,7 +58,6 @@ import com.rawedit.app.ui.motion.RawEasings
 import com.rawedit.app.ui.motion.RawPressButton
 import com.rawedit.app.ui.motion.rememberAnimationsEnabled
 import com.rawedit.app.ui.theme.BricolageFamily
-import com.rawedit.app.ui.theme.InstrumentSerifFamily
 import com.rawedit.app.ui.theme.RawColors
 import com.rawedit.app.ui.theme.RawTypography
 import java.io.File
@@ -67,6 +67,7 @@ import java.util.Locale
 
 enum class MainTab(val label: String, val icon: RawIconType) {
     HOME("Home", RawIconType.HOME),
+    PALETTE("Palette", RawIconType.PALETTE),
     CREATE("Create", RawIconType.PLUS),
     REELS("Reels", RawIconType.FILM),
     PROFILE("Profile", RawIconType.PERSON)
@@ -91,7 +92,7 @@ fun RawEditLogoBadge(
             Spacer(modifier = Modifier.width(10.dp))
             Text(
                 text = "raw_edit",
-                style = RawTypography.titleLarge.copy(fontWeight = FontWeight.SemiBold),
+                style = RawTypography.titleLarge.copy(fontWeight = FontWeight.Bold),
                 color = RawColors.TextPrimary
             )
         }
@@ -143,8 +144,9 @@ fun UserAvatarView(
 }
 
 /**
- * Floating obsidian dock (#dock + #cap) matching the updated typography mockup:
- * - Rounded-rectangle 14dp active Mint indicator & 50dp Create + tile
+ * Fixed 5-item Wallet floating pill dock (#dock + sliding Cream #cap):
+ * - Zero width animations (fixed 60dp slots + 50dp center Tan '+' button).
+ * - Capsule slides strictly via GPU `graphicsLayer { translationX }`.
  */
 @Composable
 fun RawBottomNavBar(
@@ -153,96 +155,115 @@ fun RawBottomNavBar(
     modifier: Modifier = Modifier
 ) {
     val animEnabled = rememberAnimationsEnabled()
+    val density = LocalDensity.current
+
+    val tabWidthDp = 60.dp
+    val plusSizeDp = 50.dp
+    val gapDp = 4.dp
+    val dockPadDp = 7.dp
+
+    val targetOffsetDp = when (currentTab) {
+        MainTab.HOME -> 0.dp
+        MainTab.PALETTE -> tabWidthDp + gapDp
+        MainTab.CREATE -> 0.dp
+        MainTab.REELS -> (tabWidthDp + gapDp) * 2 + plusSizeDp + gapDp
+        MainTab.PROFILE -> (tabWidthDp + gapDp) * 3 + plusSizeDp + gapDp
+    }
+    val targetOffsetPx = with(density) { targetOffsetDp.toPx() }
+    val capsuleXState = animateFloatAsState(
+        targetValue = targetOffsetPx,
+        animationSpec = if (animEnabled) {
+            spring(dampingRatio = 0.78f, stiffness = 430f)
+        } else {
+            tween(0)
+        },
+        label = "dock_cap_x"
+    )
+    val capsuleAlphaState = animateFloatAsState(
+        targetValue = if (currentTab == MainTab.CREATE) 0f else 1f,
+        animationSpec = tween(if (animEnabled) 180 else 0),
+        label = "dock_cap_alpha"
+    )
 
     Box(
         modifier = modifier
             .fillMaxWidth()
             .navigationBarsPadding()
-            .padding(bottom = 16.dp),
+            .padding(bottom = 14.dp),
         contentAlignment = Alignment.Center
     ) {
-        Row(
+        Box(
             modifier = Modifier
-                .height(62.dp)
-                .clip(RoundedCornerShape(30.dp))
+                .shadow(14.dp, CircleShape, ambientColor = Color.Black, spotColor = Color.Black)
+                .clip(CircleShape)
                 .background(RawColors.DockBg)
-                .border(1.dp, RawColors.Divider, RoundedCornerShape(30.dp))
-                .padding(6.dp),
-            horizontalArrangement = Arrangement.spacedBy(2.dp),
-            verticalAlignment = Alignment.CenterVertically
+                .padding(dockPadDp)
         ) {
-            MainTab.entries.forEach { tab ->
-                if (tab == MainTab.CREATE) {
-                    RawPressButton(
-                        onClick = { onSelectTab(MainTab.CREATE) },
-                        modifier = Modifier.padding(horizontal = 3.dp)
-                    ) {
-                        Box(
-                            modifier = Modifier
-                                .size(50.dp)
-                                .clip(RoundedCornerShape(14.dp))
-                                .background(RawColors.Mint),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            RawIcon(
-                                type = RawIconType.PLUS,
-                                size = 24.dp,
-                                tint = RawColors.PrimaryBtnText,
-                                strokeWidth = 2.2.dp
-                            )
-                        }
+            // Sliding Cream capsule strictly moved in GPU transform phase
+            Box(
+                modifier = Modifier
+                    .graphicsLayer {
+                        translationX = capsuleXState.value
+                        alpha = capsuleAlphaState.value
                     }
-                } else {
-                    val selected = tab == currentTab
-                    val pillBg by animateColorAsState(
-                        targetValue = if (selected) RawColors.Mint else Color.Transparent,
-                        animationSpec = tween(if (animEnabled) 190 else 0, easing = RawEasings.Morph),
-                        label = "dock_bg_${tab.name}"
-                    )
-                    val iconTint by animateColorAsState(
-                        targetValue = if (selected) RawColors.PrimaryBtnText else RawColors.TextMuted,
-                        animationSpec = tween(if (animEnabled) 190 else 0, easing = RawEasings.Morph),
-                        label = "dock_tint_${tab.name}"
-                    )
-                    Row(
-                        modifier = Modifier
-                            .defaultMinSize(minWidth = 50.dp)
-                            .height(50.dp)
-                            .clip(RoundedCornerShape(14.dp))
-                            .background(pillBg)
-                            .clickable(
-                                interactionSource = remember { MutableInteractionSource() },
-                                indication = null
-                            ) { onSelectTab(tab) }
-                            .padding(horizontal = 14.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.Center
-                    ) {
-                        RawIcon(
-                            type = tab.icon,
-                            size = 21.dp,
-                            tint = iconTint,
-                            strokeWidth = 2.1.dp
-                        )
-                        AnimatedVisibility(
-                            visible = selected,
-                            enter = fadeIn(tween(180, easing = RawEasings.Morph)) +
-                                expandHorizontally(tween(200, easing = RawEasings.Morph)),
-                            exit = fadeOut(tween(100)) +
-                                shrinkHorizontally(tween(140, easing = RawEasings.Morph))
-                        ) {
-                            Row(verticalAlignment = Alignment.CenterVertically) {
-                                Spacer(modifier = Modifier.width(8.dp))
-                                Text(
-                                    text = tab.label,
-                                    fontFamily = BricolageFamily,
-                                    fontWeight = FontWeight.SemiBold,
-                                    fontSize = 14.5.sp,
-                                    color = RawColors.PrimaryBtnText,
-                                    maxLines = 1,
-                                    softWrap = false
+                    .size(width = tabWidthDp, height = 50.dp)
+                    .clip(CircleShape)
+                    .background(RawColors.Cream)
+            )
+
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(gapDp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                MainTab.entries.forEach { tab ->
+                    if (tab == MainTab.CREATE) {
+                        RawPressButton(onClick = { onSelectTab(MainTab.CREATE) }) {
+                            Box(
+                                modifier = Modifier
+                                    .size(plusSizeDp)
+                                    .clip(CircleShape)
+                                    .background(RawColors.Tan),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                RawIcon(
+                                    type = RawIconType.PLUS,
+                                    size = 24.dp,
+                                    tint = RawColors.Ink,
+                                    strokeWidth = 2.4.dp
                                 )
                             }
+                        }
+                    } else {
+                        val selected = tab == currentTab
+                        val contentColor = if (selected) RawColors.Ink else RawColors.TextMuted
+                        Column(
+                            modifier = Modifier
+                                .size(width = tabWidthDp, height = 50.dp)
+                                .clip(CircleShape)
+                                .clickable(
+                                    interactionSource = remember { MutableInteractionSource() },
+                                    indication = null
+                                ) { onSelectTab(tab) },
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                            verticalArrangement = Arrangement.Center
+                        ) {
+                            RawIcon(
+                                type = tab.icon,
+                                size = 19.dp,
+                                tint = contentColor,
+                                strokeWidth = 2.1.dp
+                            )
+                            Spacer(modifier = Modifier.height(2.dp))
+                            Text(
+                                text = tab.label,
+                                fontFamily = BricolageFamily,
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 10.sp,
+                                lineHeight = 10.sp,
+                                color = contentColor,
+                                maxLines = 1,
+                                softWrap = false
+                            )
                         }
                     }
                 }
@@ -252,21 +273,20 @@ fun RawBottomNavBar(
 }
 
 /**
- * Blocky squircle action button (.ib / .ib.s / .ib.bad from mockup: 12dp radius).
+ * Circular action icon button (.ib / .ib.s / .ib.bad in raw_edit_ui.html).
  */
 @Composable
 fun CircleActionButton(
     icon: RawIconType,
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
-    size: Dp = 50.dp,
-    backgroundColor: Color = RawColors.CardSurface,
+    size: Dp = 48.dp,
+    backgroundColor: Color = RawColors.RaisedCard,
     iconTint: Color = RawColors.TextPrimary,
-    borderColor: Color = if (iconTint == RawColors.ErrorCoral) RawColors.ErrorBorder else RawColors.Divider,
+    borderColor: Color = Color.Transparent,
     enabled: Boolean = true
 ) {
-    val corner = if (size <= 32.dp) 10.dp else 12.dp
-    val effectiveBg = if (iconTint == RawColors.ErrorCoral && backgroundColor == RawColors.CardSurface) {
+    val effectiveBg = if (iconTint == RawColors.ErrorCoral && backgroundColor == RawColors.RaisedCard) {
         RawColors.ErrorSoft
     } else {
         backgroundColor
@@ -279,16 +299,22 @@ fun CircleActionButton(
         Box(
             modifier = Modifier
                 .size(size)
-                .clip(RoundedCornerShape(corner))
+                .clip(CircleShape)
                 .background(effectiveBg)
-                .border(1.dp, borderColor, RoundedCornerShape(corner)),
+                .then(
+                    if (borderColor != Color.Transparent) {
+                        Modifier.border(1.dp, borderColor, CircleShape)
+                    } else {
+                        Modifier
+                    }
+                ),
             contentAlignment = Alignment.Center
         ) {
             RawIcon(
                 type = icon,
-                size = if (size >= 48.dp) 22.dp else size * 0.48f,
+                size = if (size >= 46.dp) 21.dp else size * 0.48f,
                 tint = iconTint,
-                strokeWidth = if (size <= 36.dp) 1.8.dp else 2.2.dp
+                strokeWidth = if (size <= 36.dp) 1.9.dp else 2.2.dp
             )
         }
     }
@@ -313,28 +339,22 @@ fun MorphingFilterChips(
             val selected = idx == selectedIndex
             val count = counts.getOrNull(idx)
             val bg by animateColorAsState(
-                targetValue = if (selected) RawColors.Mint else Color.Transparent,
-                animationSpec = tween(if (animEnabled) 220 else 0, easing = RawEasings.Morph),
+                targetValue = if (selected) RawColors.Tan else RawColors.RaisedCard,
+                animationSpec = tween(if (animEnabled) 200 else 0, easing = RawEasings.Morph),
                 label = "chip_bg_$idx"
             )
-            val border by animateColorAsState(
-                targetValue = if (selected) RawColors.Mint else RawColors.DividerStrong,
-                animationSpec = tween(if (animEnabled) 220 else 0, easing = RawEasings.Morph),
-                label = "chip_bd_$idx"
-            )
             val fg by animateColorAsState(
-                targetValue = if (selected) RawColors.PrimaryBtnText else RawColors.TextMuted,
-                animationSpec = tween(if (animEnabled) 220 else 0, easing = RawEasings.Morph),
+                targetValue = if (selected) RawColors.Ink else RawColors.TextMuted,
+                animationSpec = tween(if (animEnabled) 200 else 0, easing = RawEasings.Morph),
                 label = "chip_fg_$idx"
             )
 
             RawPressButton(onClick = { onSelect(idx) }) {
                 Row(
                     modifier = Modifier
-                        .height(44.dp)
-                        .clip(RoundedCornerShape(10.dp))
+                        .height(42.dp)
+                        .clip(CircleShape)
                         .background(bg)
-                        .border(1.dp, border, RoundedCornerShape(10.dp))
                         .padding(horizontal = 18.dp),
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(6.dp)
@@ -342,8 +362,8 @@ fun MorphingFilterChips(
                     Text(
                         text = if (count != null) "$label $count" else label,
                         fontFamily = BricolageFamily,
-                        fontWeight = FontWeight.SemiBold,
-                        fontSize = 15.5.sp,
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 14.5.sp,
                         color = fg,
                         maxLines = 1,
                         softWrap = false
@@ -359,9 +379,11 @@ fun BigPrimaryButton(
     text: String,
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
-    height: Dp = 60.dp,
+    height: Dp = 58.dp,
     enabled: Boolean = true,
-    leadingIcon: RawIconType? = null
+    leadingIcon: RawIconType? = null,
+    containerColor: Color = RawColors.Cream,
+    contentColor: Color = RawColors.PrimaryBtnText
 ) {
     RawPressButton(
         onClick = onClick,
@@ -372,27 +394,27 @@ fun BigPrimaryButton(
             modifier = Modifier
                 .fillMaxWidth()
                 .height(height)
-                .graphicsLayer { alpha = if (enabled) 1f else 0.30f }
-                .clip(RoundedCornerShape(16.dp))
-                .background(RawColors.Mint)
-                .padding(horizontal = 22.dp),
+                .graphicsLayer { alpha = if (enabled) 1f else 0.32f }
+                .clip(CircleShape)
+                .background(containerColor)
+                .padding(horizontal = if (height <= 48.dp) 14.dp else 22.dp),
             horizontalArrangement = Arrangement.Center,
             verticalAlignment = Alignment.CenterVertically
         ) {
             if (leadingIcon != null) {
                 RawIcon(
                     type = leadingIcon,
-                    size = if (height <= 52.dp) 16.dp else 18.dp,
-                    tint = RawColors.PrimaryBtnText
+                    size = if (height <= 48.dp) 16.dp else 18.dp,
+                    tint = contentColor
                 )
                 Spacer(modifier = Modifier.width(8.dp))
             }
             Text(
                 text = text,
                 fontFamily = BricolageFamily,
-                fontWeight = FontWeight.SemiBold,
-                fontSize = if (height <= 52.dp) 15.5.sp else 18.5.sp,
-                color = RawColors.PrimaryBtnText,
+                fontWeight = FontWeight.Bold,
+                fontSize = if (height <= 48.dp) 14.5.sp else 17.sp,
+                color = contentColor,
                 maxLines = 1,
                 softWrap = false
             )
@@ -405,14 +427,13 @@ fun RawSecondaryButton(
     text: String,
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
-    height: Dp = 60.dp,
+    height: Dp = 58.dp,
     enabled: Boolean = true,
     leadingIcon: RawIconType? = null,
     isDanger: Boolean = false,
     fillWidth: Boolean = true
 ) {
     val bg = if (isDanger) RawColors.ErrorSoft else RawColors.RaisedCard
-    val border = if (isDanger) RawColors.ErrorBorder else RawColors.Divider
     val fg = if (isDanger) RawColors.ErrorCoral else RawColors.TextPrimary
 
     RawPressButton(
@@ -425,22 +446,21 @@ fun RawSecondaryButton(
                 .then(if (fillWidth) Modifier.fillMaxWidth() else Modifier)
                 .height(height)
                 .graphicsLayer { alpha = if (enabled) 1f else 0.4f }
-                .clip(RoundedCornerShape(16.dp))
+                .clip(CircleShape)
                 .background(bg)
-                .border(1.dp, border, RoundedCornerShape(16.dp))
-                .padding(horizontal = if (height <= 52.dp) 16.dp else 20.dp),
+                .padding(horizontal = if (height <= 48.dp) 14.dp else 20.dp),
             horizontalArrangement = Arrangement.Center,
             verticalAlignment = Alignment.CenterVertically
         ) {
             if (leadingIcon != null) {
-                RawIcon(type = leadingIcon, size = if (height <= 52.dp) 16.dp else 18.dp, tint = fg)
+                RawIcon(type = leadingIcon, size = if (height <= 48.dp) 15.dp else 18.dp, tint = fg)
                 Spacer(modifier = Modifier.width(7.dp))
             }
             Text(
                 text = text,
                 fontFamily = BricolageFamily,
-                fontWeight = FontWeight.SemiBold,
-                fontSize = if (height <= 42.dp) 14.sp else if (height <= 52.dp) 15.5.sp else 18.5.sp,
+                fontWeight = FontWeight.Bold,
+                fontSize = if (height <= 42.dp) 13.5.sp else if (height <= 48.dp) 14.5.sp else 17.sp,
                 color = fg,
                 maxLines = 1,
                 softWrap = false
@@ -449,9 +469,6 @@ fun RawSecondaryButton(
     }
 }
 
-/**
- * Custom dark obsidian dialog matching .pn.dlg (20dp radius, Instrument Serif header, 16dp buttons).
- */
 @Composable
 fun RawConfirmDialog(
     title: String,
@@ -469,24 +486,24 @@ fun RawConfirmDialog(
         Column(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(horizontal = 26.dp)
-                .clip(RoundedCornerShape(20.dp))
+                .padding(horizontal = 24.dp)
+                .clip(RoundedCornerShape(32.dp))
                 .background(RawColors.CardSurface)
-                .border(1.dp, RawColors.DividerStrong, RoundedCornerShape(20.dp))
                 .padding(24.dp)
         ) {
             Text(
                 text = title,
-                fontFamily = InstrumentSerifFamily,
-                fontWeight = FontWeight.Normal,
-                fontSize = 29.sp,
-                lineHeight = 32.sp,
+                fontFamily = BricolageFamily,
+                fontWeight = FontWeight.Bold,
+                fontSize = 26.sp,
+                lineHeight = 29.sp,
+                letterSpacing = (-0.8).sp,
                 color = RawColors.TextPrimary
             )
             Spacer(modifier = Modifier.height(10.dp))
             Text(
                 text = body,
-                style = RawTypography.bodyLarge.copy(fontSize = 16.sp, lineHeight = 23.sp),
+                style = RawTypography.bodyLarge.copy(fontSize = 15.5.sp, lineHeight = 22.5.sp),
                 color = RawColors.TextMuted
             )
             Spacer(modifier = Modifier.height(22.dp))
@@ -496,14 +513,14 @@ fun RawConfirmDialog(
             ) {
                 RawSecondaryButton(
                     text = cancelLabel,
-                    height = 50.dp,
+                    height = 48.dp,
                     onClick = onDismiss,
                     modifier = Modifier.weight(1f)
                 )
                 if (isDanger) {
                     RawSecondaryButton(
                         text = confirmLabel,
-                        height = 50.dp,
+                        height = 48.dp,
                         isDanger = true,
                         onClick = onConfirm,
                         modifier = Modifier.weight(1f)
@@ -511,7 +528,7 @@ fun RawConfirmDialog(
                 } else {
                     BigPrimaryButton(
                         text = confirmLabel,
-                        height = 50.dp,
+                        height = 48.dp,
                         onClick = onConfirm,
                         modifier = Modifier.weight(1f)
                     )
@@ -522,7 +539,7 @@ fun RawConfirmDialog(
 }
 
 /**
- * Floating dark rounded-rectangle toast banner (#toast: 14dp radius).
+ * Floating Cream pill toast banner (#toast in raw_edit_ui.html: Cream pill with dark bold ink).
  */
 @Composable
 fun RawToastBanner(
@@ -531,23 +548,23 @@ fun RawToastBanner(
 ) {
     AnimatedVisibility(
         visible = !message.isNullOrBlank(),
-        enter = fadeIn(tween(180)) + scaleIn(initialScale = 0.94f, animationSpec = tween(220, easing = RawEasings.Morph)),
-        exit = fadeOut(tween(160)) + scaleOut(targetScale = 0.94f, animationSpec = tween(160)),
+        enter = fadeIn(tween(180)) + scaleIn(initialScale = 0.92f, animationSpec = tween(220, easing = RawEasings.Morph)),
+        exit = fadeOut(tween(160)) + scaleOut(targetScale = 0.92f, animationSpec = tween(160)),
         modifier = modifier
     ) {
         Box(
             modifier = Modifier
-                .clip(RoundedCornerShape(14.dp))
-                .background(RawColors.RaisedCard)
-                .border(1.dp, RawColors.DividerStrong, RoundedCornerShape(14.dp))
-                .padding(horizontal = 20.dp, vertical = 13.dp)
+                .shadow(12.dp, CircleShape, ambientColor = Color.Black, spotColor = Color.Black)
+                .clip(CircleShape)
+                .background(RawColors.Cream)
+                .padding(horizontal = 20.dp, vertical = 12.dp)
         ) {
             Text(
                 text = message.orEmpty(),
                 fontFamily = BricolageFamily,
-                fontWeight = FontWeight.SemiBold,
-                fontSize = 15.sp,
-                color = RawColors.TextPrimary,
+                fontWeight = FontWeight.Bold,
+                fontSize = 14.5.sp,
+                color = RawColors.Ink,
                 maxLines = 1,
                 softWrap = false
             )

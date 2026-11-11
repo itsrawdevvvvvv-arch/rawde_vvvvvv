@@ -19,6 +19,7 @@ data class ProjectEntity(
     val layersJson: String = "",
     val codeDurationSec: Double = 0.0,
     val hasEditableLayers: Boolean = false,
+    val attachedAssetIds: String = "",
     val state: String = STATE_IN_PROGRESS,
     val createdAt: Long = System.currentTimeMillis(),
     val updatedAt: Long = System.currentTimeMillis()
@@ -42,3 +43,27 @@ data class VideoEntity(
     val savedToGalleryUri: String? = null,
     val createdAt: Long = System.currentTimeMillis()
 )
+
+@Entity(tableName = "assets")
+data class LocalAssetEntity(
+    @PrimaryKey(autoGenerate = true)
+    val id: Long = 0,
+    val fileName: String,
+    val relativePath: String,
+    val kind: String,
+    val mimeType: String,
+    val width: Int,
+    val height: Int,
+    val durationSec: Double = 0.0,
+    val sizeBytes: Long = 0L,
+    val thumbPath: String = "",
+    val description: String = "",
+    val safeZone: String = "",
+    val createdAt: Long = System.currentTimeMillis()
+) {
+    companion object {
+        const val KIND_IMAGE = "image"
+        const val KIND_CUTOUT = "cutout"
+        const val KIND_CLIP = "clip"
+    }
+}

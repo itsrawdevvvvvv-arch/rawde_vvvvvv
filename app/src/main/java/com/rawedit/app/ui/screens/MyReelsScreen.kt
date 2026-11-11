@@ -8,7 +8,6 @@ import androidx.compose.animation.fadeOut
 import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
@@ -25,7 +24,8 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -73,12 +73,14 @@ import com.rawedit.app.ui.icons.PixelMascotKind
 import com.rawedit.app.ui.icons.RawIcon
 import com.rawedit.app.ui.icons.RawIconType
 import com.rawedit.app.ui.icons.RawPixelMascot
+import com.rawedit.app.ui.motion.CascadeSkewCard
+import com.rawedit.app.ui.motion.FeatheredScrollEdges
 import com.rawedit.app.ui.motion.KineticHeading
 import com.rawedit.app.ui.motion.RawEasings
 import com.rawedit.app.ui.motion.rememberAnimationsEnabled
+import com.rawedit.app.ui.motion.walletCardColors
 import com.rawedit.app.ui.theme.BricolageCondensedFamily
 import com.rawedit.app.ui.theme.BricolageFamily
-import com.rawedit.app.ui.theme.InstrumentSerifFamily
 import com.rawedit.app.ui.theme.JetBrainsMonoFamily
 import com.rawedit.app.ui.theme.RawColors
 import com.rawedit.app.ui.theme.RawTypography
@@ -114,6 +116,7 @@ fun MyReelsScreen(
 ) {
     val context = LocalContext.current
     val animEnabled = rememberAnimationsEnabled()
+    val listState = rememberLazyListState()
 
     var filterIndex by remember { mutableIntStateOf(0) }
     var actionTarget by remember { mutableStateOf<VideoEntity?>(null) }
@@ -138,7 +141,7 @@ fun MyReelsScreen(
             .background(RawColors.BgPrimary)
             .statusBarsPadding()
     ) {
-        // Editorial Serif Header matching R.reels
+        // Editorial Bricolage Header matching Warm Wallet My Reels
         Row(
             modifier = Modifier
                 .fillMaxWidth()
@@ -150,10 +153,11 @@ fun MyReelsScreen(
                 KineticHeading(
                     words = listOf("My", "reels"),
                     style = RawTypography.headlineLarge.copy(
-                        fontSize = 48.sp,
-                        lineHeight = 50.sp,
-                        letterSpacing = (-1.1).sp
-                    )
+                        fontSize = 46.sp,
+                        lineHeight = 48.sp,
+                        letterSpacing = (-1.4).sp
+                    ),
+                    highlightLastWord = true
                 )
                 Spacer(modifier = Modifier.height(6.dp))
                 val draftsLabel = if (inProgressProjects.size == 1) "draft" else "drafts"
@@ -174,7 +178,7 @@ fun MyReelsScreen(
             )
         }
 
-        // All / Drafts / Finished outlined/Mint filter pills
+        // All / Drafts / Finished Wallet pill filters
         Box(modifier = Modifier.padding(horizontal = 18.dp, vertical = 4.dp)) {
             MorphingFilterChips(
                 options = listOf("All", "Drafts", "Finished"),
@@ -189,7 +193,8 @@ fun MyReelsScreen(
         if (displayItems.isEmpty()) {
             Box(
                 modifier = Modifier
-                    .fillMaxSize()
+                    .weight(1f)
+                    .fillMaxWidth()
                     .padding(bottom = 110.dp),
                 contentAlignment = Alignment.Center
             ) {
@@ -217,21 +222,21 @@ fun MyReelsScreen(
                                 2 -> "No finished reels yet"
                                 else -> "Nothing here yet"
                             },
-                            fontFamily = InstrumentSerifFamily,
-                            fontWeight = FontWeight.Normal,
-                            fontSize = 34.sp,
-                            lineHeight = 36.sp,
-                            letterSpacing = (-0.5).sp,
+                            fontFamily = BricolageFamily,
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 32.sp,
+                            lineHeight = 34.sp,
+                            letterSpacing = (-1.0).sp,
                             color = RawColors.TextPrimary,
                             textAlign = TextAlign.Center
                         )
                         Spacer(modifier = Modifier.height(8.dp))
                         Text(
-                            text = "Tap Create to make your first reel. Drafts and finished videos will live here.",
+                            text = "Tap + below to make your first reel. Drafts and finished videos will live here.",
                             fontFamily = BricolageFamily,
                             fontWeight = FontWeight.Medium,
-                            fontSize = 16.5.sp,
-                            lineHeight = 24.5.sp,
+                            fontSize = 16.sp,
+                            lineHeight = 23.5.sp,
                             color = RawColors.TextMuted,
                             textAlign = TextAlign.Center
                         )
@@ -239,108 +244,124 @@ fun MyReelsScreen(
                 }
             }
         } else {
-            LazyColumn(
-                modifier = Modifier.fillMaxSize(),
-                contentPadding = PaddingValues(start = 18.dp, end = 18.dp, bottom = 120.dp),
-                verticalArrangement = Arrangement.spacedBy(12.dp)
+            Box(
+                modifier = Modifier
+                    .weight(1f)
+                    .fillMaxWidth()
             ) {
-                items(
-                    items = displayItems,
-                    key = { item ->
-                        when (item) {
-                            is ProjectEntity -> "proj_${item.id}"
-                            is VideoEntity -> "vid_${item.id}"
-                            else -> "item_${item.hashCode()}"
-                        }
-                    }
-                ) { item ->
-                    when (item) {
-                        is ProjectEntity -> {
-                            val dismissState = rememberSwipeToDismissBoxState()
-                            LaunchedEffect(deleteProjectConfirmTarget) {
-                                if (deleteProjectConfirmTarget == null && dismissState.currentValue != SwipeToDismissBoxValue.Settled) {
-                                    dismissState.reset()
-                                }
+                LazyColumn(
+                    state = listState,
+                    modifier = Modifier.fillMaxSize(),
+                    contentPadding = PaddingValues(start = 18.dp, end = 18.dp, bottom = 126.dp),
+                    verticalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
+                    itemsIndexed(
+                        items = displayItems,
+                        key = { _, item ->
+                            when (item) {
+                                is ProjectEntity -> "proj_${item.id}"
+                                is VideoEntity -> "vid_${item.id}"
+                                else -> "item_${item.hashCode()}"
                             }
-                            SwipeToDismissBox(
-                                state = dismissState,
-                                enableDismissFromStartToEnd = false,
-                                onDismiss = { direction ->
-                                    if (direction == SwipeToDismissBoxValue.EndToStart) {
-                                        deleteProjectConfirmTarget = item
+                        }
+                    ) { idx, item ->
+                        CascadeSkewCard(index = idx) {
+                            when (item) {
+                                is ProjectEntity -> {
+                                    val dismissState = rememberSwipeToDismissBoxState()
+                                    LaunchedEffect(deleteProjectConfirmTarget) {
+                                        if (deleteProjectConfirmTarget == null && dismissState.currentValue != SwipeToDismissBoxValue.Settled) {
+                                            dismissState.reset()
+                                        }
                                     }
-                                },
-                                backgroundContent = {
-                                    Box(
-                                        modifier = Modifier
-                                            .fillMaxSize()
-                                            .clip(RoundedCornerShape(20.dp))
-                                            .background(RawColors.ErrorSoft)
-                                            .border(1.dp, RawColors.ErrorBorder, RoundedCornerShape(20.dp))
-                                            .padding(end = 22.dp),
-                                        contentAlignment = Alignment.CenterEnd
+                                    SwipeToDismissBox(
+                                        state = dismissState,
+                                        enableDismissFromStartToEnd = false,
+                                        onDismiss = { direction ->
+                                            if (direction == SwipeToDismissBoxValue.EndToStart) {
+                                                deleteProjectConfirmTarget = item
+                                            }
+                                        },
+                                        backgroundContent = {
+                                            Box(
+                                                modifier = Modifier
+                                                    .fillMaxSize()
+                                                    .clip(RoundedCornerShape(28.dp))
+                                                    .background(RawColors.ErrorSoft)
+                                                    .padding(end = 22.dp),
+                                                contentAlignment = Alignment.CenterEnd
+                                            ) {
+                                                RawIcon(RawIconType.TRASH, size = 20.dp, tint = RawColors.ErrorCoral)
+                                            }
+                                        }
                                     ) {
-                                        RawIcon(RawIconType.TRASH, size = 20.dp, tint = RawColors.ErrorCoral)
+                                        DraftProjectRow(
+                                            project = item,
+                                            index = idx,
+                                            onOpen = { onOpenProject(item.id, Offset(540f, 900f)) },
+                                            onDelete = { deleteProjectConfirmTarget = item }
+                                        )
                                     }
                                 }
-                            ) {
-                                DraftProjectRow(
-                                    project = item,
-                                    onOpen = { onOpenProject(item.id, Offset(540f, 900f)) },
-                                    onDelete = { deleteProjectConfirmTarget = item }
-                                )
-                            }
-                        }
 
-                        is VideoEntity -> {
-                            val dismissState = rememberSwipeToDismissBoxState()
-                            LaunchedEffect(deleteVideoConfirmTarget) {
-                                if (deleteVideoConfirmTarget == null && dismissState.currentValue != SwipeToDismissBoxValue.Settled) {
-                                    dismissState.reset()
-                                }
-                            }
-                            SwipeToDismissBox(
-                                state = dismissState,
-                                enableDismissFromStartToEnd = false,
-                                onDismiss = { direction ->
-                                    if (direction == SwipeToDismissBoxValue.EndToStart) {
-                                        deleteVideoConfirmTarget = item
+                                is VideoEntity -> {
+                                    val dismissState = rememberSwipeToDismissBoxState()
+                                    LaunchedEffect(deleteVideoConfirmTarget) {
+                                        if (deleteVideoConfirmTarget == null && dismissState.currentValue != SwipeToDismissBoxValue.Settled) {
+                                            dismissState.reset()
+                                        }
                                     }
-                                },
-                                backgroundContent = {
-                                    Box(
-                                        modifier = Modifier
-                                            .fillMaxSize()
-                                            .clip(RoundedCornerShape(18.dp))
-                                            .background(RawColors.ErrorSoft)
-                                            .border(1.dp, RawColors.ErrorBorder, RoundedCornerShape(18.dp))
-                                            .padding(end = 22.dp),
-                                        contentAlignment = Alignment.CenterEnd
+                                    SwipeToDismissBox(
+                                        state = dismissState,
+                                        enableDismissFromStartToEnd = false,
+                                        onDismiss = { direction ->
+                                            if (direction == SwipeToDismissBoxValue.EndToStart) {
+                                                deleteVideoConfirmTarget = item
+                                            }
+                                        },
+                                        backgroundContent = {
+                                            Box(
+                                                modifier = Modifier
+                                                    .fillMaxSize()
+                                                    .clip(RoundedCornerShape(28.dp))
+                                                    .background(RawColors.ErrorSoft)
+                                                    .padding(end = 22.dp),
+                                                contentAlignment = Alignment.CenterEnd
+                                            ) {
+                                                RawIcon(RawIconType.TRASH, size = 20.dp, tint = RawColors.ErrorCoral)
+                                            }
+                                        }
                                     ) {
-                                        RawIcon(RawIconType.TRASH, size = 20.dp, tint = RawColors.ErrorCoral)
+                                        VideoLibraryRow(
+                                            video = item,
+                                            index = idx,
+                                            onClick = { onPlayVideo(item.id, Offset(540f, 900f)) },
+                                            onLongClick = { actionTarget = item },
+                                            onMoreClick = { actionTarget = item },
+                                            onDelete = { deleteVideoConfirmTarget = item }
+                                        )
                                     }
                                 }
-                            ) {
-                                VideoLibraryRow(
-                                    video = item,
-                                    onClick = { onPlayVideo(item.id, Offset(540f, 900f)) },
-                                    onLongClick = { actionTarget = item },
-                                    onMoreClick = { actionTarget = item },
-                                    onDelete = { deleteVideoConfirmTarget = item }
-                                )
                             }
                         }
                     }
                 }
+
+                FeatheredScrollEdges(
+                    listState = listState,
+                    topHeight = 36.dp,
+                    bottomHeight = 120.dp,
+                    alwaysShowBottom = true
+                )
             }
         }
     }
 
-    // Bottom Actions Sheet matching .pn.sheet + .srow
+    // Bottom Actions Sheet matching .pn.sheet + .srow (32dp top corners)
     actionTarget?.let { target ->
         ModalBottomSheet(
             onDismissRequest = { actionTarget = null },
-            shape = RoundedCornerShape(topStart = 20.dp, topEnd = 20.dp),
+            shape = RoundedCornerShape(topStart = 32.dp, topEnd = 32.dp),
             containerColor = RawColors.CardSurface,
             contentColor = RawColors.TextPrimary
         ) {
@@ -352,7 +373,7 @@ fun MyReelsScreen(
                 Text(
                     text = target.title,
                     fontFamily = BricolageFamily,
-                    fontWeight = FontWeight.SemiBold,
+                    fontWeight = FontWeight.Bold,
                     fontSize = 22.sp,
                     color = RawColors.TextPrimary,
                     maxLines = 2,
@@ -404,7 +425,7 @@ fun MyReelsScreen(
         }
     }
 
-    // Custom dark obsidian Rename Dialog (.pn.dlg)
+    // Warm Wallet Rename Dialog (32dp borderless)
     renameTarget?.let { target ->
         var titleDraft by remember(target.id) { mutableStateOf(target.title) }
         Dialog(
@@ -414,18 +435,18 @@ fun MyReelsScreen(
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(horizontal = 26.dp)
-                    .clip(RoundedCornerShape(20.dp))
+                    .padding(horizontal = 24.dp)
+                    .clip(RoundedCornerShape(32.dp))
                     .background(RawColors.CardSurface)
-                    .border(1.dp, RawColors.DividerStrong, RoundedCornerShape(20.dp))
                     .padding(24.dp)
             ) {
                 Text(
                     text = "Rename reel",
-                    fontFamily = InstrumentSerifFamily,
-                    fontWeight = FontWeight.Normal,
-                    fontSize = 29.sp,
-                    lineHeight = 32.sp,
+                    fontFamily = BricolageFamily,
+                    fontWeight = FontWeight.Bold,
+                    fontSize = 26.sp,
+                    lineHeight = 29.sp,
+                    letterSpacing = (-0.8).sp,
                     color = RawColors.TextPrimary
                 )
                 Spacer(modifier = Modifier.height(14.dp))
@@ -436,18 +457,18 @@ fun MyReelsScreen(
                     textStyle = TextStyle(
                         fontFamily = BricolageFamily,
                         fontWeight = FontWeight.SemiBold,
-                        fontSize = 19.sp,
+                        fontSize = 18.sp,
                         color = RawColors.TextPrimary
                     ),
-                    shape = RoundedCornerShape(14.dp),
+                    shape = RoundedCornerShape(20.dp),
                     colors = OutlinedTextFieldDefaults.colors(
-                        focusedBorderColor = RawColors.MintFocus,
-                        unfocusedBorderColor = RawColors.DividerStrong,
+                        focusedBorderColor = RawColors.AccentFocus,
+                        unfocusedBorderColor = Color.Transparent,
                         focusedContainerColor = RawColors.RaisedCard,
                         unfocusedContainerColor = RawColors.RaisedCard,
                         focusedTextColor = RawColors.TextPrimary,
                         unfocusedTextColor = RawColors.TextPrimary,
-                        cursorColor = RawColors.Mint
+                        cursorColor = RawColors.Tan
                     ),
                     modifier = Modifier.fillMaxWidth()
                 )
@@ -510,25 +531,28 @@ fun MyReelsScreen(
 @Composable
 private fun DraftProjectRow(
     project: ProjectEntity,
+    index: Int,
     onOpen: () -> Unit,
     onDelete: () -> Unit
 ) {
+    val palette = walletCardColors(index)
+    val isDarkCard = ((index % 3) + 3) % 3 == 2
+
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .clip(RoundedCornerShape(20.dp))
-            .background(RawColors.CardSurface)
-            .border(1.dp, RawColors.Divider, RoundedCornerShape(20.dp))
+            .clip(RoundedCornerShape(28.dp))
+            .background(palette.containerColor)
             .clickable(onClick = onOpen)
-            .padding(horizontal = 14.dp, vertical = 16.dp),
+            .padding(horizontal = 16.dp, vertical = 16.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(13.dp)
     ) {
         Box(
             modifier = Modifier
-                .size(60.dp)
-                .clip(RoundedCornerShape(12.dp))
-                .background(RawColors.RaisedCard),
+                .size(58.dp)
+                .clip(RoundedCornerShape(18.dp))
+                .background(if (isDarkCard) RawColors.RaisedCard else RawColors.CodeSurface),
             contentAlignment = Alignment.Center
         ) {
             RawPixelMascot(
@@ -544,29 +568,29 @@ private fun DraftProjectRow(
             Text(
                 text = project.title.ifBlank { "Untitled Reel" },
                 fontFamily = BricolageFamily,
-                fontWeight = FontWeight.SemiBold,
+                fontWeight = FontWeight.Bold,
                 fontSize = 18.sp,
                 lineHeight = 22.sp,
-                color = RawColors.TextPrimary,
+                color = palette.titleColor,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis
             )
             Spacer(modifier = Modifier.height(6.dp))
             Box(
                 modifier = Modifier
-                    .clip(RoundedCornerShape(6.dp))
-                    .background(RawColors.RaisedCard)
+                    .clip(CircleShape)
+                    .background(palette.badgeBg)
                     .padding(horizontal = 10.dp, vertical = 4.dp)
             ) {
                 Text(
                     text = "Draft",
                     fontFamily = JetBrainsMonoFamily,
-                    fontWeight = FontWeight.Medium,
-                    fontSize = 12.sp,
-                    color = RawColors.TextMuted
+                    fontWeight = FontWeight.SemiBold,
+                    fontSize = 11.5.sp,
+                    color = palette.badgeText
                 )
             }
-            Spacer(modifier = Modifier.height(5.dp))
+            Spacer(modifier = Modifier.height(6.dp))
             val sub = buildString {
                 if (project.audioDurationSec > 0.0) {
                     append(FormatHelpers.formatDuration(project.audioDurationSec))
@@ -580,9 +604,9 @@ private fun DraftProjectRow(
                 text = sub,
                 fontFamily = JetBrainsMonoFamily,
                 fontWeight = FontWeight.Medium,
-                fontSize = 12.5.sp,
+                fontSize = 12.sp,
                 style = TextStyle(fontFeatureSettings = "tnum"),
-                color = RawColors.TextMuted,
+                color = palette.subtitleColor,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis
             )
@@ -591,13 +615,14 @@ private fun DraftProjectRow(
         CircleActionButton(
             icon = RawIconType.TRASH,
             size = 36.dp,
+            backgroundColor = if (isDarkCard) RawColors.ErrorSoft else RawColors.CardSurface,
             iconTint = RawColors.ErrorCoral,
             onClick = onDelete
         )
         RawIcon(
             type = RawIconType.CHEVRON_RIGHT,
             size = 18.dp,
-            tint = RawColors.TextMuted
+            tint = palette.subtitleColor
         )
     }
 }
@@ -606,34 +631,39 @@ private fun DraftProjectRow(
 @Composable
 private fun VideoLibraryRow(
     video: VideoEntity,
+    index: Int,
     onClick: () -> Unit,
     onLongClick: () -> Unit,
     onMoreClick: () -> Unit,
     onDelete: () -> Unit
 ) {
     val context = LocalContext.current
+    val palette = walletCardColors(index)
+    val isDarkCard = ((index % 3) + 3) % 3 == 2
+
     val hasThumb = remember(video.thumbnailPath) {
         video.thumbnailPath.isNotBlank() && File(video.thumbnailPath).exists()
     }
     val artLabel = remember(video.title) { buildReelArtLabel(video.title) }
 
-    // Full-width editorial finished reel card (.rcz)
+    // Alternating Tan / Cream / CardSurface Wallet Card (28dp borderless)
     Column(
         modifier = Modifier
             .fillMaxWidth()
-            .clip(RoundedCornerShape(18.dp))
-            .background(RawColors.CardSurface)
-            .border(1.dp, RawColors.Divider, RoundedCornerShape(18.dp))
+            .clip(RoundedCornerShape(28.dp))
+            .background(palette.containerColor)
             .combinedClickable(
                 onClick = onClick,
                 onLongClick = onLongClick
             )
     ) {
-        // Top 16:9 thumbnail box (.rcz-th)
+        // Inset 16:9 dark preview stage
         Box(
             modifier = Modifier
                 .fillMaxWidth()
+                .padding(start = 10.dp, end = 10.dp, top = 10.dp)
                 .aspectRatio(16f / 9f)
+                .clip(RoundedCornerShape(20.dp))
                 .background(RawColors.CodeSurface),
             contentAlignment = Alignment.Center
         ) {
@@ -657,56 +687,55 @@ private fun VideoLibraryRow(
                     fontWeight = FontWeight.ExtraBold,
                     fontSize = 48.sp,
                     letterSpacing = (-1.5).sp,
-                    color = RawColors.TextPrimary,
+                    color = RawColors.Cream,
                     maxLines = 1,
                     softWrap = false
                 )
             }
 
-            // Top-left 34dp translucent play circle (.rcz-play)
+            // Top-left translucent play badge
             Box(
                 modifier = Modifier
                     .align(Alignment.TopStart)
                     .padding(start = 10.dp, top = 10.dp)
-                    .size(34.dp)
+                    .size(36.dp)
                     .clip(CircleShape)
-                    .background(Color(0x990A0C0A))
-                    .border(1.dp, Color(0x38FFFFFF), CircleShape),
+                    .background(RawColors.BgPrimary.copy(alpha = 0.65f)),
                 contentAlignment = Alignment.Center
             ) {
                 RawIcon(
                     type = RawIconType.PLAY,
                     size = 15.dp,
-                    tint = Color.White
+                    tint = RawColors.Cream
                 )
             }
 
-            // Bottom-right duration badge (.rcz-dur)
+            // Bottom-right duration badge
             Box(
                 modifier = Modifier
                     .align(Alignment.BottomEnd)
-                    .padding(end = 8.dp, bottom = 8.dp)
-                    .clip(RoundedCornerShape(6.dp))
-                    .background(Color(0xBD000000))
-                    .padding(horizontal = 7.dp, vertical = 3.dp)
+                    .padding(end = 10.dp, bottom = 10.dp)
+                    .clip(CircleShape)
+                    .background(RawColors.BgPrimary.copy(alpha = 0.78f))
+                    .padding(horizontal = 9.dp, vertical = 4.dp)
             ) {
                 Text(
                     text = FormatHelpers.formatDuration(video.durationSec),
                     fontFamily = JetBrainsMonoFamily,
                     fontWeight = FontWeight.Medium,
-                    fontSize = 12.5.sp,
+                    fontSize = 12.sp,
                     letterSpacing = 0.2.sp,
                     style = TextStyle(fontFeatureSettings = "tnum"),
-                    color = Color.White
+                    color = RawColors.Cream
                 )
             }
         }
 
-        // Bottom metadata + actions row (.rcz-meta)
+        // Metadata + action buttons row
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(start = 14.dp, end = 14.dp, top = 13.dp, bottom = 14.dp),
+                .padding(start = 16.dp, end = 14.dp, top = 12.dp, bottom = 16.dp),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(10.dp)
         ) {
@@ -714,21 +743,21 @@ private fun VideoLibraryRow(
                 Text(
                     text = video.title,
                     fontFamily = BricolageFamily,
-                    fontWeight = FontWeight.SemiBold,
+                    fontWeight = FontWeight.Bold,
                     fontSize = 18.5.sp,
                     lineHeight = 23.sp,
-                    color = RawColors.TextPrimary,
+                    color = palette.titleColor,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis
                 )
-                Spacer(modifier = Modifier.height(5.dp))
+                Spacer(modifier = Modifier.height(4.dp))
                 Text(
                     text = "${FormatHelpers.formatFileSize(video.sizeBytes)}  \u2022  ${FormatHelpers.formatDate(video.createdAt)}",
                     fontFamily = JetBrainsMonoFamily,
                     fontWeight = FontWeight.Medium,
-                    fontSize = 12.5.sp,
+                    fontSize = 12.sp,
                     style = TextStyle(fontFeatureSettings = "tnum"),
-                    color = RawColors.TextMuted,
+                    color = palette.subtitleColor,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis
                 )
@@ -741,12 +770,15 @@ private fun VideoLibraryRow(
                 CircleActionButton(
                     icon = RawIconType.TRASH,
                     size = 36.dp,
+                    backgroundColor = if (isDarkCard) RawColors.ErrorSoft else RawColors.CardSurface,
                     iconTint = RawColors.ErrorCoral,
                     onClick = onDelete
                 )
                 CircleActionButton(
                     icon = RawIconType.MORE_VERT,
                     size = 36.dp,
+                    backgroundColor = palette.iconBoxBg,
+                    iconTint = palette.iconTint,
                     onClick = onMoreClick
                 )
             }
@@ -772,10 +804,9 @@ fun SheetActionRow(
     ) {
         Box(
             modifier = Modifier
-                .size(36.dp)
-                .clip(RoundedCornerShape(12.dp))
-                .background(if (isBad) RawColors.ErrorSoft else RawColors.RaisedCard)
-                .border(1.dp, if (isBad) RawColors.ErrorBorder else RawColors.Divider, RoundedCornerShape(12.dp)),
+                .size(38.dp)
+                .clip(CircleShape)
+                .background(if (isBad) RawColors.ErrorSoft else RawColors.RaisedCard),
             contentAlignment = Alignment.Center
         ) {
             RawIcon(type = icon, size = 17.dp, tint = tint)
@@ -783,7 +814,7 @@ fun SheetActionRow(
         Text(
             text = label,
             fontFamily = BricolageFamily,
-            fontWeight = FontWeight.SemiBold,
+            fontWeight = FontWeight.Bold,
             fontSize = 17.sp,
             color = tint
         )

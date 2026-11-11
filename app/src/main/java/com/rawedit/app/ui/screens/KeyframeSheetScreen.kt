@@ -39,7 +39,9 @@ import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.GridItemSpan
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.itemsIndexed
+import androidx.compose.foundation.lazy.grid.rememberLazyGridState
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.CircularProgressIndicator
@@ -80,9 +82,12 @@ import coil.request.CachePolicy
 import coil.request.ImageRequest
 import com.rawedit.app.data.CacheManager
 import com.rawedit.app.data.local.ProjectEntity
+import com.rawedit.app.domain.CodeValidator
+import com.rawedit.app.domain.GeminiClient
 import com.rawedit.app.domain.KeyframeSample
 import com.rawedit.app.domain.KeyframeSheetGenerator
 import com.rawedit.app.domain.KeyframeSheetResult
+import com.rawedit.app.domain.SheetReviewResult
 import com.rawedit.app.domain.SheetSamplingMode
 import com.rawedit.app.ui.components.BigPrimaryButton
 import com.rawedit.app.ui.components.CircleActionButton
@@ -93,12 +98,12 @@ import com.rawedit.app.ui.icons.PixelMascotKind
 import com.rawedit.app.ui.icons.RawIcon
 import com.rawedit.app.ui.icons.RawIconType
 import com.rawedit.app.ui.icons.RawPixelMascot
+import com.rawedit.app.ui.motion.FeatheredScrollEdges
 import com.rawedit.app.ui.motion.KineticHeading
 import com.rawedit.app.ui.motion.RawEasings
 import com.rawedit.app.ui.motion.RawPressButton
 import com.rawedit.app.ui.motion.rememberAnimationsEnabled
 import com.rawedit.app.ui.theme.BricolageFamily
-import com.rawedit.app.ui.theme.InstrumentSerifFamily
 import com.rawedit.app.ui.theme.JetBrainsMonoFamily
 import com.rawedit.app.ui.theme.RawColors
 import com.rawedit.app.ui.theme.RawTypography
@@ -115,19 +120,23 @@ import java.util.Locale
 fun KeyframeSheetScreen(
     project: ProjectEntity,
     cacheManager: CacheManager,
+    geminiApiKey: String,
     onBack: () -> Unit,
     onEditCode: () -> Unit,
+    onApplyFixedHtml: (String, Double) -> Unit,
+    onOpenApiKey: () -> Unit,
     onRenderNow: () -> Unit
 ) {
     val context = LocalContext.current
     val haptic = LocalHapticFeedback.current
     val scope = rememberCoroutineScope()
     val animEnabled = rememberAnimationsEnabled()
+    val gridState = rememberLazyGridState()
 
-    var resolvedHtml by remember(project.id, project.code) {
+    var resolvedHtml by remember(project.id) {
         mutableStateOf(if (project.code.startsWith(CacheManager.CODE_FILE_PREFIX)) "" else project.code)
     }
-    var htmlReady by remember(project.id, project.code) {
+    var htmlReady by remember(project.id) {
         mutableStateOf(!project.code.startsWith(CacheManager.CODE_FILE_PREFIX))
     }
     LaunchedEffect(project.id, project.code) {
@@ -135,9 +144,11 @@ fun KeyframeSheetScreen(
             resolvedHtml = withContext(Dispatchers.IO) { cacheManager.resolveHtmlCode(project.code) }
             htmlReady = true
         } else {
+            resolvedHtml = project.code
             htmlReady = true
         }
     }
+
     val durationSec = remember(project.codeDurationSec, project.audioDurationSec) {
         when {
             project.codeDurationSec > 0.2 -> project.codeDurationSec
@@ -166,6 +177,11 @@ fun KeyframeSheetScreen(
     var captureError by remember { mutableStateOf<String?>(null) }
 
     var inspectingIndex by remember { mutableStateOf<Int?>(null) }
+
+    var aiBusy by remember { mutableStateOf(false) }
+    var aiAction by remember { mutableStateOf("") }
+    var reviewResult by remember { mutableStateOf<SheetReviewResult?>(null) }
+    var aiError by remember { mutableStateOf<String?>(null) }
 
     var exportBusy by remember { mutableStateOf(false) }
     var toastMsg by remember { mutableStateOf<String?>(null) }
@@ -235,6 +251,8 @@ fun KeyframeSheetScreen(
         capturing = true
         captureError = null
         sheetResult = null
+        reviewResult = null
+        aiError = null
         progressDone = 0
         progressTotal = 0
         progressTimeSec = 0.0
@@ -393,18 +411,19 @@ fun KeyframeSheetScreen(
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                CircleActionButton(icon = RawIconType.BACK, onClick = onBack, size = 50.dp)
+                CircleActionButton(icon = RawIconType.BACK, onClick = onBack, size = 48.dp)
                 RawPixelMascot(kind = PixelMascotKind.LENS_BOT, size = 40.dp)
             }
 
             KineticHeading(
                 words = listOf("Contact", "sheet"),
-                style = RawTypography.headlineLarge
+                style = RawTypography.headlineLarge,
+                highlightLastWord = true
             )
 
             Text(
                 text = "Live DOM auto-fit ran on every frame, fully on-device. Zero API cost.",
-                style = RawTypography.bodyLarge.copy(fontSize = 16.5.sp),
+                style = RawTypography.bodyLarge.copy(fontSize = 15.5.sp),
                 color = RawColors.TextMuted
             )
 
@@ -456,9 +475,8 @@ fun KeyframeSheetScreen(
                                 modifier = Modifier
                                     .fillMaxWidth()
                                     .aspectRatio(16f / 9f)
-                                    .clip(RoundedCornerShape(12.dp))
-                                    .background(Color.Black)
-                                    .border(1.dp, RawColors.Divider, RoundedCornerShape(12.dp)),
+                                    .clip(RoundedCornerShape(24.dp))
+                                    .background(Color.Black),
                                 contentAlignment = Alignment.Center
                             ) {
                                 if (thumbExists && thumb != null) {
@@ -475,13 +493,12 @@ fun KeyframeSheetScreen(
                                     )
                                 } else {
                                     CircularProgressIndicator(
-                                        color = RawColors.Mint,
+                                        color = RawColors.Tan,
                                         strokeWidth = 2.5.dp,
                                         modifier = Modifier.size(30.dp)
                                     )
                                 }
 
-                                // Sweeping Mint scanline (.scn) drawn inside Canvas (zero relayout & zero recomposition)
                                 if (scanYState != null) {
                                     Canvas(modifier = Modifier.fillMaxSize()) {
                                         val cy = size.height * scanYState.value
@@ -490,7 +507,7 @@ fun KeyframeSheetScreen(
                                             brush = Brush.verticalGradient(
                                                 colors = listOf(
                                                     Color.Transparent,
-                                                    RawColors.Mint.copy(alpha = 0.28f),
+                                                    RawColors.Tan.copy(alpha = 0.28f),
                                                     Color.Transparent
                                                 ),
                                                 startY = cy - bandH * 0.5f,
@@ -512,20 +529,19 @@ fun KeyframeSheetScreen(
                                     fontWeight = FontWeight.Medium,
                                     fontSize = 12.sp,
                                     style = TextStyle(fontFeatureSettings = "tnum"),
-                                    color = Color.White.copy(alpha = 0.72f),
+                                    color = Color.White.copy(alpha = 0.78f),
                                     modifier = Modifier
                                         .align(Alignment.BottomStart)
-                                        .padding(10.dp)
+                                        .padding(12.dp)
                                 )
                             }
 
                             Column(
                                 modifier = Modifier
                                     .fillMaxWidth()
-                                    .clip(RoundedCornerShape(20.dp))
+                                    .clip(RoundedCornerShape(28.dp))
                                     .background(RawColors.CardSurface)
-                                    .border(1.dp, RawColors.Divider, RoundedCornerShape(20.dp))
-                                    .padding(16.dp)
+                                    .padding(18.dp)
                             ) {
                                 Row(
                                     modifier = Modifier.fillMaxWidth(),
@@ -543,7 +559,7 @@ fun KeyframeSheetScreen(
                                     Text(
                                         text = "$percentInt%",
                                         fontFamily = JetBrainsMonoFamily,
-                                        fontWeight = FontWeight.Medium,
+                                        fontWeight = FontWeight.Bold,
                                         fontSize = 13.sp,
                                         style = TextStyle(fontFeatureSettings = "tnum"),
                                         color = RawColors.TextPrimary
@@ -554,13 +570,13 @@ fun KeyframeSheetScreen(
                                     modifier = Modifier
                                         .fillMaxWidth()
                                         .height(6.dp)
-                                        .clip(RoundedCornerShape(9.dp))
+                                        .clip(CircleShape)
                                         .background(RawColors.PillGrey)
                                 ) {
                                     val w = size.width * smoothFracState.value.coerceIn(0f, 1f)
                                     if (w > 0f) {
                                         drawRoundRect(
-                                            color = RawColors.Mint,
+                                            color = RawColors.Tan,
                                             topLeft = Offset.Zero,
                                             size = Size(w, size.height),
                                             cornerRadius = CornerRadius(size.height * 0.5f, size.height * 0.5f)
@@ -582,21 +598,22 @@ fun KeyframeSheetScreen(
                             RawPixelMascot(kind = PixelMascotKind.CODE_BOT, size = 76.dp)
                             Text(
                                 text = "Capture stopped",
-                                fontFamily = InstrumentSerifFamily,
-                                fontWeight = FontWeight.Normal,
-                                fontSize = 34.sp,
-                                lineHeight = 36.sp,
+                                fontFamily = BricolageFamily,
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 30.sp,
+                                lineHeight = 32.sp,
+                                letterSpacing = (-0.8).sp,
                                 color = RawColors.TextPrimary
                             )
                             Text(
                                 text = captureError.orEmpty(),
-                                style = RawTypography.bodyLarge.copy(fontSize = 16.sp),
+                                style = RawTypography.bodyLarge.copy(fontSize = 15.5.sp),
                                 color = RawColors.TextMuted
                             )
                             Spacer(modifier = Modifier.height(6.dp))
                             BigPrimaryButton(
                                 text = "Retry capture",
-                                height = 60.dp,
+                                height = 58.dp,
                                 leadingIcon = RawIconType.REFRESH,
                                 onClick = { captureGen++ },
                                 modifier = Modifier.width(210.dp)
@@ -612,9 +629,10 @@ fun KeyframeSheetScreen(
                         val visibleSamples = if (flaggedOnly) flaggedSamples else res.samples
 
                         LazyVerticalGrid(
+                            state = gridState,
                             columns = GridCells.Fixed(2),
                             modifier = Modifier.fillMaxSize(),
-                            contentPadding = PaddingValues(top = 4.dp, bottom = 112.dp),
+                            contentPadding = PaddingValues(top = 4.dp, bottom = 118.dp),
                             verticalArrangement = Arrangement.spacedBy(10.dp),
                             horizontalArrangement = Arrangement.spacedBy(10.dp)
                         ) {
@@ -623,11 +641,10 @@ fun KeyframeSheetScreen(
                                 Column(
                                     modifier = Modifier
                                         .fillMaxWidth()
-                                        .clip(RoundedCornerShape(20.dp))
+                                        .clip(RoundedCornerShape(28.dp))
                                         .background(RawColors.CardSurface)
-                                        .border(1.dp, RawColors.Divider, RoundedCornerShape(20.dp))
-                                        .padding(16.dp),
-                                    verticalArrangement = Arrangement.spacedBy(10.dp)
+                                        .padding(18.dp),
+                                    verticalArrangement = Arrangement.spacedBy(12.dp)
                                 ) {
                                     Row(
                                         modifier = Modifier.fillMaxWidth(),
@@ -637,8 +654,8 @@ fun KeyframeSheetScreen(
                                         Text(
                                             text = "${res.samples.size} frames  \u2022  ${String.format(Locale.US, "%.1fs", res.durationSec)}",
                                             fontFamily = BricolageFamily,
-                                            fontWeight = FontWeight.SemiBold,
-                                            fontSize = 21.sp,
+                                            fontWeight = FontWeight.Bold,
+                                            fontSize = 20.sp,
                                             color = RawColors.TextPrimary
                                         )
                                         val isClean = res.warningCount == 0 && res.totalAutoFits == 0
@@ -649,17 +666,17 @@ fun KeyframeSheetScreen(
                                         }
                                         Box(
                                             modifier = Modifier
-                                                .clip(RoundedCornerShape(6.dp))
-                                                .background(if (isClean) RawColors.MintSoft else RawColors.RaisedCard)
-                                                .padding(horizontal = 12.dp, vertical = 7.dp)
+                                                .clip(CircleShape)
+                                                .background(if (isClean) RawColors.AccentSoft else RawColors.RaisedCard)
+                                                .padding(horizontal = 12.dp, vertical = 6.dp)
                                         ) {
                                             Text(
                                                 text = badgeLabel,
                                                 fontFamily = JetBrainsMonoFamily,
-                                                fontWeight = FontWeight.Medium,
-                                                fontSize = 12.sp,
+                                                fontWeight = FontWeight.SemiBold,
+                                                fontSize = 11.5.sp,
                                                 style = TextStyle(fontFeatureSettings = "tnum"),
-                                                color = if (isClean) RawColors.Mint else RawColors.TextMuted
+                                                color = if (isClean) RawColors.Tan else RawColors.TextMuted
                                             )
                                         }
                                     }
@@ -679,23 +696,257 @@ fun KeyframeSheetScreen(
                                 }
                             }
 
-                            // Cloud AI Export Card (.tiles + Mint fix prompt CTA)
+                            // Gemini Frame Inspector Card (optional, uses user's own API key)
                             item(span = { GridItemSpan(2) }) {
                                 Column(
                                     modifier = Modifier
                                         .fillMaxWidth()
-                                        .clip(RoundedCornerShape(20.dp))
+                                        .clip(RoundedCornerShape(28.dp))
                                         .background(RawColors.CardSurface)
-                                        .border(1.dp, RawColors.Divider, RoundedCornerShape(20.dp))
-                                        .padding(16.dp),
+                                        .padding(18.dp),
+                                    verticalArrangement = Arrangement.spacedBy(10.dp)
+                                ) {
+                                    Row(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        horizontalArrangement = Arrangement.SpaceBetween,
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        Row(
+                                            verticalAlignment = Alignment.CenterVertically,
+                                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                            modifier = Modifier.weight(1f)
+                                        ) {
+                                            RawIcon(RawIconType.SPARK, size = 18.dp, tint = RawColors.Tan)
+                                            Column {
+                                                Text(
+                                                    text = "Gemini Frame Inspector",
+                                                    fontFamily = BricolageFamily,
+                                                    fontWeight = FontWeight.Bold,
+                                                    fontSize = 18.5.sp,
+                                                    color = RawColors.TextPrimary
+                                                )
+                                                Text(
+                                                    text = if (geminiApiKey.isBlank()) "Optional \u2022 Add API key to enable" else "Visual inspection + 1-tap HTML auto-fix",
+                                                    style = RawTypography.labelMedium
+                                                )
+                                            }
+                                        }
+                                        CircleActionButton(
+                                            icon = RawIconType.KEY,
+                                            size = 38.dp,
+                                            backgroundColor = if (geminiApiKey.isNotBlank()) RawColors.AccentSoft else RawColors.RaisedCard,
+                                            iconTint = if (geminiApiKey.isNotBlank()) RawColors.Tan else RawColors.TextMuted,
+                                            onClick = onOpenApiKey
+                                        )
+                                    }
+
+                                    Row(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        horizontalArrangement = Arrangement.spacedBy(10.dp)
+                                    ) {
+                                        RawSecondaryButton(
+                                            text = if (aiBusy && aiAction == "review") "Reviewing..." else "AI review",
+                                            height = 48.dp,
+                                            enabled = !aiBusy,
+                                            leadingIcon = RawIconType.LENS,
+                                            onClick = {
+                                                if (geminiApiKey.isBlank()) {
+                                                    onOpenApiKey()
+                                                    return@RawSecondaryButton
+                                                }
+                                                aiBusy = true
+                                                aiAction = "review"
+                                                aiError = null
+                                                scope.launch {
+                                                    val imgs = KeyframeSheetGenerator.buildGeminiSheetImages(
+                                                        samples = res.samples,
+                                                        title = project.title.ifBlank { "Untitled Reel" },
+                                                        outDir = cacheManager.sheetTempDir(project.id),
+                                                        maxPages = 2
+                                                    )
+                                                    val review = GeminiClient.reviewContactSheet(
+                                                        apiKey = geminiApiKey,
+                                                        sheetImages = imgs,
+                                                        htmlCode = resolvedHtml,
+                                                        frameCount = res.samples.size
+                                                    )
+                                                    aiBusy = false
+                                                    aiAction = ""
+                                                    review.onSuccess { r ->
+                                                        reviewResult = r
+                                                        toastMsg = if (r.issues.isEmpty()) "No visual glitches spotted" else "Found ${r.issues.size} frame notes"
+                                                    }.onFailure { err ->
+                                                        aiError = err.message ?: "Gemini inspection failed."
+                                                    }
+                                                }
+                                            },
+                                            modifier = Modifier.weight(1f)
+                                        )
+
+                                        BigPrimaryButton(
+                                            text = if (aiBusy && aiAction == "fix") "Fixing..." else "Auto-fix",
+                                            height = 48.dp,
+                                            enabled = !aiBusy,
+                                            leadingIcon = RawIconType.SPARK,
+                                            containerColor = RawColors.Tan,
+                                            contentColor = RawColors.Ink,
+                                            onClick = {
+                                                if (geminiApiKey.isBlank()) {
+                                                    onOpenApiKey()
+                                                    return@BigPrimaryButton
+                                                }
+                                                aiBusy = true
+                                                aiAction = "fix"
+                                                aiError = null
+                                                scope.launch {
+                                                    val imgs = KeyframeSheetGenerator.buildGeminiSheetImages(
+                                                        samples = res.samples,
+                                                        title = project.title.ifBlank { "Untitled Reel" },
+                                                        outDir = cacheManager.sheetTempDir(project.id),
+                                                        maxPages = 2
+                                                    )
+                                                    val issuesText = buildString {
+                                                        reviewResult?.let { rev ->
+                                                            if (rev.summary.isNotBlank()) appendLine(rev.summary)
+                                                            rev.issues.forEach { iss ->
+                                                                appendLine("${iss.frame} (${iss.time}): ${iss.problem} -> ${iss.fix}")
+                                                            }
+                                                        }
+                                                        flaggedSamples.forEach { s ->
+                                                            appendLine(
+                                                                String.format(
+                                                                    Locale.US,
+                                                                    "Local DOM #${s.index + 1} (t=%.2fs): ${s.warnings.joinToString("; ")} ${s.autoFitNotes.joinToString("; ")}",
+                                                                    s.timeSec
+                                                                )
+                                                            )
+                                                        }
+                                                    }.ifBlank { "Inspect all frames for text overflow, overlap, margin clipping, or contrast issues." }
+
+                                                    val fixRes = GeminiClient.autoFixHtmlWithSheet(
+                                                        apiKey = geminiApiKey,
+                                                        sheetImages = imgs,
+                                                        htmlCode = resolvedHtml,
+                                                        issuesSummary = issuesText,
+                                                        durationSec = res.durationSec
+                                                    )
+                                                    fixRes.onSuccess { fixedHtml ->
+                                                        val validation = CodeValidator.validateFull(context, cacheManager, fixedHtml)
+                                                        aiBusy = false
+                                                        aiAction = ""
+                                                        if (validation.isValid) {
+                                                            resolvedHtml = validation.cleanedHtml
+                                                            onApplyFixedHtml(validation.cleanedHtml, validation.durationSec)
+                                                            reviewResult = null
+                                                            aiError = null
+                                                            toastMsg = "Gemini fix applied — re-capturing sheet"
+                                                            captureGen++
+                                                        } else {
+                                                            aiError = "Auto-fix failed offline check: ${validation.summaryMessage}"
+                                                        }
+                                                    }.onFailure { err ->
+                                                        aiBusy = false
+                                                        aiAction = ""
+                                                        aiError = err.message ?: "Gemini auto-fix failed."
+                                                    }
+                                                }
+                                            },
+                                            modifier = Modifier.weight(1f)
+                                        )
+                                    }
+
+                                    aiError?.let { msg ->
+                                        Box(
+                                            modifier = Modifier
+                                                .fillMaxWidth()
+                                                .clip(RoundedCornerShape(16.dp))
+                                                .background(RawColors.ErrorSoft)
+                                                .padding(12.dp)
+                                        ) {
+                                            Text(
+                                                text = msg,
+                                                fontFamily = BricolageFamily,
+                                                fontWeight = FontWeight.SemiBold,
+                                                fontSize = 13.5.sp,
+                                                color = RawColors.ErrorCoral
+                                            )
+                                        }
+                                    }
+
+                                    reviewResult?.let { rev ->
+                                        Text(
+                                            text = rev.summary,
+                                            fontFamily = BricolageFamily,
+                                            fontWeight = FontWeight.SemiBold,
+                                            fontSize = 14.sp,
+                                            color = RawColors.TextPrimary
+                                        )
+                                        rev.issues.forEach { issue ->
+                                            Row(
+                                                modifier = Modifier
+                                                    .fillMaxWidth()
+                                                    .clip(RoundedCornerShape(18.dp))
+                                                    .background(RawColors.RaisedCard)
+                                                    .clickable {
+                                                        val frameNum = Regex("\\d+").find(issue.frame)?.value?.toIntOrNull()
+                                                        if (frameNum != null && res.samples.isNotEmpty()) {
+                                                            inspectingIndex = (frameNum - 1).coerceIn(0, res.samples.lastIndex)
+                                                        }
+                                                    }
+                                                    .padding(12.dp),
+                                                verticalAlignment = Alignment.CenterVertically,
+                                                horizontalArrangement = Arrangement.spacedBy(10.dp)
+                                            ) {
+                                                Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                                                    Text(
+                                                        text = "${issue.frame}  \u2022  ${issue.time}",
+                                                        fontFamily = JetBrainsMonoFamily,
+                                                        fontWeight = FontWeight.Bold,
+                                                        fontSize = 12.sp,
+                                                        color = RawColors.Tan
+                                                    )
+                                                    if (issue.problem.isNotBlank()) {
+                                                        Text(
+                                                            text = issue.problem,
+                                                            fontFamily = BricolageFamily,
+                                                            fontWeight = FontWeight.SemiBold,
+                                                            fontSize = 13.5.sp,
+                                                            color = RawColors.TextPrimary
+                                                        )
+                                                    }
+                                                    if (issue.fix.isNotBlank()) {
+                                                        Text(
+                                                            text = "Fix: ${issue.fix}",
+                                                            fontFamily = BricolageFamily,
+                                                            fontWeight = FontWeight.Medium,
+                                                            fontSize = 12.5.sp,
+                                                            color = RawColors.TextMuted
+                                                        )
+                                                    }
+                                                }
+                                                RawIcon(RawIconType.CHEVRON_RIGHT, size = 16.dp, tint = RawColors.TextMuted)
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+
+                            // Offline Cloud AI Export Card (.tiles)
+                            item(span = { GridItemSpan(2) }) {
+                                Column(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .clip(RoundedCornerShape(28.dp))
+                                        .background(RawColors.CardSurface)
+                                        .padding(18.dp),
                                     verticalArrangement = Arrangement.spacedBy(10.dp)
                                 ) {
                                     Column {
                                         Text(
                                             text = "Export sheet for Cloud AI",
                                             fontFamily = BricolageFamily,
-                                            fontWeight = FontWeight.SemiBold,
-                                            fontSize = 19.5.sp,
+                                            fontWeight = FontWeight.Bold,
+                                            fontSize = 19.sp,
                                             color = RawColors.TextPrimary
                                         )
                                         Text(
@@ -744,7 +995,10 @@ fun KeyframeSheetScreen(
                                         )
                                     }
 
-                                    RawPressButton(
+                                    BigPrimaryButton(
+                                        text = if (promptCopied) "Copied fix prompt!" else "Copy targeted AI fix prompt",
+                                        height = 50.dp,
+                                        leadingIcon = if (promptCopied) RawIconType.CHECK else RawIconType.COPY,
                                         onClick = {
                                             val fixPrompt = KeyframeSheetGenerator.buildFixPrompt(
                                                 samples = res.samples,
@@ -761,33 +1015,7 @@ fun KeyframeSheetScreen(
                                                 promptCopied = false
                                             }
                                         }
-                                    ) {
-                                        Row(
-                                            modifier = Modifier
-                                                .fillMaxWidth()
-                                                .height(50.dp)
-                                                .clip(RoundedCornerShape(16.dp))
-                                                .background(RawColors.Mint),
-                                            horizontalArrangement = Arrangement.Center,
-                                            verticalAlignment = Alignment.CenterVertically
-                                        ) {
-                                            RawIcon(
-                                                type = if (promptCopied) RawIconType.CHECK else RawIconType.COPY,
-                                                size = 16.dp,
-                                                tint = RawColors.PrimaryBtnText
-                                            )
-                                            Spacer(modifier = Modifier.width(7.dp))
-                                            Text(
-                                                text = if (promptCopied) "Copied fix prompt!" else "Copy targeted AI fix prompt",
-                                                fontFamily = BricolageFamily,
-                                                fontWeight = FontWeight.SemiBold,
-                                                fontSize = 15.5.sp,
-                                                color = RawColors.PrimaryBtnText,
-                                                maxLines = 1,
-                                                softWrap = false
-                                            )
-                                        }
-                                    }
+                                    )
                                 }
                             }
 
@@ -796,9 +1024,9 @@ fun KeyframeSheetScreen(
                                     Column(
                                         modifier = Modifier
                                             .fillMaxWidth()
-                                            .clip(RoundedCornerShape(20.dp))
+                                            .clip(RoundedCornerShape(28.dp))
                                             .background(RawColors.CardSurface)
-                                            .border(1.dp, RawColors.MintBorder, RoundedCornerShape(20.dp))
+                                            .border(1.dp, RawColors.AccentBorder, RoundedCornerShape(28.dp))
                                             .padding(20.dp),
                                         horizontalAlignment = Alignment.CenterHorizontally,
                                         verticalArrangement = Arrangement.spacedBy(8.dp)
@@ -807,7 +1035,7 @@ fun KeyframeSheetScreen(
                                         Text(
                                             text = "All ${res.samples.size} frames look clean",
                                             style = RawTypography.titleMedium,
-                                            color = RawColors.Mint
+                                            color = RawColors.Tan
                                         )
                                         Text(
                                             text = "No edge clips or auto-fit resizes were flagged.",
@@ -816,7 +1044,7 @@ fun KeyframeSheetScreen(
                                         Spacer(modifier = Modifier.height(4.dp))
                                         RawSecondaryButton(
                                             text = "Show all frames",
-                                            height = 50.dp,
+                                            height = 46.dp,
                                             fillWidth = false,
                                             onClick = { flaggedOnly = false }
                                         )
@@ -835,23 +1063,24 @@ fun KeyframeSheetScreen(
                                 }
                             }
                         }
+
+                        FeatheredScrollEdges(
+                            gridState = gridState,
+                            topHeight = 34.dp,
+                            bottomHeight = 112.dp,
+                            alwaysShowBottom = true
+                        )
                     }
                 }
             }
         }
 
-        // Sticky gradient footer (.stk .row2)
         Box(
             modifier = Modifier
                 .align(Alignment.BottomCenter)
                 .fillMaxWidth()
-                .background(
-                    Brush.verticalGradient(
-                        listOf(Color.Transparent, RawColors.BgPrimary.copy(alpha = 0.94f), RawColors.BgPrimary)
-                    )
-                )
                 .navigationBarsPadding()
-                .padding(start = 18.dp, end = 18.dp, top = 20.dp, bottom = 18.dp)
+                .padding(start = 18.dp, end = 18.dp, bottom = 16.dp)
         ) {
             Row(
                 modifier = Modifier.fillMaxWidth(),
@@ -859,14 +1088,14 @@ fun KeyframeSheetScreen(
             ) {
                 RawSecondaryButton(
                     text = "Fix code",
-                    height = 60.dp,
+                    height = 58.dp,
                     onClick = onEditCode,
                     modifier = Modifier.weight(1f)
                 )
                 val hasAudio = project.audioUri.isNotBlank() && project.audioDurationSec > 0.0
                 BigPrimaryButton(
                     text = if (hasAudio) "Render video" else "Add audio first",
-                    height = 60.dp,
+                    height = 58.dp,
                     enabled = hasAudio && !capturing,
                     onClick = onRenderNow,
                     modifier = Modifier.weight(1f)
@@ -879,11 +1108,11 @@ fun KeyframeSheetScreen(
             modifier = Modifier
                 .align(Alignment.BottomCenter)
                 .navigationBarsPadding()
-                .padding(bottom = 94.dp)
+                .padding(bottom = 90.dp)
         )
     }
 
-    // Dark full-screen Zoom Inspection Modal (.pn.mdl)
+    // Zoom Inspection Modal (.pn.mdl)
     val activeIdx = inspectingIndex
     val samplesList = sheetResult?.samples
     if (activeIdx != null && samplesList != null) {
@@ -896,7 +1125,7 @@ fun KeyframeSheetScreen(
                 Column(
                     modifier = Modifier
                         .fillMaxSize()
-                        .background(Color(0xFA0B0C0B))
+                        .background(RawColors.BgPrimary.copy(alpha = 0.98f))
                         .statusBarsPadding()
                         .navigationBarsPadding()
                         .padding(horizontal = 20.dp, vertical = 24.dp),
@@ -915,10 +1144,11 @@ fun KeyframeSheetScreen(
                                 sample.timeSec,
                                 sample.sceneLabel.ifBlank { "SCENE" }
                             ),
-                            fontFamily = InstrumentSerifFamily,
-                            fontWeight = FontWeight.Normal,
-                            fontSize = 29.sp,
-                            lineHeight = 32.sp,
+                            fontFamily = BricolageFamily,
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 24.sp,
+                            lineHeight = 28.sp,
+                            letterSpacing = (-0.6).sp,
                             color = RawColors.TextPrimary,
                             maxLines = 1,
                             overflow = TextOverflow.Ellipsis,
@@ -927,7 +1157,7 @@ fun KeyframeSheetScreen(
                         Spacer(modifier = Modifier.width(10.dp))
                         CircleActionButton(
                             icon = RawIconType.CLOSE,
-                            size = 36.dp,
+                            size = 38.dp,
                             onClick = { inspectingIndex = null }
                         )
                     }
@@ -936,16 +1166,16 @@ fun KeyframeSheetScreen(
                         modifier = Modifier
                             .fillMaxWidth()
                             .aspectRatio(16f / 9f)
-                            .clip(RoundedCornerShape(12.dp))
+                            .clip(RoundedCornerShape(24.dp))
                             .background(Color.Black)
                             .border(
-                                1.dp,
+                                1.5.dp,
                                 when {
                                     sample.warnings.isNotEmpty() -> RawColors.ErrorCoral
-                                    sample.autoFitCount > 0 -> RawColors.Mint.copy(alpha = 0.55f)
+                                    sample.autoFitCount > 0 -> RawColors.Tan.copy(alpha = 0.65f)
                                     else -> RawColors.Divider
                                 },
-                                RoundedCornerShape(12.dp)
+                                RoundedCornerShape(24.dp)
                             )
                     ) {
                         AsyncImage(
@@ -972,7 +1202,7 @@ fun KeyframeSheetScreen(
                             Box(
                                 modifier = Modifier
                                     .fillMaxWidth()
-                                    .clip(RoundedCornerShape(12.dp))
+                                    .clip(RoundedCornerShape(16.dp))
                                     .background(RawColors.ErrorSoft)
                                     .padding(horizontal = 12.dp, vertical = 10.dp)
                             ) {
@@ -991,7 +1221,7 @@ fun KeyframeSheetScreen(
                             Box(
                                 modifier = Modifier
                                     .fillMaxWidth()
-                                    .clip(RoundedCornerShape(12.dp))
+                                    .clip(RoundedCornerShape(16.dp))
                                     .background(RawColors.RaisedCard)
                                     .padding(horizontal = 12.dp, vertical = 10.dp)
                             ) {
@@ -1002,14 +1232,14 @@ fun KeyframeSheetScreen(
                                     fontSize = 13.sp,
                                     lineHeight = 20.sp,
                                     style = TextStyle(fontFeatureSettings = "tnum"),
-                                    color = RawColors.Mint
+                                    color = RawColors.Tan
                                 )
                             }
                         }
                         Box(
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .clip(RoundedCornerShape(12.dp))
+                                .clip(RoundedCornerShape(16.dp))
                                 .background(RawColors.RaisedCard)
                                 .padding(horizontal = 12.dp, vertical = 10.dp)
                         ) {
@@ -1025,7 +1255,7 @@ fun KeyframeSheetScreen(
                         Box(
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .clip(RoundedCornerShape(12.dp))
+                                .clip(RoundedCornerShape(16.dp))
                                 .background(RawColors.RaisedCard)
                                 .padding(horizontal = 12.dp, vertical = 10.dp)
                         ) {
@@ -1046,7 +1276,7 @@ fun KeyframeSheetScreen(
                     ) {
                         RawSecondaryButton(
                             text = "Prev frame",
-                            height = 58.dp,
+                            height = 56.dp,
                             leadingIcon = RawIconType.CHEVRON_LEFT,
                             onClick = {
                                 inspectingIndex = (sample.index - 1 + samplesList.size) % samplesList.size
@@ -1062,10 +1292,9 @@ fun KeyframeSheetScreen(
                             Row(
                                 modifier = Modifier
                                     .fillMaxWidth()
-                                    .height(58.dp)
-                                    .clip(RoundedCornerShape(16.dp))
-                                    .background(RawColors.RaisedCard)
-                                    .border(1.dp, RawColors.Divider, RoundedCornerShape(16.dp)),
+                                    .height(56.dp)
+                                    .clip(CircleShape)
+                                    .background(RawColors.RaisedCard),
                                 horizontalArrangement = Arrangement.Center,
                                 verticalAlignment = Alignment.CenterVertically
                             ) {
@@ -1092,12 +1321,12 @@ private fun ContactSheetFrameTile(
     val hasFit = sample.autoFitCount > 0
     val frameBorder = when {
         hasWarn -> RawColors.ErrorCoral
-        hasFit -> RawColors.Mint.copy(alpha = 0.55f)
+        hasFit -> RawColors.Tan.copy(alpha = 0.65f)
         else -> Color.Transparent
     }
     val (statusLabel, statusBg, statusFg) = when {
         hasWarn -> Triple("WARN", RawColors.ErrorSoft, RawColors.ErrorCoral)
-        hasFit -> Triple("FIT", RawColors.MintSoft, RawColors.Mint)
+        hasFit -> Triple("FIT", RawColors.AccentSoft, RawColors.Tan)
         else -> Triple("OK", RawColors.PillGrey, RawColors.TextMuted)
     }
 
@@ -1105,10 +1334,9 @@ private fun ContactSheetFrameTile(
         Column(
             modifier = Modifier
                 .fillMaxWidth()
-                .clip(RoundedCornerShape(12.dp))
+                .clip(RoundedCornerShape(24.dp))
                 .background(RawColors.CardSurface)
-                .border(1.dp, RawColors.Divider, RoundedCornerShape(12.dp))
-                .padding(8.dp),
+                .padding(10.dp),
             verticalArrangement = Arrangement.spacedBy(7.dp)
         ) {
             Row(
@@ -1129,15 +1357,15 @@ private fun ContactSheetFrameTile(
                 )
                 Box(
                     modifier = Modifier
-                        .clip(RoundedCornerShape(6.dp))
+                        .clip(CircleShape)
                         .background(statusBg)
                         .padding(horizontal = 8.dp, vertical = 3.dp)
                 ) {
                     Text(
                         text = statusLabel,
                         fontFamily = JetBrainsMonoFamily,
-                        fontWeight = FontWeight.Medium,
-                        fontSize = 11.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        fontSize = 10.5.sp,
                         style = TextStyle(fontFeatureSettings = "tnum"),
                         color = statusFg
                     )
@@ -1148,11 +1376,11 @@ private fun ContactSheetFrameTile(
                 modifier = Modifier
                     .fillMaxWidth()
                     .aspectRatio(16f / 9f)
-                    .clip(RoundedCornerShape(10.dp))
+                    .clip(RoundedCornerShape(16.dp))
                     .background(Color.Black)
                     .then(
                         if (frameBorder != Color.Transparent) {
-                            Modifier.border(1.5.dp, frameBorder, RoundedCornerShape(10.dp))
+                            Modifier.border(1.5.dp, frameBorder, RoundedCornerShape(16.dp))
                         } else Modifier
                     )
             ) {
@@ -1202,21 +1430,20 @@ private fun ExportTileButton(
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .height(50.dp)
-                .clip(RoundedCornerShape(16.dp))
+                .height(48.dp)
+                .clip(CircleShape)
                 .background(RawColors.RaisedCard)
-                .border(1.dp, RawColors.Divider, RoundedCornerShape(16.dp))
                 .padding(horizontal = 8.dp),
             horizontalArrangement = Arrangement.Center,
             verticalAlignment = Alignment.CenterVertically
         ) {
-            RawIcon(type = icon, size = 16.dp, tint = RawColors.TextPrimary)
+            RawIcon(type = icon, size = 15.dp, tint = RawColors.TextPrimary)
             Spacer(modifier = Modifier.width(6.dp))
             Text(
                 text = text,
                 fontFamily = BricolageFamily,
-                fontWeight = FontWeight.SemiBold,
-                fontSize = 14.5.sp,
+                fontWeight = FontWeight.Bold,
+                fontSize = 14.sp,
                 color = RawColors.TextPrimary,
                 maxLines = 1,
                 softWrap = false
@@ -1232,26 +1459,25 @@ private fun SheetTogglePill(
     onClick: () -> Unit
 ) {
     val bg by animateColorAsState(
-        targetValue = if (selected) RawColors.Mint else Color.Transparent,
+        targetValue = if (selected) RawColors.Tan else RawColors.RaisedCard,
         animationSpec = tween(200, easing = RawEasings.Morph),
         label = "sh_tog_bg"
     )
     Box(
         modifier = Modifier
-            .height(44.dp)
-            .clip(RoundedCornerShape(10.dp))
+            .height(40.dp)
+            .clip(CircleShape)
             .background(bg)
-            .border(1.dp, if (selected) RawColors.Mint else RawColors.DividerStrong, RoundedCornerShape(10.dp))
             .clickable(onClick = onClick)
-            .padding(horizontal = 18.dp),
+            .padding(horizontal = 16.dp),
         contentAlignment = Alignment.Center
     ) {
         Text(
             text = label,
             fontFamily = BricolageFamily,
-            fontWeight = FontWeight.SemiBold,
-            fontSize = 15.5.sp,
-            color = if (selected) RawColors.PrimaryBtnText else RawColors.TextMuted
+            fontWeight = FontWeight.Bold,
+            fontSize = 14.sp,
+            color = if (selected) RawColors.Ink else RawColors.TextMuted
         )
     }
 }

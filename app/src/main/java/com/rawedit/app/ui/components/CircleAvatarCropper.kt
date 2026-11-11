@@ -152,7 +152,7 @@ fun CircleAvatarCropperDialog(
                         }
                         drawPath(scrim, Color.Black.copy(alpha = 0.65f))
                         drawCircle(
-                            color = RawColors.Mint.copy(alpha = 0.55f),
+                            color = RawColors.Tan.copy(alpha = 0.6f),
                             radius = r,
                             center = Offset(centerX, centerY),
                             style = Stroke(width = 1.5.dp.toPx())
@@ -167,8 +167,8 @@ fun CircleAvatarCropperDialog(
                     onValueChange = { userScale = it },
                     valueRange = 1f..2.5f,
                     colors = SliderDefaults.colors(
-                        thumbColor = RawColors.Mint,
-                        activeTrackColor = RawColors.Mint,
+                        thumbColor = RawColors.Tan,
+                        activeTrackColor = RawColors.Tan,
                         inactiveTrackColor = RawColors.PillGrey
                     ),
                     modifier = Modifier.fillMaxWidth(0.86f)

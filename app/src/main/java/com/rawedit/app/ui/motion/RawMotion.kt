@@ -21,14 +21,15 @@ import androidx.compose.animation.slideInHorizontally
 import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.ScrollState
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxScope
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -36,6 +37,8 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.lazy.LazyListState
+import androidx.compose.foundation.lazy.grid.LazyGridState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Text
@@ -56,6 +59,7 @@ import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.graphicsLayer
@@ -69,6 +73,7 @@ import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.rawedit.app.ui.icons.RawIcon
@@ -84,9 +89,9 @@ import kotlin.math.roundToInt
 import kotlin.math.sin
 
 object RawEasings {
-    val Morph = CubicBezierEasing(0.22f, 0.90f, 0.24f, 1.0f)
+    val Morph = CubicBezierEasing(0.22f, 1.0f, 0.36f, 1.0f)
     val SnappyOut = CubicBezierEasing(0.16f, 1.0f, 0.30f, 1.0f)
-    val OvershootSettle = CubicBezierEasing(0.22f, 1.25f, 0.36f, 1.0f)
+    val OvershootSettle = CubicBezierEasing(0.34f, 1.45f, 0.64f, 1.0f)
 }
 
 private object AnimSettingCache {
@@ -112,6 +117,215 @@ fun rememberAnimationsEnabled(): Boolean {
     return remember(context) { AnimSettingCache.isEnabled(context) }
 }
 
+data class WalletCardPalette(
+    val containerColor: Color,
+    val titleColor: Color,
+    val subtitleColor: Color,
+    val badgeBg: Color,
+    val badgeText: Color,
+    val iconBoxBg: Color,
+    val iconTint: Color
+)
+
+fun walletCardColors(index: Int): WalletCardPalette = when (((index % 3) + 3) % 3) {
+    0 -> WalletCardPalette(
+        containerColor = RawColors.Tan,
+        titleColor = RawColors.Ink,
+        subtitleColor = RawColors.Ink.copy(alpha = 0.72f),
+        badgeBg = RawColors.Ink.copy(alpha = 0.14f),
+        badgeText = RawColors.Ink,
+        iconBoxBg = RawColors.Ink.copy(alpha = 0.12f),
+        iconTint = RawColors.Ink
+    )
+    1 -> WalletCardPalette(
+        containerColor = RawColors.Cream,
+        titleColor = RawColors.Ink,
+        subtitleColor = RawColors.Ink.copy(alpha = 0.65f),
+        badgeBg = RawColors.Ink.copy(alpha = 0.10f),
+        badgeText = RawColors.Ink,
+        iconBoxBg = RawColors.Ink.copy(alpha = 0.08f),
+        iconTint = RawColors.Ink
+    )
+    else -> WalletCardPalette(
+        containerColor = RawColors.CardSurface,
+        titleColor = RawColors.TextPrimary,
+        subtitleColor = RawColors.TextMuted,
+        badgeBg = RawColors.RaisedCard,
+        badgeText = RawColors.TextMuted,
+        iconBoxBg = RawColors.RaisedCard,
+        iconTint = RawColors.TextPrimary
+    )
+}
+
+/**
+ * Signature Wallet tilted tan rounded pill highlight (e.g. `em` inside headings).
+ */
+@Composable
+fun TiltedAccentPill(
+    text: String,
+    modifier: Modifier = Modifier,
+    style: TextStyle = RawTypography.displayLarge,
+    angleDeg: Float = -1.8f,
+    animateRock: Boolean = false,
+    backgroundColor: Color = RawColors.Tan,
+    textColor: Color = RawColors.Ink
+) {
+    val animEnabled = rememberAnimationsEnabled()
+    val rockState: State<Float>? = if (animateRock && animEnabled) {
+        val inf = rememberInfiniteTransition(label = "pill_rock")
+        inf.animateFloat(
+            initialValue = 0f,
+            targetValue = 1f,
+            animationSpec = infiniteRepeatable(
+                tween(2100, easing = RawEasings.Morph),
+                RepeatMode.Reverse
+            ),
+            label = "rk"
+        )
+    } else {
+        null
+    }
+
+    Box(
+        modifier = modifier
+            .graphicsLayer {
+                val p = rockState?.value ?: 0f
+                rotationZ = angleDeg + if (animateRock) p * 3.3f else 0f
+                translationY = if (animateRock) -p * 3f else 0f
+            }
+            .clip(RoundedCornerShape(percent = 28))
+            .background(backgroundColor)
+            .padding(horizontal = 14.dp, vertical = 2.dp),
+        contentAlignment = Alignment.Center
+    ) {
+        Text(
+            text = text,
+            style = style.copy(lineHeight = style.fontSize),
+            color = textColor,
+            maxLines = 1,
+            softWrap = false
+        )
+    }
+}
+
+/**
+ * Zero-recomposition GPU soft smoke gradients at TOP & BOTTOM edges of scrollable screens.
+ * Mimics `.fz.t` & `.fz.b` cleanly at 60/120fps on Android 9+.
+ */
+@Composable
+fun BoxScope.FeatheredScrollEdges(
+    canScrollBackward: () -> Boolean,
+    canScrollForward: () -> Boolean,
+    topOffset: Dp = 0.dp,
+    topHeight: Dp = 54.dp,
+    bottomHeight: Dp = 112.dp,
+    alwaysShowBottom: Boolean = false
+) {
+    val animEnabled = rememberAnimationsEnabled()
+    val showTop by remember { derivedStateOf { canScrollBackward() } }
+    val showBottom by remember(alwaysShowBottom) {
+        derivedStateOf { alwaysShowBottom || canScrollForward() }
+    }
+    val topAlphaState = animateFloatAsState(
+        targetValue = if (showTop) 1f else 0f,
+        animationSpec = tween(if (animEnabled) 220 else 0),
+        label = "fz_top"
+    )
+    val bottomAlphaState = animateFloatAsState(
+        targetValue = if (showBottom) 1f else 0f,
+        animationSpec = tween(if (animEnabled) 220 else 0),
+        label = "fz_bot"
+    )
+
+    val topBrush = remember {
+        Brush.verticalGradient(
+            0f to RawColors.BgPrimary,
+            0.48f to RawColors.BgPrimary.copy(alpha = 0.78f),
+            1f to Color.Transparent
+        )
+    }
+    val bottomBrush = remember {
+        Brush.verticalGradient(
+            0f to Color.Transparent,
+            0.42f to RawColors.BgPrimary.copy(alpha = 0.78f),
+            0.84f to RawColors.BgPrimary,
+            1f to RawColors.BgPrimary
+        )
+    }
+
+    Box(
+        modifier = Modifier
+            .align(Alignment.TopCenter)
+            .fillMaxWidth()
+            .padding(top = topOffset)
+            .height(topHeight)
+            .graphicsLayer { alpha = topAlphaState.value }
+            .background(topBrush)
+    )
+    Box(
+        modifier = Modifier
+            .align(Alignment.BottomCenter)
+            .fillMaxWidth()
+            .height(bottomHeight)
+            .graphicsLayer { alpha = bottomAlphaState.value }
+            .background(bottomBrush)
+    )
+}
+
+@Composable
+fun BoxScope.FeatheredScrollEdges(
+    scrollState: ScrollState,
+    topOffset: Dp = 0.dp,
+    topHeight: Dp = 54.dp,
+    bottomHeight: Dp = 112.dp,
+    alwaysShowBottom: Boolean = false
+) {
+    FeatheredScrollEdges(
+        canScrollBackward = { scrollState.value > 8 },
+        canScrollForward = { scrollState.maxValue > 8 && scrollState.value < scrollState.maxValue - 8 },
+        topOffset = topOffset,
+        topHeight = topHeight,
+        bottomHeight = bottomHeight,
+        alwaysShowBottom = alwaysShowBottom
+    )
+}
+
+@Composable
+fun BoxScope.FeatheredScrollEdges(
+    listState: LazyListState,
+    topOffset: Dp = 0.dp,
+    topHeight: Dp = 54.dp,
+    bottomHeight: Dp = 112.dp,
+    alwaysShowBottom: Boolean = false
+) {
+    FeatheredScrollEdges(
+        canScrollBackward = { listState.canScrollBackward },
+        canScrollForward = { listState.canScrollForward },
+        topOffset = topOffset,
+        topHeight = topHeight,
+        bottomHeight = bottomHeight,
+        alwaysShowBottom = alwaysShowBottom
+    )
+}
+
+@Composable
+fun BoxScope.FeatheredScrollEdges(
+    gridState: LazyGridState,
+    topOffset: Dp = 0.dp,
+    topHeight: Dp = 54.dp,
+    bottomHeight: Dp = 112.dp,
+    alwaysShowBottom: Boolean = false
+) {
+    FeatheredScrollEdges(
+        canScrollBackward = { gridState.canScrollBackward },
+        canScrollForward = { gridState.canScrollForward },
+        topOffset = topOffset,
+        topHeight = topHeight,
+        bottomHeight = bottomHeight,
+        alwaysShowBottom = alwaysShowBottom
+    )
+}
+
 /**
  * Ultra-lightweight GPU spring press feedback using graphicsLayer only (zero layout work).
  */
@@ -126,7 +340,7 @@ fun RawPressButton(
     val interactionSource = remember { MutableInteractionSource() }
     val pressed by interactionSource.collectIsPressedAsState()
     val scaleState: State<Float> = animateFloatAsState(
-        targetValue = if (pressed && enabled && animEnabled) 0.968f else 1f,
+        targetValue = if (pressed && enabled && animEnabled) 0.955f else 1f,
         animationSpec = if (animEnabled) {
             spring(dampingRatio = 0.72f, stiffness = 480f)
         } else {
@@ -153,9 +367,6 @@ fun RawPressButton(
     }
 }
 
-/**
- * Crisp morphing swap for dynamic button captions and status tags.
- */
 @Composable
 fun SplitFlapText(
     text: String,
@@ -184,8 +395,7 @@ fun SplitFlapText(
 }
 
 /**
- * Word-staggered kinetic headline powered by ONE shared Animatable and GPU graphicsLayer
- * (eliminates N parallel coroutines per heading for lag-free screen opens).
+ * Word-staggered kinetic headline powered by ONE shared Animatable and GPU graphicsLayer.
  */
 @Composable
 fun KineticHeading(
@@ -217,28 +427,52 @@ fun KineticHeading(
                 val startAt = (idx.toFloat() / (count + 1.5f)).coerceAtMost(0.45f)
                 val span = (1f - startAt).coerceAtLeast(0.35f)
                 val isLast = idx == words.lastIndex
-                val wordColor = if (highlightLastWord && isLast) RawColors.Mint else style.color
+                val usePill = highlightLastWord && isLast
                 Box(modifier = Modifier.clipToBounds()) {
-                    Text(
-                        text = word,
-                        style = style.copy(lineHeight = safeLineHeight),
-                        color = wordColor,
-                        maxLines = 1,
-                        softWrap = false,
-                        modifier = Modifier
-                            .padding(bottom = 2.dp)
-                            .graphicsLayer {
-                                val p = ((master.value - startAt) / span).coerceIn(0f, 1f)
-                                translationY = (1f - p) * 24f
-                                alpha = p
-                            }
-                    )
+                    if (usePill) {
+                        Box(
+                            modifier = Modifier
+                                .padding(bottom = 2.dp, start = 2.dp, end = 2.dp)
+                                .graphicsLayer {
+                                    val p = ((master.value - startAt) / span).coerceIn(0f, 1f)
+                                    translationY = (1f - p) * 24f
+                                    rotationZ = -1.5f
+                                    alpha = p
+                                }
+                                .clip(RoundedCornerShape(percent = 28))
+                                .background(RawColors.Tan)
+                                .padding(horizontal = 10.dp, vertical = 1.dp)
+                        ) {
+                            Text(
+                                text = word,
+                                style = style.copy(lineHeight = safeLineHeight),
+                                color = RawColors.Ink,
+                                maxLines = 1,
+                                softWrap = false
+                            )
+                        }
+                    } else {
+                        Text(
+                            text = word,
+                            style = style.copy(lineHeight = safeLineHeight),
+                            color = style.color,
+                            maxLines = 1,
+                            softWrap = false,
+                            modifier = Modifier
+                                .padding(bottom = 2.dp)
+                                .graphicsLayer {
+                                    val p = ((master.value - startAt) / span).coerceIn(0f, 1f)
+                                    translationY = (1f - p) * 24f
+                                    alpha = p
+                                }
+                        )
+                    }
                 }
             }
         }
     ) { measurables, constraints ->
         val hGap = 9.dp.roundToPx()
-        val vGap = 2.dp.roundToPx()
+        val vGap = 4.dp.roundToPx()
         val maxW = if (constraints.hasBoundedWidth) constraints.maxWidth else Int.MAX_VALUE
         val childConstraints = constraints.copy(minWidth = 0, minHeight = 0)
         val placeables = measurables.map { it.measure(childConstraints) }
@@ -290,9 +524,6 @@ fun KineticHeading(
     }
 }
 
-/**
- * Lightweight GPU entrance wrapper for card groups.
- */
 @Composable
 fun CascadeSkewCard(
     index: Int,
@@ -312,7 +543,10 @@ fun CascadeSkewCard(
     Box(
         modifier = modifier.graphicsLayer {
             val p = progress.value
-            translationY = (1f - p) * 20f
+            val s = 0.95f + 0.05f * p
+            translationY = (1f - p) * 24f
+            scaleX = s
+            scaleY = s
             alpha = p.coerceIn(0f, 1f)
         }
     ) {
@@ -320,10 +554,6 @@ fun CascadeSkewCard(
     }
 }
 
-/**
- * Single-Canvas fluid Mint pager dots (7dp -> 24dp expanding Mint pill) linked to finger drag.
- * Zero per-dot composables or per-dot animation state allocations.
- */
 @Composable
 fun LiquidPagerDots(
     totalCount: Int,
@@ -349,7 +579,7 @@ fun LiquidPagerDots(
         for (i in 0 until count) {
             val closeness = (1f - abs(activePos - i)).coerceIn(0f, 1f)
             val w = minW + (maxW - minW) * closeness
-            val col = lerp(RawColors.PillGrey, RawColors.Mint, closeness)
+            val col = lerp(RawColors.PillGrey, RawColors.Tan, closeness)
             drawRoundRect(
                 color = col,
                 topLeft = Offset(curX, 0f),
@@ -362,9 +592,8 @@ fun LiquidPagerDots(
 }
 
 /**
- * Signature Mint Swipe-to-create control (#sl2 in mockup):
- * Track fill, pulsing >>> chevrons, and knob travel all run inside draw/layer phases so dragging
- * produces zero recompositions even on older Android 9 GPUs.
+ * Wallet pill Swipe-to-create control (#sl2 in raw_edit_ui.html):
+ * Pure GPU draw-phase Tan trail + graphicsLayer knob so dragging allocates 0 layout passes.
  */
 @Composable
 fun SwipeToCreateSlider(
@@ -381,7 +610,7 @@ fun SwipeToCreateSlider(
     var widthPx by remember { mutableFloatStateOf(1f) }
     val knobSizeDp = 52.dp
     val density = LocalDensity.current
-    val padPx = with(density) { 4.dp.toPx() }
+    val padPx = with(density) { 5.dp.toPx() }
     val knobPx = with(density) { knobSizeDp.toPx() }
     val maxTravelPx = (widthPx - knobPx - padPx * 2f).coerceAtLeast(1f)
 
@@ -427,9 +656,8 @@ fun SwipeToCreateSlider(
             .fillMaxWidth()
             .height(62.dp)
             .graphicsLayer { translationX = shakeOffset.value }
-            .clip(RoundedCornerShape(16.dp))
+            .clip(CircleShape)
             .background(RawColors.RaisedCard)
-            .border(1.dp, RawColors.Divider, RoundedCornerShape(16.dp))
             .onSizeChanged { widthPx = it.width.toFloat() }
             .then(
                 if (!unlocked) {
@@ -439,28 +667,27 @@ fun SwipeToCreateSlider(
                     ) { triggerLockedBump() }
                 } else Modifier
             )
-            .padding(horizontal = 4.dp),
+            .padding(horizontal = 5.dp),
         contentAlignment = Alignment.CenterStart
     ) {
-        // GPU Draw-phase trail & chevrons (ZERO recompositions while dragging or idling!)
         Canvas(modifier = Modifier.fillMaxSize()) {
             val ratio = ratioAnim.value
             val fillWidth = (knobPx + padPx * 2f + maxTravelPx * ratio).coerceIn(knobPx, size.width)
             if (unlocked && ratio > 0.01f) {
+                val r = size.height * 0.5f
                 drawRoundRect(
-                    color = RawColors.Mint,
+                    color = RawColors.Tan,
                     topLeft = Offset.Zero,
                     size = Size(fillWidth, size.height),
-                    cornerRadius = CornerRadius(16.dp.toPx())
+                    cornerRadius = CornerRadius(r, r)
                 )
             }
         }
 
-        // Centered label + Mint >>> chevrons + right duration pill
         Row(
             modifier = Modifier
                 .fillMaxSize()
-                .padding(start = 62.dp, end = 14.dp),
+                .padding(start = 62.dp, end = 12.dp),
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically
         ) {
@@ -475,9 +702,9 @@ fun SwipeToCreateSlider(
                     val phase = chevronPhaseState?.value ?: 0f
                     val ratio = ratioAnim.value
                     val baseCol = if (unlocked) {
-                        if (ratio > 0.35f) RawColors.PrimaryBtnText else RawColors.Mint
+                        if (ratio > 0.35f) RawColors.Ink else RawColors.Tan
                     } else {
-                        Color(0xFF6E746E)
+                        Color(0xFF78706A)
                     }
                     for (c in 0..2) {
                         val wave = ((phase * 3f - c + 3f) % 3f)
@@ -492,12 +719,12 @@ fun SwipeToCreateSlider(
                 Text(
                     text = labelText,
                     fontFamily = BricolageFamily,
-                    fontWeight = FontWeight.SemiBold,
-                    fontSize = 17.sp,
+                    fontWeight = FontWeight.Bold,
+                    fontSize = 16.5.sp,
                     color = when {
-                        !unlocked -> Color(0xFF6E746E)
-                        pastMidpoint -> RawColors.PrimaryBtnText
-                        else -> RawColors.TextMuted
+                        !unlocked -> Color(0xFF78706A)
+                        pastMidpoint -> RawColors.Ink
+                        else -> RawColors.TextPrimary
                     }
                 )
             }
@@ -505,15 +732,15 @@ fun SwipeToCreateSlider(
             if (showRightTag) {
                 Box(
                     modifier = Modifier
-                        .clip(RoundedCornerShape(6.dp))
+                        .clip(CircleShape)
                         .background(RawColors.PillGrey)
-                        .padding(horizontal = 9.dp, vertical = 5.dp)
+                        .padding(horizontal = 10.dp, vertical = 5.dp)
                 ) {
                     Text(
                         text = rightTag,
                         fontFamily = JetBrainsMonoFamily,
-                        fontWeight = FontWeight.SemiBold,
-                        fontSize = 12.5.sp,
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 12.sp,
                         style = TextStyle(fontFeatureSettings = "tnum"),
                         color = RawColors.TextPrimary
                     )
@@ -521,13 +748,12 @@ fun SwipeToCreateSlider(
             }
         }
 
-        // Circular Draggable Knob moved via GPU graphicsLayer (0 relayout, 0 recompose!)
         Box(
             modifier = Modifier
                 .graphicsLayer { translationX = ratioAnim.value * maxTravelPx }
                 .size(knobSizeDp)
                 .clip(CircleShape)
-                .background(if (unlocked) RawColors.Mint else RawColors.PillGrey)
+                .background(if (unlocked) RawColors.Tan else RawColors.PillGrey)
                 .pointerInput(unlocked, maxTravelPx) {
                     if (!unlocked) return@pointerInput
                     detectHorizontalDragGestures(
@@ -536,7 +762,7 @@ fun SwipeToCreateSlider(
                             if (!triggered) {
                                 val next = (ratioAnim.value + dragAmount / maxTravelPx).coerceIn(0f, 1f)
                                 scope.launch { ratioAnim.snapTo(next) }
-                                if (next >= 0.85f && !triggered) {
+                                if (next >= 0.82f && !triggered) {
                                     triggered = true
                                     haptic.performHapticFeedback(HapticFeedbackType.LongPress)
                                     onTriggered(Offset(widthPx * 0.85f, knobPx))
@@ -547,7 +773,7 @@ fun SwipeToCreateSlider(
                             if (!triggered) {
                                 scope.launch {
                                     if (animEnabled) {
-                                        ratioAnim.animateTo(0f, spring(dampingRatio = 0.78f, stiffness = 360f))
+                                        ratioAnim.animateTo(0f, spring(dampingRatio = 0.76f, stiffness = 360f))
                                     } else {
                                         ratioAnim.snapTo(0f)
                                     }
@@ -565,17 +791,13 @@ fun SwipeToCreateSlider(
         ) {
             RawIcon(
                 type = if (unlocked) RawIconType.ARROW_RIGHT else RawIconType.LOCK,
-                tint = if (unlocked) RawColors.PrimaryBtnText else RawColors.TextMuted,
+                tint = if (unlocked) RawColors.Ink else RawColors.TextMuted,
                 size = 22.dp
             )
         }
     }
 }
 
-/**
- * Pure GPU screen transition matching raw_edit.html cubic-bezier(.22,.9,.24,1).
- * Uses ONLY translation + scale + alpha (no Compose blur) for 60/120fps on Android 9+.
- */
 @Composable
 fun <T> RawScreenTransition(
     targetState: T,
@@ -593,24 +815,24 @@ fun <T> RawScreenTransition(
             } else if (isForward) {
                 ContentTransform(
                     targetContentEnter = slideInHorizontally(
-                        tween(280, easing = RawEasings.Morph)
-                    ) { (it * 0.22f).roundToInt() } +
-                        fadeIn(tween(210, easing = RawEasings.Morph)),
+                        tween(290, easing = RawEasings.Morph)
+                    ) { (it * 0.24f).roundToInt() } +
+                        fadeIn(tween(220, easing = RawEasings.Morph)),
                     initialContentExit = slideOutHorizontally(
-                        tween(250, easing = RawEasings.Morph)
-                    ) { -(it * 0.12f).roundToInt() } +
+                        tween(260, easing = RawEasings.Morph)
+                    ) { -(it * 0.14f).roundToInt() } +
                         fadeOut(tween(180)),
                     targetContentZIndex = 1f
                 )
             } else {
                 ContentTransform(
                     targetContentEnter = slideInHorizontally(
-                        tween(260, easing = RawEasings.Morph)
-                    ) { -(it * 0.12f).roundToInt() } +
-                        fadeIn(tween(200, easing = RawEasings.Morph)),
+                        tween(270, easing = RawEasings.Morph)
+                    ) { -(it * 0.14f).roundToInt() } +
+                        fadeIn(tween(210, easing = RawEasings.Morph)),
                     initialContentExit = slideOutHorizontally(
-                        tween(240, easing = RawEasings.Morph)
-                    ) { (it * 0.22f).roundToInt() } +
+                        tween(250, easing = RawEasings.Morph)
+                    ) { (it * 0.24f).roundToInt() } +
                         fadeOut(tween(180)),
                     targetContentZIndex = 0f
                 )
@@ -622,9 +844,6 @@ fun <T> RawScreenTransition(
     }
 }
 
-/**
- * Directional glide + micro-scale transition between dock tabs.
- */
 @Composable
 fun <T : Enum<T>> RawTabMorphTransition(
     targetTab: T,
@@ -642,10 +861,10 @@ fun <T : Enum<T>> RawTabMorphTransition(
                 val movingRight = targetState.ordinal >= initialState.ordinal
                 val enterSlideDir = if (movingRight) 1 else -1
                 val exitSlideDir = -enterSlideDir
-                (slideInHorizontally(tween(220, easing = RawEasings.Morph)) { (it * 0.06f * enterSlideDir).roundToInt() } +
-                    fadeIn(tween(190, easing = RawEasings.Morph)))
+                (slideInHorizontally(tween(230, easing = RawEasings.Morph)) { (it * 0.08f * enterSlideDir).roundToInt() } +
+                    fadeIn(tween(200, easing = RawEasings.Morph)))
                     .togetherWith(
-                        slideOutHorizontally(tween(180, easing = RawEasings.Morph)) { (it * 0.04f * exitSlideDir).roundToInt() } +
+                        slideOutHorizontally(tween(190, easing = RawEasings.Morph)) { (it * 0.05f * exitSlideDir).roundToInt() } +
                             fadeOut(tween(150))
                     )
             }
@@ -662,12 +881,11 @@ private data class ConfettiPiece(
     val speed: Float,
     val sizeDp: Float,
     val alpha: Float,
-    val isMint: Boolean
+    val isTan: Boolean
 )
 
 /**
- * Crisp retro square pixel confetti matching #cf in raw_edit.html, allocated ONCE and
- * auto-stopping cleanly after 1.9 seconds so idle Result screen consumes 0% GPU.
+ * Retro square pixel confetti in Cream & Tan.
  */
 @Composable
 fun ResultCelebrationOverlay(
@@ -678,17 +896,17 @@ fun ResultCelebrationOverlay(
     if (!play || !animEnabled) return
 
     val particles = remember {
-        List(56) { i ->
+        List(52) { i ->
             val seed = (i * 9301 + 49297) % 233280
             val r1 = seed / 233280f
             val r2 = ((seed * 7 + 13) % 997) / 997f
             ConfettiPiece(
-                xFrac = ((i + 0.5f) / 56f + (r1 - 0.5f) * 0.06f).coerceIn(0.02f, 0.98f),
+                xFrac = ((i + 0.5f) / 52f + (r1 - 0.5f) * 0.06f).coerceIn(0.02f, 0.98f),
                 startY = -r2 * 0.42f,
                 speed = 0.75f + r1 * 0.65f,
                 sizeDp = 4f + (i % 4) * 1.6f,
                 alpha = if (i % 3 == 0) 0.9f else 0.45f,
-                isMint = i % 5 == 0
+                isTan = i % 5 == 0
             )
         }
     }
@@ -717,7 +935,7 @@ fun ResultCelebrationOverlay(
             val yPx = yNorm * h
             val xPx = pt.xFrac * w + sin(yPx / 38f) * 10f
             val side = pt.sizeDp * densityPx
-            val col = (if (pt.isMint) RawColors.Mint else Color.White).copy(alpha = pt.alpha * fadeOut)
+            val col = (if (pt.isTan) RawColors.Tan else RawColors.Cream).copy(alpha = pt.alpha * fadeOut)
             drawRect(
                 color = col,
                 topLeft = Offset(xPx, yPx),

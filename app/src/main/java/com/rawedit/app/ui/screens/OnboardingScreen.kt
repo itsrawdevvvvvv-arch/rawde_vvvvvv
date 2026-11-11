@@ -14,7 +14,6 @@ import androidx.compose.animation.fadeOut
 import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
@@ -31,9 +30,9 @@ import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
-import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.rememberPagerState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -85,19 +84,19 @@ private data class OnboardingPageData(
 private val ONBOARDING_PAGES = listOf(
     OnboardingPageData(
         titleWords = listOf("Add", "your", "voice"),
-        subtitle = "Pick an MP3 voiceover and add optional SRT captions. Everything lives on your phone.",
+        subtitle = "Pick an MP3 voiceover and optional SRT captions or local assets. Everything stays on your phone.",
         chipTop = "00:01 hello",
         chipBottom = "SRT - 24 cues"
     ),
     OnboardingPageData(
         titleWords = listOf("Copy", "to", "AI"),
-        subtitle = "Download the bundled kinetic-explainer-style.zip and copy the prompt into your Cloud AI.",
+        subtitle = "Download kinetic-explainer-style.zip and copy the prompt into Cloud AI with your Studio Palette.",
         chipTop = "PROMPT.txt",
-        chipBottom = "552 KB zip"
+        chipBottom = "Style Pack ZIP"
     ),
     OnboardingPageData(
         titleWords = listOf("Paste", "and", "create"),
-        subtitle = "Paste the code back. Get a sharp 1080p typography reel - free and offline.",
+        subtitle = "Paste the code back. Get a sharp 1080p typography reel with RAW.syncVideo - free and offline.",
         chipTop = "1080p MP4",
         chipBottom = "offline"
     )
@@ -111,7 +110,6 @@ fun OnboardingScreen(
     val scope = rememberCoroutineScope()
     val animEnabled = rememberAnimationsEnabled()
 
-    // Single lightweight phase driving slide artwork cleanly in draw/layer phase (zero recompositions)
     val artPhaseState: State<Float>? = if (animEnabled) {
         val inf = rememberInfiniteTransition(label = "ob_art_phase")
         inf.animateFloat(
@@ -130,7 +128,7 @@ fun OnboardingScreen(
             .background(RawColors.BgPrimary)
             .statusBarsPadding()
     ) {
-        // Top minimal header matching R.onb
+        // Top minimal header
         Row(
             modifier = Modifier
                 .fillMaxWidth()
@@ -145,7 +143,7 @@ fun OnboardingScreen(
                 horizontalArrangement = Arrangement.spacedBy(4.dp)
             ) {
                 RawPixelMascot(kind = PixelMascotKind.TV_BOT, size = 30.dp)
-                PixelSparkle(size = 12.dp, phaseOffsetMs = 200)
+                PixelSparkle(size = 12.dp, tint = RawColors.Tan, phaseOffsetMs = 200)
             }
         }
 
@@ -177,14 +175,13 @@ fun OnboardingScreen(
                     },
                 contentAlignment = Alignment.Center
             ) {
-                // Vector backdrop outlines + slide-specific bottom motion cue in ONE Canvas
                 OnboardingSlideCanvas(
                     page = page,
                     phaseState = artPhaseState,
                     modifier = Modifier.fillMaxSize()
                 )
 
-                // Stage preview card on slide 2 matching .stack .fr
+                // Stage preview card on slide 2 (18dp borderless)
                 if (page == 2) {
                     Box(
                         modifier = Modifier
@@ -194,9 +191,8 @@ fun OnboardingScreen(
                             .graphicsLayer {
                                 translationY = if (artPhaseState != null) sin(artPhaseState.value * Math.PI.toFloat() * 2f) * 5f else 0f
                             }
-                            .clip(RoundedCornerShape(10.dp))
-                            .background(Color.Black)
-                            .border(1.dp, RawColors.DividerStrong, RoundedCornerShape(10.dp)),
+                            .clip(RoundedCornerShape(18.dp))
+                            .background(Color.Black),
                         contentAlignment = Alignment.Center
                     ) {
                         Text(
@@ -205,22 +201,20 @@ fun OnboardingScreen(
                             fontWeight = FontWeight.ExtraBold,
                             fontSize = 28.sp,
                             letterSpacing = (-1.2).sp,
-                            color = Color.White
+                            color = RawColors.Cream
                         )
                     }
                 }
 
-                // Centered floating retro pixel mascot
                 RawPixelMascot(
                     kind = pageMascot,
                     size = 122.dp,
                     modifier = Modifier.offset(y = (-24).dp)
                 )
 
-                // Floating mono info chips (.chip.c1 / .chip.c2)
                 OnboardingFloatingChip(
                     text = data.chipTop,
-                    textColor = RawColors.Mint,
+                    textColor = RawColors.Tan,
                     modifier = Modifier
                         .align(Alignment.TopStart)
                         .padding(start = 10.dp, top = 42.dp)
@@ -242,20 +236,15 @@ fun OnboardingScreen(
             }
         }
 
-        // Bottom rounded dark obsidian card (#obc)
+        // Bottom rounded dark obsidian panel (#obc 36dp borderless)
         val current = ONBOARDING_PAGES[pagerState.currentPage]
         val isLast = pagerState.currentPage == ONBOARDING_PAGES.lastIndex
 
         Column(
             modifier = Modifier
                 .fillMaxWidth()
-                .clip(RoundedCornerShape(topStart = 30.dp, topEnd = 30.dp))
+                .clip(RoundedCornerShape(topStart = 36.dp, topEnd = 36.dp))
                 .background(RawColors.CardSurface)
-                .border(
-                    width = 1.dp,
-                    color = RawColors.Divider,
-                    shape = RoundedCornerShape(topStart = 30.dp, topEnd = 30.dp)
-                )
                 .navigationBarsPadding()
                 .padding(horizontal = 24.dp, vertical = 26.dp)
         ) {
@@ -277,7 +266,7 @@ fun OnboardingScreen(
                 ) { sub ->
                     Text(
                         text = sub,
-                        style = RawTypography.bodyLarge.copy(fontSize = 16.5.sp, lineHeight = 24.5.sp),
+                        style = RawTypography.bodyLarge.copy(fontSize = 16.sp, lineHeight = 23.5.sp),
                         color = RawColors.TextMuted
                     )
                 }
@@ -299,17 +288,17 @@ fun OnboardingScreen(
                 Text(
                     text = "Skip",
                     fontFamily = BricolageFamily,
-                    fontWeight = FontWeight.SemiBold,
+                    fontWeight = FontWeight.Bold,
                     fontSize = 17.sp,
                     color = RawColors.TextPrimary,
                     modifier = Modifier
-                        .clip(RoundedCornerShape(12.dp))
+                        .clip(CircleShape)
                         .clickable(
                             interactionSource = remember { MutableInteractionSource() },
                             indication = null,
                             onClick = onFinished
                         )
-                        .padding(horizontal = 4.dp, vertical = 12.dp)
+                        .padding(horizontal = 12.dp, vertical = 12.dp)
                 )
 
                 RawPressButton(
@@ -327,8 +316,8 @@ fun OnboardingScreen(
                         modifier = Modifier
                             .defaultMinSize(minWidth = 150.dp)
                             .height(58.dp)
-                            .clip(RoundedCornerShape(16.dp))
-                            .background(RawColors.Mint)
+                            .clip(CircleShape)
+                            .background(RawColors.Tan)
                             .animateContentSize(
                                 animationSpec = if (animEnabled) spring(dampingRatio = 0.78f, stiffness = 360f) else tween(0)
                             )
@@ -337,8 +326,8 @@ fun OnboardingScreen(
                     ) {
                         SplitFlapText(
                             text = if (isLast) "Get started" else "Next",
-                            style = RawTypography.labelLarge.copy(fontSize = 18.5.sp),
-                            color = RawColors.PrimaryBtnText
+                            style = RawTypography.labelLarge.copy(fontSize = 18.sp),
+                            color = RawColors.Ink
                         )
                     }
                 }
@@ -355,10 +344,9 @@ private fun OnboardingFloatingChip(
 ) {
     Box(
         modifier = modifier
-            .clip(RoundedCornerShape(11.dp))
+            .clip(RoundedCornerShape(16.dp))
             .background(RawColors.RaisedCard)
-            .border(1.dp, RawColors.Divider, RoundedCornerShape(11.dp))
-            .padding(horizontal = 11.dp, vertical = 7.dp)
+            .padding(horizontal = 12.dp, vertical = 7.dp)
     ) {
         Text(
             text = text,
@@ -396,7 +384,7 @@ private fun OnboardingSlideCanvas(
                 drawCircle(lineCol, radius = w * 0.33f, center = c, style = Stroke(sw))
                 drawCircle(lineCol, radius = w * 0.46f, center = c, style = Stroke(sw))
 
-                // 16 Mint equalizer bars at bottom (.wv)
+                // 16 Tan equalizer bars at bottom
                 val barCount = 16
                 val barW = 5.dp.toPx()
                 val gap = 5.dp.toPx()
@@ -409,7 +397,7 @@ private fun OnboardingSlideCanvas(
                     val bh = (maxH * v).coerceAtLeast(8.dp.toPx())
                     val bx = startX + i * (barW + gap)
                     drawRoundRect(
-                        color = RawColors.Mint,
+                        color = RawColors.Tan,
                         topLeft = Offset(bx, bottomY - bh),
                         size = Size(barW, bh),
                         cornerRadius = CornerRadius(3.dp.toPx())
@@ -422,7 +410,6 @@ private fun OnboardingSlideCanvas(
                 drawLine(lineCol, Offset(w * 0.62f, h * 0.28f), Offset(w * 0.82f, h * 0.28f), sw, pathEffect = dashEffect)
                 drawLine(lineCol, Offset(w * 0.16f, h * 0.72f), Offset(w * 0.84f, h * 0.72f), sw, pathEffect = dashEffect)
 
-                // Cloud icon outline top-right
                 cloudPath.reset()
                 val cx = w * 0.68f
                 val cy = h * 0.20f
@@ -434,7 +421,6 @@ private fun OnboardingSlideCanvas(
                 cloudPath.close()
                 drawPath(cloudPath, RawColors.TextPrimary.copy(alpha = 0.85f), style = Stroke(2.2.dp.toPx(), cap = StrokeCap.Round))
 
-                // Animated typing code lines (.ln)
                 val lx = 36.dp.toPx()
                 val maxLineW = w - lx * 2f
                 val baseY = h - 78.dp.toPx()
