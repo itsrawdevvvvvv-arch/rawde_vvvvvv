@@ -128,11 +128,18 @@ object GeminiClient {
     ): Result<Pair<String, String>> = withContext(Dispatchers.IO) {
         runCatching {
             val (b64, mime) = encodeFileForVision(imageFile, maxDim = 960)
-            val prompt = if (asset.kind == LocalAssetEntity.KIND_CLIP) {
-                "This 3-frame storyboard is sampled at 10%, 50%, 85% from the video clip ${asset.relativePath} (${asset.width}x${asset.height}, ${String.format(Locale.US, "%.1f", asset.durationSec)}s). Return strict JSON with keys: \"description\" (1 concise sentence describing visual motion/content across the clip) and \"safeZone\" (1 concise sentence stating where kinetic overlay typography can sit safely with high contrast)."
-            } else {
-                val label = if (asset.kind == LocalAssetEntity.KIND_CUTOUT) "PNG cutout" else "image"
-                "Analyze this $label (${asset.relativePath}, ${asset.width}x${asset.height}). Return strict JSON with keys: \"description\" (1 concise sentence describing visual subject and lighting/palette) and \"safeZone\" (1 concise sentence stating where kinetic overlay text can be placed cleanly without obscuring the subject)."
+            val isWebShot = asset.description.contains("Interactive UI targets", ignoreCase = true)
+            val prompt = when {
+                asset.kind == LocalAssetEntity.KIND_CLIP -> {
+                    "This 3-frame storyboard is sampled at 10%, 50%, 85% from the video clip ${asset.relativePath} (${asset.width}x${asset.height}, ${String.format(Locale.US, "%.1f", asset.durationSec)}s). Return strict JSON with keys: \"description\" (1 concise sentence describing visual motion/content across the clip) and \"safeZone\" (1 concise sentence stating where kinetic overlay typography can sit safely with high contrast)."
+                }
+                isWebShot -> {
+                    "Analyze this tutorial UI screenshot (${asset.relativePath}, ${asset.width}x${asset.height}). Extracted UI context: ${asset.description.take(700)}. Return strict JSON with keys: \"description\" (1-2 concise sentences describing the UI screen AND preserving key target [x,y,wxh] boxes for tutorial cursor/highlight animation) and \"safeZone\" (1 concise sentence stating which region is safest for kinetic titles without covering interactive controls)."
+                }
+                else -> {
+                    val label = if (asset.kind == LocalAssetEntity.KIND_CUTOUT) "PNG cutout" else "image"
+                    "Analyze this $label (${asset.relativePath}, ${asset.width}x${asset.height}). Return strict JSON with keys: \"description\" (1 concise sentence describing visual subject and lighting/palette) and \"safeZone\" (1 concise sentence stating where kinetic overlay text can be placed cleanly without obscuring the subject)."
+                }
             }
 
             val parts = JSONArray().apply {
@@ -157,6 +164,100 @@ object GeminiClient {
             val desc = obj.optString("description", asset.description).trim().ifBlank { asset.description }
             val safe = obj.optString("safeZone", asset.safeZone).trim().ifBlank { asset.safeZone }
             desc to safe
+        }
+    }
+
+    suspend fun auditCutout(
+        apiKey: String,
+        comparisonFile: File,
+        currentTolerance: Int,
+        currentPad: CutoutPadRatios,
+        isSvgSource: Boolean,
+        keepOriginalMode: Boolean
+    ): Result<CutoutAuditResult> = withContext(Dispatchers.IO) {
+        runCatching {
+            val (b64, mime) = encodeFileForVision(comparisonFile, maxDim = 1024)
+            val padInfo = String.format(
+                Locale.US,
+                "T=%.2f, R=%.2f, B=%.2f, L=%.2f",
+                currentPad.top,
+                currentPad.right,
+                currentPad.bottom,
+                currentPad.left
+            )
+            val prompt = """
+                Inspect this side-by-side PNG cutout diagnostic image carefully.
+                LEFT panel shows the SOURCE original. RIGHT panel shows the extracted PNG CUTOUT placed over a dark gray checkerboard.
+                Current parameters: isSvg=$isSvgSource, tolerance=$currentTolerance, keepOriginal=$keepOriginalMode, padding=[$padInfo].
+
+                Check for two specific conversion defects:
+                1. UNNECESSARY CROPPING: outer vector strokes, rounded corners, drop shadows, circular rings, or thin edges clipped/cut off at the top, right, bottom, or left border of the RIGHT cutout.
+                2. OVER-REMOVAL / ACCIDENTAL ERASURE: bright foreground details, inner logo text, eyes, shiny highlights, or anti-aliased edges erased into checkerboard tiles (comparing RIGHT vs LEFT), OR the LEFT image is a full rectangular UI screenshot/scene that should keep its background intact rather than keying out corners.
+
+                Return strict JSON only:
+                {
+                  "status": "OK" or "ADJUST",
+                  "diagnosis": "1 concise honest sentence summarizing whether clipping or accidental erasure was seen and what you fixed (or 'Cutout edges and interior details look clean.')",
+                  "keepOriginal": false,
+                  "recommendedTolerance": $currentTolerance,
+                  "extraPadTop": 0.0,
+                  "extraPadRight": 0.0,
+                  "extraPadBottom": 0.0,
+                  "extraPadLeft": 0.0
+                }
+                Rules:
+                - For isSvg=true, keep tolerance=0 and focus extraPad* (0.04..0.16) if strokes/shadows appear tight at edges.
+                - If inner light shapes or text were accidentally removed on a raster logo/icon, lower recommendedTolerance (6..20).
+                - Set keepOriginal=true ONLY if background removal destroyed a complex UI card, photo, or non-transparent scene that looks better un-keyed.
+            """.trimIndent()
+
+            val parts = JSONArray().apply {
+                put(JSONObject().put("text", prompt))
+                put(
+                    JSONObject().put(
+                        "inlineData",
+                        JSONObject().apply {
+                            put("mimeType", mime)
+                            put("data", b64)
+                        }
+                    )
+                )
+            }
+            val rawText = callGenerateContent(
+                apiKey = apiKey,
+                parts = parts,
+                temperature = 0.2,
+                jsonMode = true
+            )
+            val obj = JSONObject(stripJsonFences(rawText))
+            val statusRaw = obj.optString("status", "OK").trim().uppercase(Locale.US)
+            val keepOrig = obj.optBoolean("keepOriginal", false)
+            val recTol = if (isSvgSource) {
+                0
+            } else {
+                obj.optInt("recommendedTolerance", currentTolerance).coerceIn(4, 60)
+            }
+            val exT = obj.optDouble("extraPadTop", 0.0).toFloat().coerceIn(0f, 0.20f)
+            val exR = obj.optDouble("extraPadRight", 0.0).toFloat().coerceIn(0f, 0.20f)
+            val exB = obj.optDouble("extraPadBottom", 0.0).toFloat().coerceIn(0f, 0.20f)
+            val exL = obj.optDouble("extraPadLeft", 0.0).toFloat().coerceIn(0f, 0.20f)
+            val hasDelta = keepOrig != keepOriginalMode ||
+                (!isSvgSource && recTol != currentTolerance) ||
+                exT > 0.01f || exR > 0.01f || exB > 0.01f || exL > 0.01f
+
+            CutoutAuditResult(
+                status = if (statusRaw == "ADJUST" || hasDelta) "ADJUST" else "OK",
+                diagnosis = obj.optString("diagnosis", "Cutout edges and interior details verified by Gemini.")
+                    .trim()
+                    .ifBlank { "Cutout verified by Gemini." },
+                keepOriginal = keepOrig,
+                recommendedTolerance = recTol,
+                extraPadTop = exT,
+                extraPadRight = exR,
+                extraPadBottom = exB,
+                extraPadLeft = exL,
+                needsReprocess = hasDelta
+            )
         }
     }
 

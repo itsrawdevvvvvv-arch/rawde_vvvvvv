@@ -1,5 +1,6 @@
 package com.rawedit.app
 
+import android.graphics.Bitmap
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.SystemBarStyle
@@ -51,6 +52,7 @@ import com.rawedit.app.ui.screens.ProfileScreen
 import com.rawedit.app.ui.screens.ProfileSetupScreen
 import com.rawedit.app.ui.screens.RenderingScreen
 import com.rawedit.app.ui.screens.ResultScreen
+import com.rawedit.app.ui.screens.WebBrowserAssetScreen
 import com.rawedit.app.ui.theme.RawColors
 import com.rawedit.app.ui.theme.RawEditTheme
 import kotlinx.coroutines.Dispatchers
@@ -70,6 +72,7 @@ private sealed interface AppRoute {
     data class CreateHub(val projectId: Long) : AppRoute
     data class AddVoice(val projectId: Long) : AppRoute
     data class AssetLocker(val projectId: Long) : AppRoute
+    data class WebBrowser(val projectId: Long) : AppRoute
     data class CopyPrompt(val projectId: Long) : AppRoute
     data class CodePaste(val projectId: Long) : AppRoute
     data class KeyframeSheet(val projectId: Long) : AppRoute
@@ -190,6 +193,64 @@ private fun MainAuthenticatedHost(
         if (backStack.size > 1) {
             isForward = false
             backStack = backStack.dropLast(1)
+        }
+    }
+
+    fun saveCapturedBitmapToLocker(
+        projectId: Long,
+        bitmap: Bitmap,
+        isCutout: Boolean,
+        suggestedName: String,
+        defaultDescription: String?,
+        defaultSafeZone: String?
+    ) {
+        scope.launch {
+            val res = container.cacheManager.importBitmapAsLockerAsset(
+                bitmap = bitmap,
+                suggestedName = suggestedName,
+                isCutout = isCutout,
+                customDescription = defaultDescription,
+                customSafeZone = defaultSafeZone
+            )
+            res.onSuccess { imp ->
+                val entity = LocalAssetEntity(
+                    fileName = imp.fileName,
+                    relativePath = imp.relativePath,
+                    kind = imp.kind,
+                    mimeType = imp.mimeType,
+                    width = imp.width,
+                    height = imp.height,
+                    durationSec = imp.durationSec,
+                    sizeBytes = imp.sizeBytes,
+                    thumbPath = imp.thumbPath,
+                    description = imp.defaultDescription,
+                    safeZone = imp.defaultSafeZone
+                )
+                val newId = container.repository.insertAsset(entity)
+                container.repository.attachAssetToProject(projectId, newId)
+                if (userProfile.geminiApiKey.isNotBlank()) {
+                    val visionFile = container.cacheManager.getAssetFile(imp.fileName)
+                    if (visionFile != null && visionFile.exists()) {
+                        val descRes = GeminiClient.describeAsset(
+                            userProfile.geminiApiKey,
+                            entity.copy(id = newId),
+                            visionFile
+                        )
+                        descRes.onSuccess { (desc, safe) ->
+                            container.repository.updateAssetDescription(newId, desc, safe)
+                            hostToastMsg = "Saved & described ${imp.relativePath}"
+                        }.onFailure {
+                            hostToastMsg = "Saved ${imp.relativePath}"
+                        }
+                    } else {
+                        hostToastMsg = "Saved ${imp.relativePath}"
+                    }
+                } else {
+                    hostToastMsg = "Saved ${imp.relativePath}"
+                }
+            }.onFailure { err ->
+                hostToastMsg = err.message ?: "Could not save captured asset"
+            }
         }
     }
 
@@ -424,6 +485,10 @@ private fun MainAuthenticatedHost(
                                     }
                                 }
                             },
+                            onOpenWebBrowser = { pushRoute(AppRoute.WebBrowser(proj.id)) },
+                            onSaveCutoutBitmap = { bmp, isCutout, name, desc, safe ->
+                                saveCapturedBitmapToLocker(proj.id, bmp, isCutout, name, desc, safe)
+                            },
                             onUpdateAssetNotes = { assetId, desc, safe ->
                                 scope.launch {
                                     container.repository.updateAssetDescription(assetId, desc, safe)
@@ -440,6 +505,17 @@ private fun MainAuthenticatedHost(
                             onOpenApiKey = { showApiKeyDialog = true }
                         )
                     }
+                }
+
+                is AppRoute.WebBrowser -> {
+                    WebBrowserAssetScreen(
+                        apiKey = userProfile.geminiApiKey,
+                        onBack = ::popRoute,
+                        onSaveCapturedBitmap = { bmp, isCutout, name, desc, safe ->
+                            saveCapturedBitmapToLocker(route.projectId, bmp, isCutout, name, desc, safe)
+                        },
+                        onOpenApiKey = { showApiKeyDialog = true }
+                    )
                 }
 
                 is AppRoute.CopyPrompt -> {

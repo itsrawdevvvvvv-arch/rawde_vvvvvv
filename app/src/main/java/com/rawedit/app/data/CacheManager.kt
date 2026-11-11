@@ -503,6 +503,117 @@ class CacheManager(private val context: Context) {
         }
     }
 
+    suspend fun importBitmapAsLockerAsset(
+        bitmap: Bitmap,
+        suggestedName: String,
+        isCutout: Boolean,
+        customDescription: String? = null,
+        customSafeZone: String? = null
+    ): Result<LocalAssetImportResult> = withContext(Dispatchers.IO) {
+        runCatching {
+            val maxDim = maxOf(bitmap.width, bitmap.height).coerceAtLeast(1)
+            val working = if (maxDim > MAX_LOCKER_IMAGE_DIM) {
+                val scale = MAX_LOCKER_IMAGE_DIM.toFloat() / maxDim.toFloat()
+                Bitmap.createScaledBitmap(
+                    bitmap,
+                    (bitmap.width * scale).toInt().coerceAtLeast(1),
+                    (bitmap.height * scale).toInt().coerceAtLeast(1),
+                    true
+                )
+            } else {
+                bitmap
+            }
+
+            val fallback = if (isCutout) "cutout" else "webshot"
+            val uniqueName = allocateUniqueAssetName(suggestedName, "png", fallback)
+            val outFile = File(projectAssetsDir, uniqueName)
+            FileOutputStream(outFile).use { fos ->
+                working.compress(Bitmap.CompressFormat.PNG, 95, fos)
+            }
+
+            val thumbScale = minOf(1f, 512f / maxOf(working.width, working.height).toFloat())
+            val thumbBmp = if (thumbScale < 1f) {
+                Bitmap.createScaledBitmap(
+                    working,
+                    (working.width * thumbScale).toInt().coerceAtLeast(1),
+                    (working.height * thumbScale).toInt().coerceAtLeast(1),
+                    true
+                )
+            } else {
+                working
+            }
+            val thumbFile = File(assetThumbsDir, "${uniqueName.substringBeforeLast('.')}_thumb.png")
+            FileOutputStream(thumbFile).use { fos ->
+                thumbBmp.compress(Bitmap.CompressFormat.PNG, 90, fos)
+            }
+            if (thumbBmp !== working) thumbBmp.recycle()
+
+            val finalW = working.width
+            val finalH = working.height
+            if (working !== bitmap) working.recycle()
+
+            val kind = if (isCutout) LocalAssetEntity.KIND_CUTOUT else LocalAssetEntity.KIND_IMAGE
+            val desc = customDescription?.takeIf { it.isNotBlank() } ?: if (isCutout) {
+                "Transparent PNG cutout ($finalW x $finalH). Tap Auto-describe with Gemini or edit note."
+            } else {
+                "Captured PNG image ($finalW x $finalH). Tap Auto-describe with Gemini or edit note."
+            }
+            val safe = customSafeZone?.takeIf { it.isNotBlank() }
+                ?: "Keep headlines outside the subject center; pair with dark scrim if needed."
+
+            LocalAssetImportResult(
+                fileName = uniqueName,
+                relativePath = "assets/$uniqueName",
+                kind = kind,
+                mimeType = "image/png",
+                width = finalW,
+                height = finalH,
+                durationSec = 0.0,
+                sizeBytes = outFile.length(),
+                thumbPath = thumbFile.absolutePath,
+                defaultDescription = desc,
+                defaultSafeZone = safe
+            )
+        }
+    }
+
+    suspend fun loadAssetBitmapForCutout(fileName: String): Result<Bitmap> = withContext(Dispatchers.IO) {
+        runCatching {
+            val file = getAssetFile(fileName)
+                ?: throw IllegalArgumentException("Asset file not found.")
+            val bytes = file.readBytes()
+            val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+            BitmapFactory.decodeByteArray(bytes, 0, bytes.size, bounds)
+            if (bounds.outWidth <= 0 || bounds.outHeight <= 0) {
+                throw IllegalArgumentException("Asset is not a decodable image.")
+            }
+            val sample = computeInSampleSize(bounds.outWidth, bounds.outHeight, 1440)
+            val bmp = BitmapFactory.decodeByteArray(
+                bytes,
+                0,
+                bytes.size,
+                BitmapFactory.Options().apply {
+                    inSampleSize = sample
+                    inPreferredConfig = Bitmap.Config.ARGB_8888
+                }
+            ) ?: throw IllegalArgumentException("Could not decode asset image.")
+            val maxSide = maxOf(bmp.width, bmp.height)
+            if (maxSide > 1440) {
+                val scale = 1440f / maxSide.toFloat()
+                Bitmap.createScaledBitmap(
+                    bmp,
+                    (bmp.width * scale).toInt().coerceAtLeast(1),
+                    (bmp.height * scale).toInt().coerceAtLeast(1),
+                    true
+                ).also { if (it !== bmp) bmp.recycle() }
+            } else if (bmp.config == Bitmap.Config.ARGB_8888) {
+                bmp
+            } else {
+                bmp.copy(Bitmap.Config.ARGB_8888, false).also { bmp.recycle() }
+            }
+        }
+    }
+
     suspend fun saveProfileAvatar(bitmap: Bitmap): String = withContext(Dispatchers.IO) {
         val scaled = if (bitmap.width != 512 || bitmap.height != 512) {
             Bitmap.createScaledBitmap(bitmap, 512, 512, true)

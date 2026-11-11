@@ -1,7 +1,11 @@
 package com.rawedit.app
 
 import com.rawedit.app.data.local.LocalAssetEntity
+import com.rawedit.app.domain.BackgroundKeyMath
 import com.rawedit.app.domain.CodeValidator
+import com.rawedit.app.domain.CutoutAuditMath
+import com.rawedit.app.domain.CutoutAuditResult
+import com.rawedit.app.domain.CutoutPadRatios
 import com.rawedit.app.domain.KeyframeSample
 import com.rawedit.app.domain.KeyframeSheetGenerator
 import com.rawedit.app.domain.PaletteColorMath
@@ -11,6 +15,9 @@ import com.rawedit.app.domain.PromptGenerator
 import com.rawedit.app.domain.SceneSpan
 import com.rawedit.app.domain.SheetSamplingMode
 import com.rawedit.app.domain.SrtParser
+import com.rawedit.app.domain.SvgSanitizerAndPadding
+import com.rawedit.app.domain.WebCaptureHelper
+import com.rawedit.app.domain.WebUiElementBox
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
@@ -224,5 +231,129 @@ Enjoy!
         assertEquals(0xFFF7ECE6L, PaletteColorMath.contrastInkArgb("#0D0D0D"))
         assertEquals(0xFFF7ECE6L, PaletteColorMath.contrastInkArgb("#1A1024"))
         assertEquals("01", PaletteState.DEFAULT_01.numFormatted)
+    }
+
+    @Test
+    fun svgSanitizerAndPaddingStripsScriptsAndExpandsViewBox() {
+        val raw = """
+            <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" onclick="evil()">
+              <script>alert(1)</script>
+              <foreignObject><div>bad</div></foreignObject>
+              <path fill="currentColor" d="M2 2h20v20H2z" />
+              <image href="https://evil.example.com/x.png" />
+            </svg>
+        """.trimIndent()
+        val sanitized = SvgSanitizerAndPadding.sanitizeSvg(raw, tintHex = "#F7ECE6")
+        assertFalse(sanitized.contains("<script", ignoreCase = true))
+        assertFalse(sanitized.contains("onclick=", ignoreCase = true))
+        assertFalse(sanitized.contains("foreignObject", ignoreCase = true))
+        assertFalse(sanitized.contains("evil.example.com"))
+        assertTrue(sanitized.contains("http://www.w3.org/2000/svg"))
+        assertTrue(sanitized.contains("#F7ECE6"))
+
+        val expanded = SvgSanitizerAndPadding.expandSvgViewBox(
+            sanitized,
+            CutoutPadRatios(0.10f, 0.10f, 0.10f, 0.10f)
+        )
+        assertTrue(expanded.contains("-2.400 -2.400 28.800 28.800"))
+        assertTrue(expanded.contains("width=\"100%\""))
+        assertTrue(expanded.contains("preserveAspectRatio=\"xMidYMid meet\""))
+    }
+
+    @Test
+    fun backgroundKeyMathAndAuditAdjustmentComputeSafeParams() {
+        val w = 8
+        val h = 8
+        val whitePixels = IntArray(w * h) { 0xFFFFFFFF.toInt() }
+        // Solid red icon inside center 4x4
+        for (y in 2..5) {
+            for (x in 2..5) {
+                whitePixels[y * w + x] = 0xFFFF0000.toInt()
+            }
+        }
+        assertFalse(BackgroundKeyMath.hasMeaningfulTransparency(whitePixels))
+        val detectedBg = BackgroundKeyMath.detectUniformCornerBackground(whitePixels, w, h)
+        assertEquals(0xFFFFFFFF.toInt(), detectedBg)
+
+        whitePixels[0] = 0x00000000
+        whitePixels[1] = 0x00000000
+        whitePixels[2] = 0x00000000
+        whitePixels[3] = 0x00000000
+        assertTrue(BackgroundKeyMath.hasMeaningfulTransparency(whitePixels))
+
+        val (innerSq, outerSq) = BackgroundKeyMath.toleranceToDistSq(20)
+        assertEquals(0, BackgroundKeyMath.smoothAlphaFromDistSq(innerSq - 10, innerSq, outerSq))
+        assertEquals(255, BackgroundKeyMath.smoothAlphaFromDistSq(outerSq + 10, innerSq, outerSq))
+
+        val audit = CutoutAuditResult(
+            status = "ADJUST",
+            diagnosis = "Tight edge & washed white center",
+            keepOriginal = false,
+            recommendedTolerance = 14,
+            extraPadTop = 0.08f,
+            extraPadRight = 0.04f,
+            extraPadBottom = 0.0f,
+            extraPadLeft = 0.04f,
+            needsReprocess = true
+        )
+        val adjustedRaster = CutoutAuditMath.applyAdjustment(
+            currentPad = CutoutPadRatios(0.04f, 0.04f, 0.04f, 0.04f),
+            currentTolerance = 32,
+            isSvgSource = false,
+            audit = audit
+        )
+        assertEquals(14, adjustedRaster.tolerance)
+        assertTrue(adjustedRaster.pad.top > 0.11f)
+
+        val adjustedSvg = CutoutAuditMath.applyAdjustment(
+            currentPad = CutoutPadRatios(0.04f, 0.04f, 0.04f, 0.04f),
+            currentTolerance = 26,
+            isSvgSource = true,
+            audit = audit
+        )
+        assertEquals(0, adjustedSvg.tolerance)
+    }
+
+    @Test
+    fun webCaptureHelperNormalizesUrlsAndFormatsUiCoordinates() {
+        assertEquals("https://github.com/login", WebCaptureHelper.normalizeUrlInput("github.com/login"))
+        assertTrue(WebCaptureHelper.normalizeUrlInput("login button icons").contains("duckduckgo.com/?q="))
+        assertEquals("github_com", WebCaptureHelper.extractHostSlug("https://www.github.com/login"))
+
+        val (desc, safe) = WebCaptureHelper.formatScreenshotMetadata(
+            url = "https://github.com/login",
+            pageTitle = "Sign in to GitHub",
+            imgW = 1080,
+            imgH = 1920,
+            elements = listOf(
+                WebUiElementBox("Sign in", "button", 120, 820, 840, 92)
+            )
+        )
+        assertTrue(desc.contains("Interactive UI targets (px):"))
+        assertTrue(desc.contains("Sign in"))
+        assertTrue(desc.contains("x=120,y=820,840x92"))
+        assertTrue(safe.contains("Top band"))
+
+        val prompt = PromptGenerator.buildPrompt(
+            fileName = "tutorial.mp3",
+            durationSeconds = 12.0,
+            topic = "How to sign in",
+            srtText = "",
+            assets = listOf(
+                LocalAssetEntity(
+                    id = 5L,
+                    fileName = "github_com_shot.png",
+                    relativePath = "assets/github_com_shot.png",
+                    kind = LocalAssetEntity.KIND_IMAGE,
+                    mimeType = "image/png",
+                    width = 1080,
+                    height = 1920,
+                    description = desc,
+                    safeZone = safe
+                )
+            )
+        )
+        assertTrue(prompt.contains("Interactive UI targets (px)"))
+        assertTrue(prompt.contains("cursor clicks"))
     }
 }

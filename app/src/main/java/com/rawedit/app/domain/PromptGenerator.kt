@@ -60,6 +60,12 @@ object PromptGenerator {
         }
 
         val hasClips = assets.any { it.kind == LocalAssetEntity.KIND_CLIP }
+        val hasUiCoords = assets.any { it.description.contains("Interactive UI targets", ignoreCase = true) }
+        val uiTutorialTip = if (hasUiCoords) {
+            "\n   - For captured UI screenshots listing `Interactive UI targets (px)`, animate cursor clicks, glowing highlight boxes, zoom-ins, or callout badges aligned accurately to those scaled image coordinates while keeping titles in the Safe text zone."
+        } else {
+            ""
+        }
         val videoSyncRule = if (hasClips) {
             """
 5. **DETERMINISTIC `<video>` CLIP SYNC VIA `RAW.syncVideo`**:
@@ -67,13 +73,13 @@ object PromptGenerator {
    - NEVER call `videoEl.play()`, `requestAnimationFrame`, or timers.
    - Inside `window.RAW.seek(t)`, tie playback deterministically using `RAW.syncVideo(videoEl, t, start, end, speed)` (bundled in `engine/raw-helpers.js` inside the ZIP and injected automatically by the app):
      `if (clipEl && t >= sceneStart && t <= sceneEnd) return RAW.syncVideo(clipEl, t, sceneStart, sceneEnd, 1);`
-   - Place titles strictly in the safe text zone noted above for each asset!
+   - Place titles strictly in the safe text zone noted above for each asset!$uiTutorialTip
             """.trimIndent()
         } else {
             """
 5. **LOCAL ASSET REFERENCES**:
    - Reference any attached `assets/...` files cleanly via relative paths (`<img src="assets/...">`, `RAW.syncVideo(videoEl, t, start, end, speed)` for clips).
-   - Never fabricate or invent `assets/...` paths that were not listed above.
+   - Never fabricate or invent `assets/...` paths that were not listed above.$uiTutorialTip
             """.trimIndent()
         }
 

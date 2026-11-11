@@ -7,7 +7,9 @@ On-device Android Studio app that turns a voiceover (and optional SRT subtitles)
 - **Offline On-Device Render Stage (Android 9.0+ / API 28+)**: The WebView render engine (`LocalAssetServer`) strictly blocks all external network loads (`blockNetworkLoads = true`), runs with bundled OFL fonts and local files, and requires zero server or ads. Optional **Google AI Studio (`gemini-2.0-flash`)** integration uses the user's own API key solely on explicit tap for Studio Palettes, Asset Auto-Description, and Contact Sheet AI Review / Auto-Fix.
 - **Warm Wallet UI & Zero-Lag Motion**: Dark obsidian `#0D0D0F` canvas with Cream (`#F7ECE6`), Tan (`#CAA07D`), `Bricolage Grotesque`, and `JetBrains Mono` typography, borderless `28.dp` wallet cards, `FeatheredScrollEdges`, slide-to-start Big Type Home screen, 5-tab navigation dock (`Home`, `Palette`, `Create`, `Reels`, `Profile`), and interactive Canvas pixel mascots (`TV_BOT`, `PEEKING_CAT`, `MIC_BOT`, `ZIP_BOT`, `CODE_BOT`, `LENS_BOT`, `PHANTOM_BUDDY`).
 - **Offline Asset Locker (`assets/` Interception + HTTP 206 Range Streaming)**: Import photos, transparent PNG cutouts (checkerboard preview), and MP4 video clips (with 3-frame storyboard strips). Intercepted cleanly offline under `assets/<filename>` via `LocalAssetServer`, including `206 Partial Content` byte-range streaming for `<video>` seeking.
-- **Gemini Auto-Description & Safe Text Zones**: Analyzes imported images or video clip storyboards via `gemini-2.0-flash` to record a concise visual description and safe typography placement zone, injected directly into the Cloud AI prompt.
+- **In-App Web Capture Browser & Icon Finder**: Built directly into the Asset Locker (`WebBrowserAssetScreen`) with Mobile/Desktop `1280px` viewport toggling so tutorial creators can log in, snap crisp UI screenshots (with automatic interactive DOM button/field coordinates mapped for cursor & highlight animations), extract page `<svg>`/`<img>` elements, and search open-source SVG icon sets via Iconify.
+- **Automatic PNG Cutout Studio with Gemini AI Edge Verification**: Rasterizes sanitized `<svg>` assets (with expanded safe viewBox margins and optional monochrome color tinting) or removes uniform raster mattes via feathered boundary keying (`CutoutProcessor`). When a Google AI Studio key is configured, `GeminiClient.auditCutout` compares the original and cutout side-by-side to detect unnecessary edge clipping or accidentally erased interior highlights and automatically refines padding/tolerance.
+- **Gemini Auto-Description & Safe Text Zones**: Analyzes imported images, tutorial UI screenshots, or video clip storyboards via `gemini-2.0-flash` to record a concise visual description and safe typography placement zone, injected directly into the Cloud AI prompt.
 - **Studio Palette Generator & Card Exporter (`#0D0D0D` 3-Swatch Card)**: Generates fresh 3-color editorial palettes via `gemini-2.0-flash`, renders the `01 / 02 / 03` numbered dark editorial palette card with contrast-aware ink, saves/shares high-res `1080x1440` PNG cards ready for Cloud AI, and injects active palette tokens automatically into `PromptGenerator`.
 - **`RAW.syncVideo` Video Sync Helper & Bundled Style Pack ZIP (`kinetic-explainer-style.zip`)**: Ships `kinetic-explainer-style/SKILL.md`, `engine/raw-helpers.js` (`RAW.syncVideo(videoEl, t, start, end, speed)`), `docs/ASSETS_GUIDE.md`, and tokens inside `app/src/main/assets/`. Auto-injected at runtime by `LocalAssetServer` and inspectable inside Step 3.
 - **Pre-Render Keyframe Contact Sheet & Gemini Frame Inspector**: Samples every keyframe (`Every 0.5s`, `Dense 0.25s`, `Scene beats`) with deterministic live DOM auto-fit (`__rawAutoFitStage`), exports timestamped PDF / ZIP contact sheets and targeted Cloud AI fix prompts (0 API cost), or runs optional 1-tap Gemini visual review & HTML auto-fix.
@@ -30,7 +32,10 @@ com.rawedit.app/
     SrtParser.kt                 # Defensive SRT parser (up to 4 MB / 20,000 cues, control-char stripping)
     PromptGenerator.kt           # Style-pack, Asset Locker, Studio Palette & RAW.syncVideo prompt builder
     PaletteEngine.kt             # PaletteState, WCAG contrast ink math, JSON codec & 1080x1440 PNG exporter
-    GeminiClient.kt              # Optional gemini-2.0-flash client (palettes, vision descriptions, sheet fix)
+    CutoutMath.kt                # Pure-Kotlin SVG sanitizer/viewBox padding, flood-key math & UI coord formatter
+    CutoutProcessor.kt           # Offline WebView SVG batch rasterizer, PNG cutout flood-keyer & comparison cards
+    WebAssetFetcher.kt           # Iconify open-source SVG search & safe HTTP/data-URI media downloader
+    GeminiClient.kt              # Optional gemini-2.0-flash client (palettes, vision notes, cutout edge audit, sheet fix)
     CodeValidator.kt             # Static checks + 20s network-blocked WebView dry-run + JS error capture
     KeyframeSheetGenerator.kt    # Pre-render timestamped keyframe capture, PDF/ZIP export, Gemini sheets & fix prompt
   render/
@@ -47,7 +52,7 @@ com.rawedit.app/
     icons/RawPixelSprites.kt     # Interactive monochrome white pixel-art mascots & sparkles
     motion/RawMotion.kt          # Zero-lag GPU screen & tab transitions, feathered edges, swipe slider, wallet cards
     components/                  # 5-tab liquid dock bottom nav, circle avatar cropper, shared widgets
-    screens/                     # Onboarding, Setup, Home, Palette, Reels, Profile, CreateHub, AssetLocker, Steps, KeyframeSheet, Rendering, Result
+    screens/                     # Onboarding, Setup, Home, Palette, Reels, Profile, CreateHub, AssetLocker, WebBrowser, CutoutStudio, Steps, KeyframeSheet, Rendering, Result
 ```
 
 ## Building the Debug APK

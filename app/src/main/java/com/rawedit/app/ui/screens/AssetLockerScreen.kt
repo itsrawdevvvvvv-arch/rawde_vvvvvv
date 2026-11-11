@@ -1,5 +1,6 @@
 package com.rawedit.app.ui.screens
 
+import android.graphics.Bitmap
 import android.net.Uri
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -78,9 +79,9 @@ import com.rawedit.app.ui.theme.BricolageFamily
 import com.rawedit.app.ui.theme.JetBrainsMonoFamily
 import com.rawedit.app.ui.theme.RawColors
 import com.rawedit.app.ui.theme.RawTypography
-import java.io.File
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import java.io.File
 
 @Composable
 fun AssetLockerScreen(
@@ -90,6 +91,14 @@ fun AssetLockerScreen(
     cacheManager: CacheManager,
     onBack: () -> Unit,
     onImportAsset: (uri: Uri, isVideo: Boolean) -> Unit,
+    onOpenWebBrowser: () -> Unit,
+    onSaveCutoutBitmap: (
+        bitmap: Bitmap,
+        isCutout: Boolean,
+        suggestedName: String,
+        defaultDescription: String?,
+        defaultSafeZone: String?
+    ) -> Unit,
     onUpdateAssetNotes: (assetId: Long, description: String, safeZone: String) -> Unit,
     onToggleAttach: (assetId: Long) -> Unit,
     onDeleteAsset: (LocalAssetEntity) -> Unit,
@@ -106,6 +115,7 @@ fun AssetLockerScreen(
     var describingAssetId by remember { mutableStateOf<Long?>(null) }
     var editingNoteTarget by remember { mutableStateOf<LocalAssetEntity?>(null) }
     var deleteConfirmTarget by remember { mutableStateOf<LocalAssetEntity?>(null) }
+    var cutoutStudioTarget by remember { mutableStateOf<CutoutStudioInput?>(null) }
     var toastMsg by remember { mutableStateOf<String?>(null) }
 
     LaunchedEffect(toastMsg) {
@@ -189,23 +199,31 @@ fun AssetLockerScreen(
                     }
 
                     item {
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.spacedBy(10.dp)
-                        ) {
+                        Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.spacedBy(10.dp)
+                            ) {
+                                RawSecondaryButton(
+                                    text = "Pick Image / PNG",
+                                    height = 50.dp,
+                                    leadingIcon = RawIconType.IMAGE,
+                                    onClick = { imagePicker.launch(arrayOf("image/*")) },
+                                    modifier = Modifier.weight(1f)
+                                )
+                                RawSecondaryButton(
+                                    text = "Pick Video Clip",
+                                    height = 50.dp,
+                                    leadingIcon = RawIconType.FILM,
+                                    onClick = { videoPicker.launch(arrayOf("video/*")) },
+                                    modifier = Modifier.weight(1f)
+                                )
+                            }
                             RawSecondaryButton(
-                                text = "Pick Image / PNG",
+                                text = "In-App Web Capture & Icon Finder",
                                 height = 50.dp,
-                                leadingIcon = RawIconType.IMAGE,
-                                onClick = { imagePicker.launch(arrayOf("image/*")) },
-                                modifier = Modifier.weight(1f)
-                            )
-                            RawSecondaryButton(
-                                text = "Pick Video Clip",
-                                height = 50.dp,
-                                leadingIcon = RawIconType.FILM,
-                                onClick = { videoPicker.launch(arrayOf("video/*")) },
-                                modifier = Modifier.weight(1f)
+                                leadingIcon = RawIconType.GLOBE,
+                                onClick = onOpenWebBrowser
                             )
                         }
                     }
@@ -267,7 +285,7 @@ fun AssetLockerScreen(
                                     color = RawColors.TextPrimary
                                 )
                                 Text(
-                                    text = "Pick an image, transparent PNG cutout, or MP4 clip above. Attach them to include their exact `assets/...` path and Gemini safe zones in your Cloud AI prompt.",
+                                    text = "Pick an image, transparent PNG cutout, video clip, or use In-App Web Capture & Icon Finder above to screenshot websites and extract icons with AI cutout refinement.",
                                     style = RawTypography.bodyMedium.copy(fontSize = 14.5.sp, lineHeight = 20.5.sp),
                                     color = RawColors.TextMuted
                                 )
@@ -314,7 +332,23 @@ fun AssetLockerScreen(
                                             }
                                         }
                                     },
-                                    onEditNote = { editingNoteTarget = asset }
+                                    onEditNote = { editingNoteTarget = asset },
+                                    onMakeCutout = {
+                                        scope.launch {
+                                            val bmpRes = cacheManager.loadAssetBitmapForCutout(asset.fileName)
+                                            bmpRes.onSuccess { bmp ->
+                                                cutoutStudioTarget = CutoutStudioInput.BitmapInput(
+                                                    sourceBitmap = bmp,
+                                                    suggestedName = "${asset.fileName.substringBeforeLast('.')}_cutout",
+                                                    defaultKeepOriginal = false,
+                                                    defaultDescription = asset.description,
+                                                    defaultSafeZone = asset.safeZone
+                                                )
+                                            }.onFailure { err ->
+                                                toastMsg = err.message ?: "Could not load image for cutout"
+                                            }
+                                        }
+                                    }
                                 )
                             }
                         }
@@ -472,6 +506,20 @@ fun AssetLockerScreen(
             onDismiss = { deleteConfirmTarget = null }
         )
     }
+
+    cutoutStudioTarget?.let { target ->
+        CutoutStudioDialog(
+            input = target,
+            apiKey = apiKey,
+            onOpenApiKey = onOpenApiKey,
+            onDismiss = { cutoutStudioTarget = null },
+            onConfirmSave = { finalBmp, isCutout, suggestedName, desc, safe ->
+                cutoutStudioTarget = null
+                onSaveCutoutBitmap(finalBmp, isCutout, suggestedName, desc, safe)
+                toastMsg = if (isCutout) "Cutout PNG saved" else "PNG saved"
+            }
+        )
+    }
 }
 
 @Composable
@@ -483,7 +531,8 @@ private fun AssetLockerCard(
     onToggleAttach: () -> Unit,
     onDelete: () -> Unit,
     onAutoDescribe: () -> Unit,
-    onEditNote: () -> Unit
+    onEditNote: () -> Unit,
+    onMakeCutout: () -> Unit
 ) {
     val context = LocalContext.current
     val isCutout = asset.kind == LocalAssetEntity.KIND_CUTOUT
@@ -697,6 +746,15 @@ private fun AssetLockerCard(
                 enabled = !describing,
                 onClick = onEditNote,
                 modifier = Modifier.weight(1f)
+            )
+        }
+        if (!isClip) {
+            RawSecondaryButton(
+                text = if (isCutout) "Refine PNG Cutout (AI)" else "Make PNG Cutout (AI)",
+                height = 42.dp,
+                leadingIcon = RawIconType.CUTOUT,
+                enabled = !describing,
+                onClick = onMakeCutout
             )
         }
     }

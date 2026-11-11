@@ -66,7 +66,11 @@ enum class RawIconType {
     PALETTE,
     BOX,
     KEY,
-    SPARK
+    SPARK,
+    GLOBE,
+    SEARCH,
+    CUTOUT,
+    DESKTOP
 }
 
 // Pre-allocated immutable 24x24 paths so Canvas draws trigger ZERO per-frame Path allocations.
@@ -364,6 +368,28 @@ private val PATH_SPARK = Path().apply {
     close()
 }
 
+private val PATH_GLOBE = Path().apply {
+    addOval(Rect(3f, 3f, 21f, 21f))
+    addOval(Rect(8.5f, 3f, 15.5f, 21f))
+    moveTo(3.2f, 12f); lineTo(20.8f, 12f)
+}
+
+private val PATH_SEARCH = Path().apply {
+    addOval(Rect(4f, 4f, 16f, 16f))
+    moveTo(14.6f, 14.6f); lineTo(20.2f, 20.2f)
+}
+
+private val PATH_CUTOUT = Path().apply {
+    addRect(Rect(4f, 4f, 15.5f, 15.5f))
+    moveTo(9f, 20f); lineTo(20f, 20f); lineTo(20f, 9f)
+}
+
+private val PATH_DESKTOP = Path().apply {
+    addRect(Rect(3f, 4.5f, 21f, 16.5f))
+    moveTo(12f, 16.5f); lineTo(12f, 20f)
+    moveTo(7.5f, 20f); lineTo(16.5f, 20f)
+}
+
 @Composable
 fun RawIcon(
     type: RawIconType,
@@ -458,6 +484,10 @@ fun RawIcon(
                     drawPath(PATH_KEY_STEM, tint, style = stroke)
                 }
                 RawIconType.SPARK -> drawPath(PATH_SPARK, tint, style = stroke)
+                RawIconType.GLOBE -> drawPath(PATH_GLOBE, tint, style = stroke)
+                RawIconType.SEARCH -> drawPath(PATH_SEARCH, tint, style = stroke)
+                RawIconType.CUTOUT -> drawPath(PATH_CUTOUT, tint, style = stroke)
+                RawIconType.DESKTOP -> drawPath(PATH_DESKTOP, tint, style = stroke)
             }
         }
     }
