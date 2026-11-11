@@ -16,6 +16,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -77,9 +78,9 @@ import com.rawedit.app.ui.theme.BricolageFamily
 import com.rawedit.app.ui.theme.JetBrainsMonoFamily
 import com.rawedit.app.ui.theme.RawColors
 import com.rawedit.app.ui.theme.RawTypography
+import java.io.File
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
-import java.io.File
 
 @Composable
 fun AssetLockerScreen(
