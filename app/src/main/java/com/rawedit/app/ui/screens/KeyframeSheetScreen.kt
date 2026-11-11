@@ -121,6 +121,7 @@ fun KeyframeSheetScreen(
     project: ProjectEntity,
     cacheManager: CacheManager,
     geminiApiKey: String,
+    modelPref: String,
     onBack: () -> Unit,
     onEditCode: () -> Unit,
     onApplyFixedHtml: (String, Double) -> Unit,
@@ -768,7 +769,8 @@ fun KeyframeSheetScreen(
                                                         apiKey = geminiApiKey,
                                                         sheetImages = imgs,
                                                         htmlCode = resolvedHtml,
-                                                        frameCount = res.samples.size
+                                                        frameCount = res.samples.size,
+                                                        modelPref = modelPref
                                                     )
                                                     aiBusy = false
                                                     aiAction = ""
@@ -828,7 +830,8 @@ fun KeyframeSheetScreen(
                                                         sheetImages = imgs,
                                                         htmlCode = resolvedHtml,
                                                         issuesSummary = issuesText,
-                                                        durationSec = res.durationSec
+                                                        durationSec = res.durationSec,
+                                                        modelPref = modelPref
                                                     )
                                                     fixRes.onSuccess { fixedHtml ->
                                                         val validation = CodeValidator.validateFull(context, cacheManager, fixedHtml)

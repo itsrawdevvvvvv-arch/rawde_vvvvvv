@@ -4,16 +4,25 @@ import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.util.Base64
 import com.rawedit.app.data.local.LocalAssetEntity
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.JsonObject
 import org.json.JSONArray
 import org.json.JSONObject
 import java.io.ByteArrayOutputStream
 import java.io.File
+import java.io.InterruptedIOException
+import java.net.ConnectException
 import java.net.HttpURLConnection
+import java.net.SocketTimeoutException
 import java.net.URL
+import java.net.UnknownHostException
 import java.util.Locale
+import java.util.concurrent.ConcurrentHashMap
 import kotlin.random.Random
 
 data class SheetIssue(
@@ -28,7 +37,28 @@ data class SheetReviewResult(
     val issues: List<SheetIssue>
 )
 
+data class GeminiConnectionInfo(
+    val latencyMs: Long,
+    val modelUsed: String,
+    val usedFallback: Boolean,
+    val endpointLatencyMs: Long? = null
+)
+
+private class GeminiHttpException(
+    val httpCode: Int,
+    override val message: String
+) : IllegalStateException(message)
+
+private data class InteractionResult(
+    val text: String,
+    val modelUsed: String
+)
+
 object GeminiClient {
+
+    private const val COOLDOWN_MS = 4 * 60_000L
+
+    private val modelCooldownUntilMs = ConcurrentHashMap<String, Long>()
 
     private val PALETTE_THEMES = listOf(
         "brutalist swiss",
@@ -45,25 +75,80 @@ object GeminiClient {
         "warm ochre darkroom"
     )
 
-    suspend fun testConnection(apiKey: String): Result<Long> = withContext(Dispatchers.IO) {
-        runCatching {
+    fun activeCooledModels(nowMs: Long = System.currentTimeMillis()): Set<String> {
+        val expired = mutableListOf<String>()
+        val active = HashSet<String>()
+        for ((model, until) in modelCooldownUntilMs) {
+            if (until > nowMs) {
+                active.add(model)
+            } else {
+                expired.add(model)
+            }
+        }
+        expired.forEach { modelCooldownUntilMs.remove(it) }
+        return active
+    }
+
+    fun clearModelCooldowns() {
+        modelCooldownUntilMs.clear()
+    }
+
+    suspend fun testConnection(
+        apiKey: String,
+        modelPref: String = GeminiInteractionsCodec.PREF_AUTO
+    ): Result<Long> {
+        return testConnectionDetailed(apiKey = apiKey, modelPref = modelPref).map { it.latencyMs }
+    }
+
+    suspend fun testConnectionDetailed(
+        apiKey: String,
+        modelPref: String = GeminiInteractionsCodec.PREF_AUTO
+    ): Result<GeminiConnectionInfo> = withContext(Dispatchers.IO) {
+        try {
+            val cleanKey = GeminiInteractionsCodec.normalizeApiKey(apiKey)
+            if (cleanKey.isEmpty()) {
+                return@withContext Result.failure(IllegalStateException("Google AI Studio API key is missing."))
+            }
+
             val t0 = System.currentTimeMillis()
-            callInteraction(
-                apiKey = apiKey,
+            val endpointLatency = verifyEndpointAndKey(cleanKey)
+            val expectedPrimary = GeminiInteractionsCodec.buildCandidateModels(
+                modelPref = modelPref,
+                heavyTask = false
+            ).first()
+
+            val probeRes = callInteractionWithFallback(
+                apiKey = cleanKey,
+                modelPref = modelPref,
                 prompt = "Reply with the single word READY.",
-                thinkingLevel = "low",
+                requestedThinkingLevel = "minimal",
+                heavyTask = false,
                 systemInstruction = "Output only the word READY."
             )
-            (System.currentTimeMillis() - t0).coerceAtLeast(1L)
+
+            val totalMs = (System.currentTimeMillis() - t0).coerceAtLeast(1L)
+            Result.success(
+                GeminiConnectionInfo(
+                    latencyMs = totalMs,
+                    modelUsed = probeRes.modelUsed,
+                    usedFallback = probeRes.modelUsed != expectedPrimary,
+                    endpointLatencyMs = endpointLatency
+                )
+            )
+        } catch (ce: CancellationException) {
+            throw ce
+        } catch (t: Throwable) {
+            Result.failure(t)
         }
     }
 
     suspend fun generatePalette(
         apiKey: String,
         nextNumber: Int,
-        previousMood: String? = null
+        previousMood: String? = null,
+        modelPref: String = GeminiInteractionsCodec.PREF_AUTO
     ): Result<PaletteState> = withContext(Dispatchers.IO) {
-        runCatching {
+        try {
             val themeHint = PALETTE_THEMES[Random.nextInt(PALETTE_THEMES.size)]
             val seed = Random.nextInt(100_000, 999_999)
             val prevNote = previousMood?.takeIf { it.isNotBlank() }?.let { "Different from previous vibe: $it." } ?: ""
@@ -76,14 +161,16 @@ object GeminiClient {
                 - pairing: one concise sentence explaining background vs headline vs accent usage
             """.trimIndent()
 
-            val rawText = callInteraction(
+            val res = callInteractionWithFallback(
                 apiKey = apiKey,
+                modelPref = modelPref,
                 prompt = prompt,
-                thinkingLevel = "low",
+                requestedThinkingLevel = "minimal",
+                heavyTask = false,
                 systemInstruction = "You are a bold editorial color director. Always respond with valid JSON matching the schema.",
                 jsonSchema = GeminiInteractionsCodec.PALETTE_SCHEMA
             )
-            val obj = JSONObject(GeminiInteractionsCodec.stripJsonFences(rawText))
+            val obj = JSONObject(GeminiInteractionsCodec.stripJsonFences(res.text))
             val arr = obj.optJSONArray("colors")
                 ?: throw IllegalStateException("Gemini palette did not contain colors array.")
             val swatches = mutableListOf<PaletteSwatch>()
@@ -96,24 +183,31 @@ object GeminiClient {
             while (swatches.size < 3) {
                 swatches.add(PaletteState.DEFAULT_SWATCHES[swatches.size])
             }
-            PaletteState(
-                number = nextNumber.coerceAtLeast(1),
-                mood = obj.optString("mood", "Editorial Motion").trim().ifBlank { "Editorial Motion" },
-                pairing = obj.optString(
-                    "pairing",
-                    "Use 01 & 03 for clean contrast with 02 for kinetic highlight pills."
-                ).trim(),
-                colors = swatches
+            Result.success(
+                PaletteState(
+                    number = nextNumber.coerceAtLeast(1),
+                    mood = obj.optString("mood", "Editorial Motion").trim().ifBlank { "Editorial Motion" },
+                    pairing = obj.optString(
+                        "pairing",
+                        "Use 01 & 03 for clean contrast with 02 for kinetic highlight pills."
+                    ).trim(),
+                    colors = swatches
+                )
             )
+        } catch (ce: CancellationException) {
+            throw ce
+        } catch (t: Throwable) {
+            Result.failure(t)
         }
     }
 
     suspend fun describeAsset(
         apiKey: String,
         asset: LocalAssetEntity,
-        imageFile: File
+        imageFile: File,
+        modelPref: String = GeminiInteractionsCodec.PREF_AUTO
     ): Result<Pair<String, String>> = withContext(Dispatchers.IO) {
-        runCatching {
+        try {
             val (b64, mime) = encodeFileForVision(imageFile, maxDim = 960)
             val isWebShot = asset.description.contains("Interactive UI targets", ignoreCase = true)
             val prompt = when {
@@ -129,18 +223,24 @@ object GeminiClient {
                 }
             }
 
-            val rawText = callInteraction(
+            val res = callInteractionWithFallback(
                 apiKey = apiKey,
+                modelPref = modelPref,
                 prompt = prompt,
                 images = listOf(InteractionImageInput(base64Data = b64, mimeType = mime)),
-                thinkingLevel = "low",
+                requestedThinkingLevel = "minimal",
+                heavyTask = false,
                 systemInstruction = "Respond strictly with JSON matching the schema.",
                 jsonSchema = GeminiInteractionsCodec.DESCRIBE_ASSET_SCHEMA
             )
-            val obj = JSONObject(GeminiInteractionsCodec.stripJsonFences(rawText))
+            val obj = JSONObject(GeminiInteractionsCodec.stripJsonFences(res.text))
             val desc = obj.optString("description", asset.description).trim().ifBlank { asset.description }
             val safe = obj.optString("safeZone", asset.safeZone).trim().ifBlank { asset.safeZone }
-            desc to safe
+            Result.success(desc to safe)
+        } catch (ce: CancellationException) {
+            throw ce
+        } catch (t: Throwable) {
+            Result.failure(t)
         }
     }
 
@@ -150,9 +250,10 @@ object GeminiClient {
         currentTolerance: Int,
         currentPad: CutoutPadRatios,
         isSvgSource: Boolean,
-        keepOriginalMode: Boolean
+        keepOriginalMode: Boolean,
+        modelPref: String = GeminiInteractionsCodec.PREF_AUTO
     ): Result<CutoutAuditResult> = withContext(Dispatchers.IO) {
-        runCatching {
+        try {
             val (b64, mime) = encodeFileForVision(comparisonFile, maxDim = 1024)
             val padInfo = String.format(
                 Locale.US,
@@ -179,15 +280,17 @@ object GeminiClient {
                 - Set keepOriginal=true ONLY if background removal destroyed a complex UI card, photo, or non-transparent scene that looks better un-keyed.
             """.trimIndent()
 
-            val rawText = callInteraction(
+            val res = callInteractionWithFallback(
                 apiKey = apiKey,
+                modelPref = modelPref,
                 prompt = prompt,
                 images = listOf(InteractionImageInput(base64Data = b64, mimeType = mime)),
-                thinkingLevel = "low",
+                requestedThinkingLevel = "minimal",
+                heavyTask = false,
                 systemInstruction = "Respond strictly with JSON matching the schema.",
                 jsonSchema = GeminiInteractionsCodec.AUDIT_CUTOUT_SCHEMA
             )
-            val obj = JSONObject(GeminiInteractionsCodec.stripJsonFences(rawText))
+            val obj = JSONObject(GeminiInteractionsCodec.stripJsonFences(res.text))
             val statusRaw = obj.optString("status", "OK").trim().uppercase(Locale.US)
             val keepOrig = obj.optBoolean("keepOriginal", false)
             val recTol = if (isSvgSource) {
@@ -203,19 +306,25 @@ object GeminiClient {
                 (!isSvgSource && recTol != currentTolerance) ||
                 exT > 0.01f || exR > 0.01f || exB > 0.01f || exL > 0.01f
 
-            CutoutAuditResult(
-                status = if (statusRaw == "ADJUST" || hasDelta) "ADJUST" else "OK",
-                diagnosis = obj.optString("diagnosis", "Cutout edges and interior details verified by Gemini.")
-                    .trim()
-                    .ifBlank { "Cutout verified by Gemini." },
-                keepOriginal = keepOrig,
-                recommendedTolerance = recTol,
-                extraPadTop = exT,
-                extraPadRight = exR,
-                extraPadBottom = exB,
-                extraPadLeft = exL,
-                needsReprocess = hasDelta
+            Result.success(
+                CutoutAuditResult(
+                    status = if (statusRaw == "ADJUST" || hasDelta) "ADJUST" else "OK",
+                    diagnosis = obj.optString("diagnosis", "Cutout edges and interior details verified by Gemini.")
+                        .trim()
+                        .ifBlank { "Cutout verified by Gemini." },
+                    keepOriginal = keepOrig,
+                    recommendedTolerance = recTol,
+                    extraPadTop = exT,
+                    extraPadRight = exR,
+                    extraPadBottom = exB,
+                    extraPadLeft = exL,
+                    needsReprocess = hasDelta
+                )
             )
+        } catch (ce: CancellationException) {
+            throw ce
+        } catch (t: Throwable) {
+            Result.failure(t)
         }
     }
 
@@ -223,9 +332,10 @@ object GeminiClient {
         apiKey: String,
         sheetImages: List<File>,
         htmlCode: String,
-        frameCount: Int
+        frameCount: Int,
+        modelPref: String = GeminiInteractionsCodec.PREF_AUTO
     ): Result<SheetReviewResult> = withContext(Dispatchers.IO) {
-        runCatching {
+        try {
             val prompt = """
                 You are inspecting a rendered video contact sheet covering $frameCount frames for a 1920x1080 kinetic typography reel.
                 Inspect every frame (#01 to #$frameCount) for: clipped/overflowing text outside 90% safe margins, overlapping text & cards, unreadable low contrast, blank scenes, or out-of-bounds elements.
@@ -242,15 +352,17 @@ object GeminiClient {
                 val (b64, mime) = encodeFileForVision(file, maxDim = 1400)
                 InteractionImageInput(base64Data = b64, mimeType = mime)
             }
-            val rawText = callInteraction(
+            val res = callInteractionWithFallback(
                 apiKey = apiKey,
+                modelPref = modelPref,
                 prompt = prompt,
                 images = encodedImages,
-                thinkingLevel = "medium",
+                requestedThinkingLevel = "medium",
+                heavyTask = true,
                 systemInstruction = "Respond strictly with JSON matching the schema.",
                 jsonSchema = GeminiInteractionsCodec.REVIEW_SHEET_SCHEMA
             )
-            val obj = JSONObject(GeminiInteractionsCodec.stripJsonFences(rawText))
+            val obj = JSONObject(GeminiInteractionsCodec.stripJsonFences(res.text))
             val summary = obj.optString("summary", "Gemini frame inspection finished.").trim()
             val arr = obj.optJSONArray("issues") ?: JSONArray()
             val issues = mutableListOf<SheetIssue>()
@@ -265,7 +377,11 @@ object GeminiClient {
                     )
                 )
             }
-            SheetReviewResult(summary = summary, issues = issues)
+            Result.success(SheetReviewResult(summary = summary, issues = issues))
+        } catch (ce: CancellationException) {
+            throw ce
+        } catch (t: Throwable) {
+            Result.failure(t)
         }
     }
 
@@ -274,9 +390,10 @@ object GeminiClient {
         sheetImages: List<File>,
         htmlCode: String,
         issuesSummary: String,
-        durationSec: Double
+        durationSec: Double,
+        modelPref: String = GeminiInteractionsCodec.PREF_AUTO
     ): Result<String> = withContext(Dispatchers.IO) {
-        runCatching {
+        try {
             val durStr = String.format(Locale.US, "%.2f", durationSec)
             val prompt = """
                 Fix all visual overflow, overlapping, clipping, contrast, and timing glitches shown on the attached contact sheet images while keeping working scenes untouched.
@@ -299,41 +416,247 @@ object GeminiClient {
                 val (b64, mime) = encodeFileForVision(file, maxDim = 1400)
                 InteractionImageInput(base64Data = b64, mimeType = mime)
             }
-            val rawText = callInteraction(
+            val res = callInteractionWithFallback(
                 apiKey = apiKey,
+                modelPref = modelPref,
                 prompt = prompt,
                 images = encodedImages,
-                thinkingLevel = "medium",
+                requestedThinkingLevel = "medium",
+                heavyTask = true,
                 systemInstruction = "Output only a complete, valid self-contained HTML document from <!DOCTYPE html> to </html> with no markdown fences or explanation."
             )
-            CodeValidator.unwrapMarkdownFences(rawText)
+            Result.success(CodeValidator.unwrapMarkdownFences(res.text))
+        } catch (ce: CancellationException) {
+            throw ce
+        } catch (t: Throwable) {
+            Result.failure(t)
         }
     }
 
-    private fun callInteraction(
+    private suspend fun verifyEndpointAndKey(cleanKey: String): Long? {
+        var lastError: Throwable? = null
+        for (attempt in 0 until 2) {
+            currentCoroutineContext().ensureActive()
+            val t0 = System.currentTimeMillis()
+            val endpoint = URL(GeminiInteractionsCodec.MODELS_CHECK_URL)
+            val conn = (endpoint.openConnection() as HttpURLConnection).apply {
+                requestMethod = "GET"
+                connectTimeout = 8_000
+                readTimeout = 8_000
+                setRequestProperty("x-goog-api-key", cleanKey)
+            }
+            try {
+                val code = conn.responseCode
+                val stream = if (code in 200..299) conn.inputStream else conn.errorStream
+                val body = stream?.bufferedReader(Charsets.UTF_8)?.use { it.readText() }.orEmpty()
+                if (code in 200..299) {
+                    return (System.currentTimeMillis() - t0).coerceAtLeast(1L)
+                }
+                val errMsg = GeminiInteractionsCodec.extractErrorMessage(body, code)
+                val cat = GeminiInteractionsCodec.classifyFailure(httpCode = code, rawMessage = errMsg)
+                if (cat == GeminiFailureCategory.FATAL_CLIENT) {
+                    throw IllegalStateException(errMsg)
+                }
+                // Transient 5xx/429 on models.list: continue into fallback interaction probes
+                return null
+            } catch (ce: CancellationException) {
+                throw ce
+            } catch (t: UnknownHostException) {
+                throw IllegalStateException(
+                    "Cannot reach generativelanguage.googleapis.com (DNS lookup failed). Check internet connection or disable VPN / Private DNS, then retry.",
+                    t
+                )
+            } catch (t: SocketTimeoutException) {
+                lastError = t
+            } catch (t: ConnectException) {
+                lastError = t
+            } catch (t: InterruptedIOException) {
+                lastError = t
+            } finally {
+                conn.disconnect()
+            }
+            if (attempt == 0) {
+                delay(450L)
+            }
+        }
+        if (lastError != null) {
+            throw IllegalStateException(
+                "Connection to Google AI (generativelanguage.googleapis.com) timed out before reaching Gemini models. Try switching Wi-Fi <-> 4G/5G or disabling VPN / Private DNS.",
+                lastError
+            )
+        }
+        return null
+    }
+
+    private suspend fun callInteractionWithFallback(
         apiKey: String,
+        modelPref: String,
         prompt: String,
         images: List<InteractionImageInput> = emptyList(),
-        thinkingLevel: String = "medium",
+        requestedThinkingLevel: String = "medium",
+        heavyTask: Boolean = false,
         systemInstruction: String? = null,
         jsonSchema: JsonObject? = null
-    ): String {
+    ): InteractionResult {
         val cleanKey = GeminiInteractionsCodec.normalizeApiKey(apiKey)
         if (cleanKey.isEmpty()) throw IllegalStateException("Google AI Studio API key is missing.")
 
+        val candidates = GeminiInteractionsCodec.buildCandidateModels(
+            modelPref = modelPref,
+            heavyTask = heavyTask,
+            cooledDownModels = activeCooledModels()
+        )
+        val attemptedModels = mutableListOf<String>()
+        var sawAnyHttpResponse = false
+        var lastCategory = GeminiFailureCategory.TRANSIENT_SERVER
+        var lastRawMessage = ""
+        var lastCause: Throwable? = null
+
+        for ((index, model) in candidates.withIndex()) {
+            currentCoroutineContext().ensureActive()
+            attemptedModels.add(model)
+
+            val connectTimeoutMs = if (heavyTask) 11_000 else 9_000
+            val readTimeoutMs = when {
+                heavyTask -> 42_000
+                index == 0 -> 14_000
+                else -> 18_000
+            }
+
+            try {
+                val text = callSingleInteraction(
+                    cleanKey = cleanKey,
+                    model = model,
+                    prompt = prompt,
+                    images = images,
+                    requestedThinkingLevel = requestedThinkingLevel,
+                    systemInstruction = systemInstruction,
+                    jsonSchema = jsonSchema,
+                    connectTimeoutMs = connectTimeoutMs,
+                    readTimeoutMs = readTimeoutMs
+                )
+                modelCooldownUntilMs.remove(model)
+                return InteractionResult(text = text, modelUsed = model)
+            } catch (ce: CancellationException) {
+                throw ce
+            } catch (t: UnknownHostException) {
+                throw IllegalStateException(
+                    "Cannot reach generativelanguage.googleapis.com (DNS lookup failed). Check internet connection or VPN/Private DNS and retry.",
+                    t
+                )
+            } catch (t: Throwable) {
+                lastCause = t
+                val httpCode = (t as? GeminiHttpException)?.httpCode
+                if (httpCode != null) {
+                    sawAnyHttpResponse = true
+                }
+                val isTimeout = t is SocketTimeoutException ||
+                    (t is InterruptedIOException && (t.message ?: "").contains("time", ignoreCase = true))
+                val isConnectErr = t is ConnectException
+                val rawMsg = (t.message ?: t.javaClass.simpleName).trim()
+                val category = GeminiInteractionsCodec.classifyFailure(
+                    httpCode = httpCode,
+                    rawMessage = rawMsg,
+                    isTimeout = isTimeout,
+                    isDnsOrConnectError = isConnectErr
+                )
+                lastCategory = category
+                lastRawMessage = rawMsg
+
+                if (category == GeminiFailureCategory.FATAL_CLIENT) {
+                    throw IllegalStateException(
+                        GeminiInteractionsCodec.buildFriendlyErrorMessage(
+                            lastCategory = category,
+                            lastRawMessage = rawMsg,
+                            attemptedModels = attemptedModels,
+                            sawAnyHttpResponse = sawAnyHttpResponse
+                        ),
+                        t
+                    )
+                }
+
+                // Mark model as temporarily congested so subsequent calls skip it automatically
+                modelCooldownUntilMs[model] = System.currentTimeMillis() + COOLDOWN_MS
+
+                if (index < candidates.lastIndex) {
+                    delay(Random.nextLong(220L, 480L))
+                }
+            }
+        }
+
+        // If every model returned HTTP traffic overload (never dead network), do one brief retry on lowest-latency Flash-Lite
+        if (sawAnyHttpResponse &&
+            (lastCategory == GeminiFailureCategory.RATE_OR_OVERLOAD || lastCategory == GeminiFailureCategory.TRANSIENT_SERVER)
+        ) {
+            currentCoroutineContext().ensureActive()
+            delay(Random.nextLong(900L, 1_400L))
+            val backupModel = GeminiInteractionsCodec.MODEL_LITE_FAST
+            attemptedModels.add(backupModel)
+            try {
+                val text = callSingleInteraction(
+                    cleanKey = cleanKey,
+                    model = backupModel,
+                    prompt = prompt,
+                    images = images,
+                    requestedThinkingLevel = if (heavyTask) "low" else "minimal",
+                    systemInstruction = systemInstruction,
+                    jsonSchema = jsonSchema,
+                    connectTimeoutMs = if (heavyTask) 11_000 else 9_000,
+                    readTimeoutMs = if (heavyTask) 42_000 else 18_000
+                )
+                modelCooldownUntilMs.remove(backupModel)
+                return InteractionResult(text = text, modelUsed = backupModel)
+            } catch (ce: CancellationException) {
+                throw ce
+            } catch (t: Throwable) {
+                lastCause = t
+                val httpCode = (t as? GeminiHttpException)?.httpCode
+                val isTimeout = t is SocketTimeoutException
+                val rawMsg = (t.message ?: t.javaClass.simpleName).trim()
+                lastCategory = GeminiInteractionsCodec.classifyFailure(
+                    httpCode = httpCode,
+                    rawMessage = rawMsg,
+                    isTimeout = isTimeout,
+                    isDnsOrConnectError = t is ConnectException
+                )
+                lastRawMessage = rawMsg
+            }
+        }
+
+        val friendly = GeminiInteractionsCodec.buildFriendlyErrorMessage(
+            lastCategory = lastCategory,
+            lastRawMessage = lastRawMessage,
+            attemptedModels = attemptedModels,
+            sawAnyHttpResponse = sawAnyHttpResponse
+        )
+        throw IllegalStateException(friendly, lastCause)
+    }
+
+    private fun callSingleInteraction(
+        cleanKey: String,
+        model: String,
+        prompt: String,
+        images: List<InteractionImageInput>,
+        requestedThinkingLevel: String,
+        systemInstruction: String?,
+        jsonSchema: JsonObject?,
+        connectTimeoutMs: Int,
+        readTimeoutMs: Int
+    ): String {
         val payload = GeminiInteractionsCodec.buildRequestJson(
             prompt = prompt,
             images = images,
-            thinkingLevel = thinkingLevel,
+            thinkingLevel = requestedThinkingLevel,
             systemInstruction = systemInstruction,
-            jsonSchema = jsonSchema
+            jsonSchema = jsonSchema,
+            model = model
         )
 
         val endpoint = URL(GeminiInteractionsCodec.INTERACTIONS_URL)
         val conn = (endpoint.openConnection() as HttpURLConnection).apply {
             requestMethod = "POST"
-            connectTimeout = 15_000
-            readTimeout = 60_000
+            connectTimeout = connectTimeoutMs
+            readTimeout = readTimeoutMs
             doOutput = true
             setRequestProperty("Content-Type", "application/json; charset=UTF-8")
             setRequestProperty("x-goog-api-key", cleanKey)
@@ -348,7 +671,7 @@ object GeminiClient {
             val body = stream?.bufferedReader(Charsets.UTF_8)?.use { it.readText() }.orEmpty()
 
             if (code !in 200..299) {
-                throw IllegalStateException(GeminiInteractionsCodec.extractErrorMessage(body, code))
+                throw GeminiHttpException(code, GeminiInteractionsCodec.extractErrorMessage(body, code))
             }
 
             return GeminiInteractionsCodec.extractResponseText(body)

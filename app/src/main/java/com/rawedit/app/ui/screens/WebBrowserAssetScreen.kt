@@ -159,6 +159,7 @@ private const val DESKTOP_USER_AGENT =
 @Composable
 fun WebBrowserAssetScreen(
     apiKey: String,
+    modelPref: String,
     onBack: () -> Unit,
     onSaveCapturedBitmap: (
         bitmap: Bitmap,
@@ -1191,6 +1192,7 @@ fun WebBrowserAssetScreen(
         CutoutStudioDialog(
             input = target,
             apiKey = apiKey,
+            modelPref = modelPref,
             onOpenApiKey = onOpenApiKey,
             onDismiss = { cutoutTarget = null },
             onConfirmSave = { finalBmp, isCutout, name, desc, safe ->

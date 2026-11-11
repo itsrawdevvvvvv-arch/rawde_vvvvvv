@@ -5,6 +5,7 @@ import android.net.Uri
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -22,6 +23,7 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -41,6 +43,7 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import com.rawedit.app.domain.GeminiClient
+import com.rawedit.app.domain.GeminiInteractionsCodec
 import com.rawedit.app.ui.components.BigPrimaryButton
 import com.rawedit.app.ui.components.CircleActionButton
 import com.rawedit.app.ui.components.RawSecondaryButton
@@ -52,25 +55,43 @@ import com.rawedit.app.ui.theme.BricolageFamily
 import com.rawedit.app.ui.theme.JetBrainsMonoFamily
 import com.rawedit.app.ui.theme.RawColors
 import com.rawedit.app.ui.theme.RawTypography
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
 
 @Composable
 fun GeminiApiKeyDialog(
     currentKey: String,
-    onSaveKey: (String) -> Unit,
+    currentModelPref: String,
+    onSaveKey: (String, String) -> Unit,
     onDismiss: () -> Unit
 ) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
 
     var keyDraft by remember(currentKey) { mutableStateOf(currentKey) }
+    var modelPrefDraft by remember(currentModelPref) {
+        mutableStateOf(GeminiInteractionsCodec.normalizeModelPref(currentModelPref))
+    }
     var showKey by remember { mutableStateOf(false) }
     var testing by remember { mutableStateOf(false) }
+    var activeTestJob by remember { mutableStateOf<Job?>(null) }
     var testMessage by remember { mutableStateOf<String?>(null) }
     var testOk by remember { mutableStateOf(false) }
 
+    val selectedOption = remember(modelPrefDraft) {
+        GeminiInteractionsCodec.optionForPref(modelPrefDraft)
+    }
+
+    DisposableEffect(Unit) {
+        onDispose { activeTestJob?.cancel() }
+    }
+
     Dialog(
-        onDismissRequest = onDismiss,
+        onDismissRequest = {
+            activeTestJob?.cancel()
+            onDismiss()
+        },
         properties = DialogProperties(usePlatformDefaultWidth = false)
     ) {
         Column(
@@ -101,7 +122,7 @@ fun GeminiApiKeyDialog(
                             .padding(horizontal = 10.dp, vertical = 4.dp)
                     ) {
                         Text(
-                            text = "GEMINI 3.8 FLASH",
+                            text = selectedOption.badgeLabel,
                             fontFamily = JetBrainsMonoFamily,
                             fontWeight = FontWeight.Bold,
                             fontSize = 11.sp,
@@ -112,7 +133,10 @@ fun GeminiApiKeyDialog(
                 CircleActionButton(
                     icon = RawIconType.CLOSE,
                     size = 34.dp,
-                    onClick = onDismiss
+                    onClick = {
+                        activeTestJob?.cancel()
+                        onDismiss()
+                    }
                 )
             }
 
@@ -127,8 +151,8 @@ fun GeminiApiKeyDialog(
             )
 
             Text(
-                text = "Used only when you trigger Palette generation, Asset auto-description, or Contact Sheet AI review. Stored locally on your phone.",
-                style = RawTypography.bodyMedium.copy(fontSize = 14.5.sp, lineHeight = 20.5.sp),
+                text = "Used only when you trigger Palette generation, Asset auto-description, Cutout check, or Contact Sheet AI review. Stored locally on your phone.",
+                style = RawTypography.bodyMedium.copy(fontSize = 14.sp, lineHeight = 20.sp),
                 color = RawColors.TextMuted
             )
 
@@ -206,9 +230,77 @@ fun GeminiApiKeyDialog(
                 modifier = Modifier.fillMaxWidth()
             )
 
+            Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        text = "MODEL ROUTE",
+                        fontFamily = JetBrainsMonoFamily,
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 11.sp,
+                        color = RawColors.TextMuted
+                    )
+                    Text(
+                        text = "Anti-timeout fallback",
+                        fontFamily = JetBrainsMonoFamily,
+                        fontWeight = FontWeight.Medium,
+                        fontSize = 11.sp,
+                        color = RawColors.Tan
+                    )
+                }
+
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .horizontalScroll(rememberScrollState()),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    GeminiInteractionsCodec.MODEL_OPTIONS.forEach { opt ->
+                        val selected = modelPrefDraft == opt.prefId
+                        Box(
+                            modifier = Modifier
+                                .clip(CircleShape)
+                                .background(if (selected) RawColors.Tan else RawColors.RaisedCard)
+                                .border(
+                                    width = 1.dp,
+                                    color = if (selected) RawColors.Tan else RawColors.Divider,
+                                    shape = CircleShape
+                                )
+                                .clickable(enabled = !testing) {
+                                    modelPrefDraft = opt.prefId
+                                    testMessage = null
+                                    GeminiClient.clearModelCooldowns()
+                                }
+                                .padding(horizontal = 12.dp, vertical = 7.dp)
+                        ) {
+                            Text(
+                                text = opt.shortLabel,
+                                fontFamily = BricolageFamily,
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 12.5.sp,
+                                color = if (selected) RawColors.Ink else RawColors.TextPrimary,
+                                maxLines = 1,
+                                softWrap = false
+                            )
+                        }
+                    }
+                }
+
+                Text(
+                    text = selectedOption.detail,
+                    fontFamily = BricolageFamily,
+                    fontSize = 12.sp,
+                    lineHeight = 16.5.sp,
+                    color = RawColors.TextMuted
+                )
+            }
+
             Row(
                 modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(12.dp),
+                horizontalArrangement = Arrangement.spacedBy(10.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 RawSecondaryButton(
@@ -218,30 +310,66 @@ fun GeminiApiKeyDialog(
                     enabled = !testing && keyDraft.trim().isNotEmpty(),
                     fillWidth = false,
                     onClick = {
+                        activeTestJob?.cancel()
                         testing = true
                         testMessage = null
                         val clean = keyDraft.trim()
-                        scope.launch {
-                            val res = GeminiClient.testConnection(clean)
-                            testing = false
-                            res.onSuccess { ms ->
-                                testOk = true
-                                testMessage = "Connected (${ms} ms)  \u2022  gemini-3.8-flash"
-                            }.onFailure { err ->
-                                testOk = false
-                                testMessage = err.message ?: "Connection failed"
+                        val pref = modelPrefDraft
+                        GeminiClient.clearModelCooldowns()
+                        activeTestJob = scope.launch {
+                            try {
+                                val res = GeminiClient.testConnectionDetailed(clean, pref)
+                                testing = false
+                                res.onSuccess { info ->
+                                    testOk = true
+                                    val fallbackNote = if (info.usedFallback) {
+                                        "\nAuto-switched around busy primary model."
+                                    } else {
+                                        ""
+                                    }
+                                    testMessage = "Connected (${info.latencyMs} ms)  \u2022  ${info.modelUsed}$fallbackNote"
+                                }.onFailure { err ->
+                                    testOk = false
+                                    testMessage = err.message ?: "Connection failed"
+                                }
+                            } catch (ce: CancellationException) {
+                                testing = false
+                                throw ce
                             }
                         }
                     }
                 )
-                Text(
-                    text = if (testing) "Checking endpoint..." else "Interactions API",
-                    fontFamily = JetBrainsMonoFamily,
-                    fontWeight = FontWeight.Medium,
-                    fontSize = 11.5.sp,
-                    color = RawColors.TextMuted,
-                    maxLines = 1
-                )
+                if (testing) {
+                    Box(
+                        modifier = Modifier
+                            .clip(CircleShape)
+                            .background(RawColors.ErrorSoft)
+                            .clickable {
+                                activeTestJob?.cancel()
+                                testing = false
+                                testOk = false
+                                testMessage = "Connection test stopped."
+                            }
+                            .padding(horizontal = 11.dp, vertical = 6.dp)
+                    ) {
+                        Text(
+                            text = "Stop",
+                            fontFamily = JetBrainsMonoFamily,
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 11.5.sp,
+                            color = RawColors.ErrorCoral
+                        )
+                    }
+                } else {
+                    Text(
+                        text = "Interactions API",
+                        fontFamily = JetBrainsMonoFamily,
+                        fontWeight = FontWeight.Medium,
+                        fontSize = 11.5.sp,
+                        color = RawColors.TextMuted,
+                        maxLines = 1
+                    )
+                }
             }
 
             testMessage?.let { msg ->
@@ -280,14 +408,20 @@ fun GeminiApiKeyDialog(
                         text = "Remove",
                         height = 50.dp,
                         isDanger = true,
-                        onClick = { onSaveKey("") },
+                        onClick = {
+                            activeTestJob?.cancel()
+                            onSaveKey("", modelPrefDraft)
+                        },
                         modifier = Modifier.weight(1f)
                     )
                 } else {
                     RawSecondaryButton(
                         text = "Cancel",
                         height = 50.dp,
-                        onClick = onDismiss,
+                        onClick = {
+                            activeTestJob?.cancel()
+                            onDismiss()
+                        },
                         modifier = Modifier.weight(1f)
                     )
                 }
@@ -295,7 +429,10 @@ fun GeminiApiKeyDialog(
                     text = "Save",
                     height = 50.dp,
                     enabled = !testing,
-                    onClick = { onSaveKey(keyDraft.trim()) },
+                    onClick = {
+                        activeTestJob?.cancel()
+                        onSaveKey(keyDraft.trim(), modelPrefDraft)
+                    },
                     modifier = Modifier.weight(1f)
                 )
             }

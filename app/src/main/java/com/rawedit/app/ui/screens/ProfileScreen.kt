@@ -71,6 +71,7 @@ import com.rawedit.app.BuildConfig
 import com.rawedit.app.data.CacheManager
 import com.rawedit.app.data.local.UserProfile
 import com.rawedit.app.data.local.VideoEntity
+import com.rawedit.app.domain.GeminiInteractionsCodec
 import com.rawedit.app.ui.components.BigPrimaryButton
 import com.rawedit.app.ui.components.CircleActionButton
 import com.rawedit.app.ui.components.CircleAvatarCropperDialog
@@ -526,11 +527,12 @@ fun ProfileScreen(
             item {
                 Spacer(modifier = Modifier.height(4.dp))
                 val hasKey = userProfile.geminiApiKey.isNotBlank()
+                val routeLabel = GeminiInteractionsCodec.routeDisplayLabel(userProfile.geminiModelPref)
                 val keySubtitle = if (hasKey) {
                     val tail = userProfile.geminiApiKey.takeLast(4)
-                    "Saved (\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022$tail)  \u2022  Gemini 3.8 Flash"
+                    "Saved (\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022$tail)  \u2022  $routeLabel"
                 } else {
-                    "Not set  \u2022  optional for Gemini features"
+                    "Not set  \u2022  $routeLabel  \u2022  optional"
                 }
                 Row(
                     modifier = Modifier

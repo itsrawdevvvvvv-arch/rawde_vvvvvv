@@ -6,6 +6,7 @@ import com.rawedit.app.domain.CodeValidator
 import com.rawedit.app.domain.CutoutAuditMath
 import com.rawedit.app.domain.CutoutAuditResult
 import com.rawedit.app.domain.CutoutPadRatios
+import com.rawedit.app.domain.GeminiFailureCategory
 import com.rawedit.app.domain.GeminiInteractionsCodec
 import com.rawedit.app.domain.InteractionImageInput
 import com.rawedit.app.domain.KeyframeSample
@@ -362,7 +363,9 @@ Enjoy!
     @Test
     fun geminiInteractionsCodecBuildsCompliant38FlashPayloadsAndParsesSteps() {
         assertEquals("gemini-3.8-flash", GeminiInteractionsCodec.MODEL_ID)
-        assertEquals("medium", GeminiInteractionsCodec.normalizeThinkingLevel("minimal"))
+        assertEquals("low", GeminiInteractionsCodec.normalizeThinkingLevel("minimal"))
+        assertEquals("minimal", GeminiInteractionsCodec.normalizeThinkingLevelForModel("minimal", "gemini-3.6-flash"))
+        assertEquals("minimal", GeminiInteractionsCodec.normalizeThinkingLevelForModel("minimal", "gemini-3.5-flash-lite"))
         assertEquals("low", GeminiInteractionsCodec.normalizeThinkingLevel("LOW"))
         assertEquals("AIzaTestKey123", GeminiInteractionsCodec.normalizeApiKey("  \"AIzaTest\nKey123\" "))
 
@@ -374,7 +377,7 @@ Enjoy!
             jsonSchema = GeminiInteractionsCodec.PALETTE_SCHEMA
         )
         assertTrue(payload.contains("\"model\":\"gemini-3.8-flash\""))
-        assertTrue(payload.contains("\"thinking_level\":\"medium\""))
+        assertTrue(payload.contains("\"thinking_level\":\"low\""))
         assertTrue(payload.contains("\"type\":\"image\""))
         assertTrue(payload.contains("\"mime_type\":\"image/jpeg\""))
         assertTrue(payload.contains("\"response_format\":{"))
@@ -406,5 +409,80 @@ Enjoy!
 
         val errorBody = """{"error":{"code":400,"message":"API key not valid."}}"""
         assertEquals("API key not valid.", GeminiInteractionsCodec.extractErrorMessage(errorBody, 400))
+    }
+
+    @Test
+    fun geminiCodecRoutesFallbackChainsAndClassifiesTrafficTimeouts() {
+        assertEquals("auto", GeminiInteractionsCodec.normalizeModelPref(""))
+        assertEquals("auto", GeminiInteractionsCodec.normalizeModelPref("unknown-model"))
+        assertEquals("gemini-3.6-flash", GeminiInteractionsCodec.normalizeModelPref("gemini-3.6-flash"))
+
+        val lightAuto = GeminiInteractionsCodec.buildCandidateModels(
+            modelPref = GeminiInteractionsCodec.PREF_AUTO,
+            heavyTask = false
+        )
+        assertEquals(
+            listOf("gemini-3.6-flash", "gemini-3.5-flash-lite", "gemini-3.8-flash", "gemini-3.1-flash-lite"),
+            lightAuto
+        )
+
+        val heavyAuto = GeminiInteractionsCodec.buildCandidateModels(
+            modelPref = GeminiInteractionsCodec.PREF_AUTO,
+            heavyTask = true
+        )
+        assertEquals("gemini-3.8-flash", heavyAuto.first())
+        assertTrue(heavyAuto.contains("gemini-3.6-flash"))
+
+        // Auto mode shifts cooled-down congested models to the tail
+        val cooledAuto = GeminiInteractionsCodec.buildCandidateModels(
+            modelPref = GeminiInteractionsCodec.PREF_AUTO,
+            heavyTask = false,
+            cooledDownModels = setOf("gemini-3.6-flash")
+        )
+        assertEquals("gemini-3.5-flash-lite", cooledAuto.first())
+        assertEquals("gemini-3.6-flash", cooledAuto.last())
+
+        // Explicitly pinned preference stays first even if previously cooled down
+        val pinned = GeminiInteractionsCodec.buildCandidateModels(
+            modelPref = "gemini-3.8-flash",
+            heavyTask = false,
+            cooledDownModels = setOf("gemini-3.8-flash", "gemini-3.6-flash")
+        )
+        assertEquals("gemini-3.8-flash", pinned.first())
+        assertEquals("gemini-3.5-flash-lite", pinned[1])
+
+        assertEquals(
+            GeminiFailureCategory.RATE_OR_OVERLOAD,
+            GeminiInteractionsCodec.classifyFailure(503, "Model is experiencing high traffic right now")
+        )
+        assertEquals(
+            GeminiFailureCategory.RATE_OR_OVERLOAD,
+            GeminiInteractionsCodec.classifyFailure(429, "Quota exceeded")
+        )
+        assertEquals(
+            GeminiFailureCategory.NETWORK_TIMEOUT,
+            GeminiInteractionsCodec.classifyFailure(null, "Read timed out", isTimeout = true)
+        )
+        assertEquals(
+            GeminiFailureCategory.FATAL_CLIENT,
+            GeminiInteractionsCodec.classifyFailure(400, "API key not valid")
+        )
+
+        val offlineMsg = GeminiInteractionsCodec.buildFriendlyErrorMessage(
+            lastCategory = GeminiFailureCategory.NETWORK_TIMEOUT,
+            lastRawMessage = "Read timed out",
+            attemptedModels = listOf("gemini-3.6-flash", "gemini-3.5-flash-lite"),
+            sawAnyHttpResponse = false
+        )
+        assertTrue(offlineMsg.contains("Wi-Fi"))
+
+        val highTrafficMsg = GeminiInteractionsCodec.buildFriendlyErrorMessage(
+            lastCategory = GeminiFailureCategory.RATE_OR_OVERLOAD,
+            lastRawMessage = "high traffic",
+            attemptedModels = listOf("gemini-3.6-flash", "gemini-3.5-flash-lite"),
+            sawAnyHttpResponse = true
+        )
+        assertTrue(highTrafficMsg.contains("High traffic"))
+        assertTrue(highTrafficMsg.contains("3.5 Lite"))
     }
 }

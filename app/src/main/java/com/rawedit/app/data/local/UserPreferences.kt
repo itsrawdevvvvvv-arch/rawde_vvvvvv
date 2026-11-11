@@ -9,6 +9,7 @@ import androidx.datastore.preferences.core.intPreferencesKey
 import androidx.datastore.preferences.core.longPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
+import com.rawedit.app.domain.GeminiInteractionsCodec
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map
 
@@ -20,6 +21,7 @@ data class UserProfile(
     val onboardingDone: Boolean = false,
     val joinDateMillis: Long = System.currentTimeMillis(),
     val geminiApiKey: String = "",
+    val geminiModelPref: String = GeminiInteractionsCodec.PREF_AUTO,
     val paletteCounter: Int = 1,
     val paletteJson: String = ""
 )
@@ -32,6 +34,7 @@ class UserPreferences(private val context: Context) {
         val ONBOARDING_DONE = booleanPreferencesKey("onboarding_done")
         val JOIN_DATE = longPreferencesKey("join_date_millis")
         val GEMINI_API_KEY = stringPreferencesKey("gemini_api_key")
+        val GEMINI_MODEL_PREF = stringPreferencesKey("gemini_model_pref")
         val PALETTE_COUNTER = intPreferencesKey("palette_counter")
         val PALETTE_JSON = stringPreferencesKey("palette_json")
     }
@@ -43,6 +46,7 @@ class UserPreferences(private val context: Context) {
             onboardingDone = prefs[Keys.ONBOARDING_DONE] ?: false,
             joinDateMillis = prefs[Keys.JOIN_DATE] ?: 0L,
             geminiApiKey = prefs[Keys.GEMINI_API_KEY] ?: "",
+            geminiModelPref = GeminiInteractionsCodec.normalizeModelPref(prefs[Keys.GEMINI_MODEL_PREF] ?: ""),
             paletteCounter = (prefs[Keys.PALETTE_COUNTER] ?: 1).coerceAtLeast(1),
             paletteJson = prefs[Keys.PALETTE_JSON] ?: ""
         )
@@ -92,6 +96,19 @@ class UserPreferences(private val context: Context) {
             } else {
                 prefs[Keys.GEMINI_API_KEY] = cleaned
             }
+        }
+    }
+
+    suspend fun saveGeminiConfig(apiKey: String, modelPref: String) {
+        val cleaned = apiKey.trim()
+        val normalizedPref = GeminiInteractionsCodec.normalizeModelPref(modelPref)
+        context.dataStore.edit { prefs ->
+            if (cleaned.isEmpty()) {
+                prefs.remove(Keys.GEMINI_API_KEY)
+            } else {
+                prefs[Keys.GEMINI_API_KEY] = cleaned
+            }
+            prefs[Keys.GEMINI_MODEL_PREF] = normalizedPref
         }
     }
 

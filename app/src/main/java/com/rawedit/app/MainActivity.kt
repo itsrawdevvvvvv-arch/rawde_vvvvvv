@@ -232,9 +232,10 @@ private fun MainAuthenticatedHost(
                     val visionFile = container.cacheManager.getAssetFile(imp.fileName)
                     if (visionFile != null && visionFile.exists()) {
                         val descRes = GeminiClient.describeAsset(
-                            userProfile.geminiApiKey,
-                            entity.copy(id = newId),
-                            visionFile
+                            apiKey = userProfile.geminiApiKey,
+                            asset = entity.copy(id = newId),
+                            imageFile = visionFile,
+                            modelPref = userProfile.geminiModelPref
                         )
                         descRes.onSuccess { (desc, safe) ->
                             container.repository.updateAssetDescription(newId, desc, safe)
@@ -435,6 +436,7 @@ private fun MainAuthenticatedHost(
                             project = proj,
                             allAssets = allAssets,
                             apiKey = userProfile.geminiApiKey,
+                            modelPref = userProfile.geminiModelPref,
                             cacheManager = container.cacheManager,
                             onBack = ::popRoute,
                             onImportAsset = { uri, isVideo ->
@@ -464,9 +466,10 @@ private fun MainAuthenticatedHost(
                                             }
                                             if (visionFile != null && visionFile.exists()) {
                                                 val descRes = GeminiClient.describeAsset(
-                                                    userProfile.geminiApiKey,
-                                                    entity.copy(id = newId),
-                                                    visionFile
+                                                    apiKey = userProfile.geminiApiKey,
+                                                    asset = entity.copy(id = newId),
+                                                    imageFile = visionFile,
+                                                    modelPref = userProfile.geminiModelPref
                                                 )
                                                 descRes.onSuccess { (desc, safe) ->
                                                     container.repository.updateAssetDescription(newId, desc, safe)
@@ -510,6 +513,7 @@ private fun MainAuthenticatedHost(
                 is AppRoute.WebBrowser -> {
                     WebBrowserAssetScreen(
                         apiKey = userProfile.geminiApiKey,
+                        modelPref = userProfile.geminiModelPref,
                         onBack = ::popRoute,
                         onSaveCapturedBitmap = { bmp, isCutout, name, desc, safe ->
                             saveCapturedBitmapToLocker(route.projectId, bmp, isCutout, name, desc, safe)
@@ -575,6 +579,7 @@ private fun MainAuthenticatedHost(
                             project = proj,
                             cacheManager = container.cacheManager,
                             geminiApiKey = userProfile.geminiApiKey,
+                            modelPref = userProfile.geminiModelPref,
                             onBack = ::popRoute,
                             onEditCode = {
                                 if (backStack.getOrNull(backStack.lastIndex - 1) is AppRoute.CodePaste) {
@@ -684,11 +689,16 @@ private fun MainAuthenticatedHost(
     if (showApiKeyDialog) {
         GeminiApiKeyDialog(
             currentKey = userProfile.geminiApiKey,
-            onSaveKey = { key ->
+            currentModelPref = userProfile.geminiModelPref,
+            onSaveKey = { key, modelPref ->
                 scope.launch {
-                    container.userPreferences.saveGeminiApiKey(key)
+                    container.userPreferences.saveGeminiConfig(key, modelPref)
                     showApiKeyDialog = false
-                    hostToastMsg = if (key.isBlank()) "API key removed" else "Google AI Studio key saved"
+                    hostToastMsg = if (key.isBlank()) {
+                        "API key removed"
+                    } else {
+                        "Saved (${com.rawedit.app.domain.GeminiInteractionsCodec.optionForPref(modelPref).shortLabel})"
+                    }
                 }
             },
             onDismiss = { showApiKeyDialog = false }

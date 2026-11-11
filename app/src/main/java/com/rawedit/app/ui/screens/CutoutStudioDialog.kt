@@ -54,6 +54,7 @@ import com.rawedit.app.domain.CutoutAuditResult
 import com.rawedit.app.domain.CutoutPadRatios
 import com.rawedit.app.domain.CutoutProcessor
 import com.rawedit.app.domain.GeminiClient
+import com.rawedit.app.domain.GeminiInteractionsCodec
 import com.rawedit.app.ui.components.BigPrimaryButton
 import com.rawedit.app.ui.components.CircleActionButton
 import com.rawedit.app.ui.components.RawSecondaryButton
@@ -106,6 +107,7 @@ private val SVG_TINT_OPTIONS = listOf(
 fun CutoutStudioDialog(
     input: CutoutStudioInput,
     apiKey: String,
+    modelPref: String = GeminiInteractionsCodec.PREF_AUTO,
     onOpenApiKey: () -> Unit,
     onDismiss: () -> Unit,
     onConfirmSave: (
@@ -203,7 +205,8 @@ fun CutoutStudioDialog(
             currentTolerance = tolerance,
             currentPad = currentPad,
             isSvgSource = isSvg,
-            keepOriginalMode = keepOriginal
+            keepOriginalMode = keepOriginal,
+            modelPref = modelPref
         )
         runCatching { compareFile.delete() }
         res.onSuccess { audit ->

@@ -145,7 +145,8 @@ fun PaletteScreen(
             val res = GeminiClient.generatePalette(
                 apiKey = userProfile.geminiApiKey,
                 nextNumber = targetNumber,
-                previousMood = currentPalette.mood
+                previousMood = currentPalette.mood,
+                modelPref = userProfile.geminiModelPref
             )
             generating = false
             res.onSuccess { palette ->

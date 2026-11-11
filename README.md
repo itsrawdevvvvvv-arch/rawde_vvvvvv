@@ -4,7 +4,7 @@ On-device Android Studio app that turns a voiceover (and optional SRT subtitles)
 
 ## Features
 
-- **Offline On-Device Render Stage (Android 9.0+ / API 28+)**: The WebView render engine (`LocalAssetServer`) strictly blocks all external network loads (`blockNetworkLoads = true`), runs with bundled OFL fonts and local files, and requires zero server or ads. Optional **Google AI Studio (`gemini-3.8-flash` Interactions API)** integration uses the user's own API key solely on explicit tap for Studio Palettes, Asset Auto-Description, Cutout Verification, and Contact Sheet AI Review / Auto-Fix.
+- **Offline On-Device Render Stage (Android 9.0+ / API 28+)**: The WebView render engine (`LocalAssetServer`) strictly blocks all external network loads (`blockNetworkLoads = true`), runs with bundled OFL fonts and local files, and requires zero server or ads. Optional **Google AI Studio (`v1beta/interactions`)** integration uses the user's own API key solely on explicit tap with **Auto Smart Fallback** across `gemini-3.6-flash`, `gemini-3.5-flash-lite`, `gemini-3.8-flash`, and `gemini-3.1-flash-lite` (plus a per-model congestion cooldown & manual route selector in Key settings to bypass free-tier high traffic or timeouts).
 - **Warm Wallet UI & Zero-Lag Motion**: Dark obsidian `#0D0D0F` canvas with Cream (`#F7ECE6`), Tan (`#CAA07D`), `Bricolage Grotesque`, and `JetBrains Mono` typography, borderless `28.dp` wallet cards, `FeatheredScrollEdges`, slide-to-start Big Type Home screen, 5-tab navigation dock (`Home`, `Palette`, `Create`, `Reels`, `Profile`), and interactive Canvas pixel mascots (`TV_BOT`, `PEEKING_CAT`, `MIC_BOT`, `ZIP_BOT`, `CODE_BOT`, `LENS_BOT`, `PHANTOM_BUDDY`).
 - **Offline Asset Locker (`assets/` Interception + HTTP 206 Range Streaming)**: Import photos, transparent PNG cutouts (checkerboard preview), and MP4 video clips (with 3-frame storyboard strips). Intercepted cleanly offline under `assets/<filename>` via `LocalAssetServer`, including `206 Partial Content` byte-range streaming for `<video>` seeking.
 - **In-App Web Capture Browser & Icon Finder**: Built directly into the Asset Locker (`WebBrowserAssetScreen`) with Mobile/Desktop `1280px` viewport toggling so tutorial creators can log in, snap crisp UI screenshots (with automatic interactive DOM button/field coordinates mapped for cursor & highlight animations), extract page `<svg>`/`<img>` elements, and search open-source SVG icon sets via Iconify.
@@ -35,8 +35,8 @@ com.rawedit.app/
     CutoutMath.kt                # Pure-Kotlin SVG sanitizer/viewBox padding, flood-key math & UI coord formatter
     CutoutProcessor.kt           # Offline WebView SVG batch rasterizer, PNG cutout flood-keyer & comparison cards
     WebAssetFetcher.kt           # Iconify open-source SVG search & safe HTTP/data-URI media downloader
-    GeminiInteractionsCodec.kt   # Pure-Kotlin Interactions API request builder, JSON schemas & response parser
-    GeminiClient.kt              # Optional gemini-3.8-flash Interactions API client (palettes, vision notes, cutout edge audit, sheet fix)
+    GeminiInteractionsCodec.kt   # Pure-Kotlin Interactions API request builder, fallback routing, error classification & parser
+    GeminiClient.kt              # Resilient Interactions API client w/ auto-failover across 3.6 Flash, 3.5 Flash-Lite, 3.8 Flash & 3.1 Flash-Lite
     CodeValidator.kt             # Static checks + 20s network-blocked WebView dry-run + JS error capture
     KeyframeSheetGenerator.kt    # Pre-render timestamped keyframe capture, PDF/ZIP export, Gemini sheets & fix prompt
   render/

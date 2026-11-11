@@ -88,6 +88,7 @@ fun AssetLockerScreen(
     project: ProjectEntity,
     allAssets: List<LocalAssetEntity>,
     apiKey: String,
+    modelPref: String,
     cacheManager: CacheManager,
     onBack: () -> Unit,
     onImportAsset: (uri: Uri, isVideo: Boolean) -> Unit,
@@ -322,7 +323,12 @@ fun AssetLockerScreen(
                                         }
                                         describingAssetId = asset.id
                                         scope.launch {
-                                            val res = GeminiClient.describeAsset(apiKey, asset, imgFile)
+                                            val res = GeminiClient.describeAsset(
+                                                apiKey = apiKey,
+                                                asset = asset,
+                                                imageFile = imgFile,
+                                                modelPref = modelPref
+                                            )
                                             describingAssetId = null
                                             res.onSuccess { (desc, safe) ->
                                                 onUpdateAssetNotes(asset.id, desc, safe)
@@ -511,6 +517,7 @@ fun AssetLockerScreen(
         CutoutStudioDialog(
             input = target,
             apiKey = apiKey,
+            modelPref = modelPref,
             onOpenApiKey = onOpenApiKey,
             onDismiss = { cutoutStudioTarget = null },
             onConfirmSave = { finalBmp, isCutout, suggestedName, desc, safe ->
