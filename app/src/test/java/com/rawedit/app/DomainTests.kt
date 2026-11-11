@@ -6,6 +6,8 @@ import com.rawedit.app.domain.CodeValidator
 import com.rawedit.app.domain.CutoutAuditMath
 import com.rawedit.app.domain.CutoutAuditResult
 import com.rawedit.app.domain.CutoutPadRatios
+import com.rawedit.app.domain.GeminiInteractionsCodec
+import com.rawedit.app.domain.InteractionImageInput
 import com.rawedit.app.domain.KeyframeSample
 import com.rawedit.app.domain.KeyframeSheetGenerator
 import com.rawedit.app.domain.PaletteColorMath
@@ -355,5 +357,54 @@ Enjoy!
         )
         assertTrue(prompt.contains("Interactive UI targets (px)"))
         assertTrue(prompt.contains("cursor clicks"))
+    }
+
+    @Test
+    fun geminiInteractionsCodecBuildsCompliant38FlashPayloadsAndParsesSteps() {
+        assertEquals("gemini-3.8-flash", GeminiInteractionsCodec.MODEL_ID)
+        assertEquals("medium", GeminiInteractionsCodec.normalizeThinkingLevel("minimal"))
+        assertEquals("low", GeminiInteractionsCodec.normalizeThinkingLevel("LOW"))
+        assertEquals("AIzaTestKey123", GeminiInteractionsCodec.normalizeApiKey("  \"AIzaTest\nKey123\" "))
+
+        val payload = GeminiInteractionsCodec.buildRequestJson(
+            prompt = "Inspect image",
+            images = listOf(InteractionImageInput(base64Data = "AQID", mimeType = "image/jpeg")),
+            thinkingLevel = "minimal",
+            systemInstruction = "Return valid JSON",
+            jsonSchema = GeminiInteractionsCodec.PALETTE_SCHEMA
+        )
+        assertTrue(payload.contains("\"model\":\"gemini-3.8-flash\""))
+        assertTrue(payload.contains("\"thinking_level\":\"medium\""))
+        assertTrue(payload.contains("\"type\":\"image\""))
+        assertTrue(payload.contains("\"mime_type\":\"image/jpeg\""))
+        assertTrue(payload.contains("\"response_format\":{"))
+        assertTrue(payload.contains("\"mime_type\":\"application/json\""))
+        assertFalse(payload.contains("temperature"))
+        assertFalse(payload.contains("response_mime_type"))
+        assertFalse(payload.contains("inlineData"))
+
+        val stepsResponse = """
+            {
+              "id": "int_abc",
+              "model": "gemini-3.8-flash",
+              "status": "completed",
+              "steps": [
+                {
+                  "type": "thought",
+                  "summary": [{"type": "text", "text": "internal thought"}]
+                },
+                {
+                  "type": "model_output",
+                  "content": [
+                    {"type": "text", "text": "READY"}
+                  ]
+                }
+              ]
+            }
+        """.trimIndent()
+        assertEquals("READY", GeminiInteractionsCodec.extractResponseText(stepsResponse))
+
+        val errorBody = """{"error":{"code":400,"message":"API key not valid."}}"""
+        assertEquals("API key not valid.", GeminiInteractionsCodec.extractErrorMessage(errorBody, 400))
     }
 }

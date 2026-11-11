@@ -118,15 +118,16 @@ object SvgSanitizerAndPadding {
         val normalizedTint = tintHex?.trim()?.takeIf { it.matches(Regex("^#[0-9A-Fa-f]{6}$")) }
         if (normalizedTint != null) {
             cleaned = cleaned.replace("currentColor", normalizedTint, ignoreCase = true)
-            val openMatch = SVG_OPEN_REGEX.find(cleaned)
-            if (openMatch != null) {
+            cleaned = run {
+                val openMatch = SVG_OPEN_REGEX.find(cleaned)
+                if (openMatch == null) return@run cleaned
                 val tag = COLOR_ATTR_REGEX.replace(openMatch.value, "")
                 val rebuilt = if (tag.endsWith("/>")) {
                     tag.dropLast(2) + " color=\"$normalizedTint\" fill=\"$normalizedTint\" />"
                 } else {
                     tag.dropLast(1) + " color=\"$normalizedTint\">"
                 }
-                cleaned = cleaned.replaceRange(openMatch.range, rebuilt)
+                cleaned.replaceRange(openMatch.range, rebuilt)
             }
         }
         return cleaned.trim()

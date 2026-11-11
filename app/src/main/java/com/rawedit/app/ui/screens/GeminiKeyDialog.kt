@@ -3,6 +3,7 @@ package com.rawedit.app.ui.screens
 import android.content.Intent
 import android.net.Uri
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -100,7 +101,7 @@ fun GeminiApiKeyDialog(
                             .padding(horizontal = 10.dp, vertical = 4.dp)
                     ) {
                         Text(
-                            text = "GEMINI 2.0 FLASH",
+                            text = "GEMINI 3.8 FLASH",
                             fontFamily = JetBrainsMonoFamily,
                             fontWeight = FontWeight.Bold,
                             fontSize = 11.sp,
@@ -207,7 +208,7 @@ fun GeminiApiKeyDialog(
 
             Row(
                 modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(10.dp),
+                horizontalArrangement = Arrangement.spacedBy(12.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 RawSecondaryButton(
@@ -225,7 +226,7 @@ fun GeminiApiKeyDialog(
                             testing = false
                             res.onSuccess { ms ->
                                 testOk = true
-                                testMessage = "Connected (${ms} ms)"
+                                testMessage = "Connected (${ms} ms)  \u2022  gemini-3.8-flash"
                             }.onFailure { err ->
                                 testOk = false
                                 testMessage = err.message ?: "Connection failed"
@@ -233,14 +234,37 @@ fun GeminiApiKeyDialog(
                         }
                     }
                 )
-                testMessage?.let { msg ->
+                Text(
+                    text = if (testing) "Checking endpoint..." else "Interactions API",
+                    fontFamily = JetBrainsMonoFamily,
+                    fontWeight = FontWeight.Medium,
+                    fontSize = 11.5.sp,
+                    color = RawColors.TextMuted,
+                    maxLines = 1
+                )
+            }
+
+            testMessage?.let { msg ->
+                val shape = RoundedCornerShape(14.dp)
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(shape)
+                        .background(if (testOk) RawColors.AccentSoft else RawColors.ErrorSoft)
+                        .border(
+                            width = 1.dp,
+                            color = if (testOk) RawColors.AccentBorder else RawColors.ErrorBorder,
+                            shape = shape
+                        )
+                        .padding(horizontal = 14.dp, vertical = 10.dp)
+                ) {
                     Text(
                         text = msg,
                         fontFamily = JetBrainsMonoFamily,
                         fontWeight = FontWeight.Medium,
                         fontSize = 12.sp,
-                        color = if (testOk) RawColors.Tan else RawColors.ErrorCoral,
-                        modifier = Modifier.weight(1f)
+                        lineHeight = 17.sp,
+                        color = if (testOk) RawColors.Tan else RawColors.ErrorCoral
                     )
                 }
             }

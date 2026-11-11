@@ -528,7 +528,7 @@ fun ProfileScreen(
                 val hasKey = userProfile.geminiApiKey.isNotBlank()
                 val keySubtitle = if (hasKey) {
                     val tail = userProfile.geminiApiKey.takeLast(4)
-                    "Saved (\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022$tail)  \u2022  Gemini 2.0 Flash"
+                    "Saved (\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022$tail)  \u2022  Gemini 3.8 Flash"
                 } else {
                     "Not set  \u2022  optional for Gemini features"
                 }

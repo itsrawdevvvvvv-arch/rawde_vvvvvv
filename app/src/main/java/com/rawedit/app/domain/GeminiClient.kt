@@ -6,13 +6,13 @@ import android.util.Base64
 import com.rawedit.app.data.local.LocalAssetEntity
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import kotlinx.serialization.json.JsonObject
 import org.json.JSONArray
 import org.json.JSONObject
 import java.io.ByteArrayOutputStream
 import java.io.File
 import java.net.HttpURLConnection
 import java.net.URL
-import java.net.URLEncoder
 import java.util.Locale
 import kotlin.random.Random
 
@@ -29,8 +29,6 @@ data class SheetReviewResult(
 )
 
 object GeminiClient {
-
-    private const val MODEL_ID = "gemini-2.0-flash"
 
     private val PALETTE_THEMES = listOf(
         "brutalist swiss",
@@ -50,14 +48,11 @@ object GeminiClient {
     suspend fun testConnection(apiKey: String): Result<Long> = withContext(Dispatchers.IO) {
         runCatching {
             val t0 = System.currentTimeMillis()
-            val parts = JSONArray().apply {
-                put(JSONObject().put("text", "Reply with the single word READY"))
-            }
-            callGenerateContent(
+            callInteraction(
                 apiKey = apiKey,
-                parts = parts,
-                temperature = 0.0,
-                jsonMode = false
+                prompt = "Reply with the single word READY.",
+                thinkingLevel = "low",
+                systemInstruction = "Output only the word READY."
             )
             (System.currentTimeMillis() - t0).coerceAtLeast(1L)
         }
@@ -73,30 +68,22 @@ object GeminiClient {
             val seed = Random.nextInt(100_000, 999_999)
             val prevNote = previousMood?.takeIf { it.isNotBlank() }?.let { "Different from previous vibe: $it." } ?: ""
             val prompt = """
-                Generate a completely original, curated 3-color editorial palette for a kinetic-typography video edit (seed: $seed, direction: "$themeHint"). $prevNote
+                Generate a completely original, curated 3-color editorial palette for a kinetic-typography video edit (variation seed: $seed, aesthetic direction: "$themeHint"). $prevNote
                 Choose 3 distinct harmonious hex colors usable together as background, dominant display type, and accent. Avoid near-black muddy duplicates.
-                Return strict JSON only:
-                {
-                  "colors": [
-                    {"hex": "#XXXXXX", "name": "two word lowercase name"},
-                    {"hex": "#XXXXXX", "name": "two word lowercase name"},
-                    {"hex": "#XXXXXX", "name": "two word lowercase name"}
-                  ],
-                  "mood": "2-4 word vibe",
-                  "pairing": "One concise sentence explaining background vs headline vs accent usage"
-                }
+                Respond with JSON matching the requested schema:
+                - colors: exactly 3 items, each with "hex" (#XXXXXX) and "name" (2 lowercase words)
+                - mood: 2-4 word vibe
+                - pairing: one concise sentence explaining background vs headline vs accent usage
             """.trimIndent()
 
-            val parts = JSONArray().apply {
-                put(JSONObject().put("text", prompt))
-            }
-            val rawText = callGenerateContent(
+            val rawText = callInteraction(
                 apiKey = apiKey,
-                parts = parts,
-                temperature = 1.35,
-                jsonMode = true
+                prompt = prompt,
+                thinkingLevel = "low",
+                systemInstruction = "You are a bold editorial color director. Always respond with valid JSON matching the schema.",
+                jsonSchema = GeminiInteractionsCodec.PALETTE_SCHEMA
             )
-            val obj = JSONObject(stripJsonFences(rawText))
+            val obj = JSONObject(GeminiInteractionsCodec.stripJsonFences(rawText))
             val arr = obj.optJSONArray("colors")
                 ?: throw IllegalStateException("Gemini palette did not contain colors array.")
             val swatches = mutableListOf<PaletteSwatch>()
@@ -131,36 +118,26 @@ object GeminiClient {
             val isWebShot = asset.description.contains("Interactive UI targets", ignoreCase = true)
             val prompt = when {
                 asset.kind == LocalAssetEntity.KIND_CLIP -> {
-                    "This 3-frame storyboard is sampled at 10%, 50%, 85% from the video clip ${asset.relativePath} (${asset.width}x${asset.height}, ${String.format(Locale.US, "%.1f", asset.durationSec)}s). Return strict JSON with keys: \"description\" (1 concise sentence describing visual motion/content across the clip) and \"safeZone\" (1 concise sentence stating where kinetic overlay typography can sit safely with high contrast)."
+                    "This 3-frame storyboard is sampled at 10%, 50%, 85% from the video clip ${asset.relativePath} (${asset.width}x${asset.height}, ${String.format(Locale.US, "%.1f", asset.durationSec)}s). Return JSON with keys: \"description\" (1 concise sentence describing visual motion/content across the clip) and \"safeZone\" (1 concise sentence stating where kinetic overlay typography can sit safely with high contrast)."
                 }
                 isWebShot -> {
-                    "Analyze this tutorial UI screenshot (${asset.relativePath}, ${asset.width}x${asset.height}). Extracted UI context: ${asset.description.take(700)}. Return strict JSON with keys: \"description\" (1-2 concise sentences describing the UI screen AND preserving key target [x,y,wxh] boxes for tutorial cursor/highlight animation) and \"safeZone\" (1 concise sentence stating which region is safest for kinetic titles without covering interactive controls)."
+                    "Analyze this tutorial UI screenshot (${asset.relativePath}, ${asset.width}x${asset.height}). Extracted UI context: ${asset.description.take(700)}. Return JSON with keys: \"description\" (1-2 concise sentences describing the UI screen AND preserving key target [x,y,wxh] boxes for tutorial cursor/highlight animation) and \"safeZone\" (1 concise sentence stating which region is safest for kinetic titles without covering interactive controls)."
                 }
                 else -> {
                     val label = if (asset.kind == LocalAssetEntity.KIND_CUTOUT) "PNG cutout" else "image"
-                    "Analyze this $label (${asset.relativePath}, ${asset.width}x${asset.height}). Return strict JSON with keys: \"description\" (1 concise sentence describing visual subject and lighting/palette) and \"safeZone\" (1 concise sentence stating where kinetic overlay text can be placed cleanly without obscuring the subject)."
+                    "Analyze this $label (${asset.relativePath}, ${asset.width}x${asset.height}). Return JSON with keys: \"description\" (1 concise sentence describing visual subject and lighting/palette) and \"safeZone\" (1 concise sentence stating where kinetic overlay text can be placed cleanly without obscuring the subject)."
                 }
             }
 
-            val parts = JSONArray().apply {
-                put(JSONObject().put("text", prompt))
-                put(
-                    JSONObject().put(
-                        "inlineData",
-                        JSONObject().apply {
-                            put("mimeType", mime)
-                            put("data", b64)
-                        }
-                    )
-                )
-            }
-            val rawText = callGenerateContent(
+            val rawText = callInteraction(
                 apiKey = apiKey,
-                parts = parts,
-                temperature = 0.35,
-                jsonMode = true
+                prompt = prompt,
+                images = listOf(InteractionImageInput(base64Data = b64, mimeType = mime)),
+                thinkingLevel = "low",
+                systemInstruction = "Respond strictly with JSON matching the schema.",
+                jsonSchema = GeminiInteractionsCodec.DESCRIBE_ASSET_SCHEMA
             )
-            val obj = JSONObject(stripJsonFences(rawText))
+            val obj = JSONObject(GeminiInteractionsCodec.stripJsonFences(rawText))
             val desc = obj.optString("description", asset.description).trim().ifBlank { asset.description }
             val safe = obj.optString("safeZone", asset.safeZone).trim().ifBlank { asset.safeZone }
             desc to safe
@@ -194,42 +171,23 @@ object GeminiClient {
                 1. UNNECESSARY CROPPING: outer vector strokes, rounded corners, drop shadows, circular rings, or thin edges clipped/cut off at the top, right, bottom, or left border of the RIGHT cutout.
                 2. OVER-REMOVAL / ACCIDENTAL ERASURE: bright foreground details, inner logo text, eyes, shiny highlights, or anti-aliased edges erased into checkerboard tiles (comparing RIGHT vs LEFT), OR the LEFT image is a full rectangular UI screenshot/scene that should keep its background intact rather than keying out corners.
 
-                Return strict JSON only:
-                {
-                  "status": "OK" or "ADJUST",
-                  "diagnosis": "1 concise honest sentence summarizing whether clipping or accidental erasure was seen and what you fixed (or 'Cutout edges and interior details look clean.')",
-                  "keepOriginal": false,
-                  "recommendedTolerance": $currentTolerance,
-                  "extraPadTop": 0.0,
-                  "extraPadRight": 0.0,
-                  "extraPadBottom": 0.0,
-                  "extraPadLeft": 0.0
-                }
                 Rules:
-                - For isSvg=true, keep tolerance=0 and focus extraPad* (0.04..0.16) if strokes/shadows appear tight at edges.
-                - If inner light shapes or text were accidentally removed on a raster logo/icon, lower recommendedTolerance (6..20).
+                - status: "OK" or "ADJUST"
+                - diagnosis: 1 concise honest sentence summarizing whether clipping or accidental erasure was seen and what you fixed (or 'Cutout edges and interior details look clean.')
+                - For isSvg=true, keep recommendedTolerance=0 and focus extraPad* (0.04..0.16) if strokes/shadows appear tight at edges.
+                - If inner light shapes or text were accidentally removed on a raster logo/icon, lower recommendedTolerance (6..20). Otherwise keep recommendedTolerance=$currentTolerance and extraPad*=0.0.
                 - Set keepOriginal=true ONLY if background removal destroyed a complex UI card, photo, or non-transparent scene that looks better un-keyed.
             """.trimIndent()
 
-            val parts = JSONArray().apply {
-                put(JSONObject().put("text", prompt))
-                put(
-                    JSONObject().put(
-                        "inlineData",
-                        JSONObject().apply {
-                            put("mimeType", mime)
-                            put("data", b64)
-                        }
-                    )
-                )
-            }
-            val rawText = callGenerateContent(
+            val rawText = callInteraction(
                 apiKey = apiKey,
-                parts = parts,
-                temperature = 0.2,
-                jsonMode = true
+                prompt = prompt,
+                images = listOf(InteractionImageInput(base64Data = b64, mimeType = mime)),
+                thinkingLevel = "low",
+                systemInstruction = "Respond strictly with JSON matching the schema.",
+                jsonSchema = GeminiInteractionsCodec.AUDIT_CUTOUT_SCHEMA
             )
-            val obj = JSONObject(stripJsonFences(rawText))
+            val obj = JSONObject(GeminiInteractionsCodec.stripJsonFences(rawText))
             val statusRaw = obj.optString("status", "OK").trim().uppercase(Locale.US)
             val keepOrig = obj.optBoolean("keepOriginal", false)
             val recTol = if (isSvgSource) {
@@ -274,44 +232,25 @@ object GeminiClient {
                 Also inspect the HTML source below:
                 ${htmlCode.take(65_000)}
 
-                Return strict JSON only:
-                {
-                  "summary": "Short overall diagnostic sentence",
-                  "issues": [
-                    {
-                      "frame": "#09",
-                      "time": "t=4.00s",
-                      "problem": "Concise visual defect found",
-                      "fix": "Exact CSS/JS adjustment needed"
-                    }
-                  ]
-                }
+                Return JSON with:
+                - summary: short overall diagnostic sentence
+                - issues: array of visual defects, each with "frame" (e.g. "#09"), "time" (e.g. "t=4.00s"), "problem", and "fix" (exact CSS/JS adjustment needed)
             """.trimIndent()
 
-            val parts = JSONArray().apply {
-                put(JSONObject().put("text", prompt))
-                sheetImages.take(2).forEach { file ->
-                    if (file.exists()) {
-                        val (b64, mime) = encodeFileForVision(file, maxDim = 1400)
-                        put(
-                            JSONObject().put(
-                                "inlineData",
-                                JSONObject().apply {
-                                    put("mimeType", mime)
-                                    put("data", b64)
-                                }
-                            )
-                        )
-                    }
-                }
+            val encodedImages = sheetImages.take(2).mapNotNull { file ->
+                if (!file.exists()) return@mapNotNull null
+                val (b64, mime) = encodeFileForVision(file, maxDim = 1400)
+                InteractionImageInput(base64Data = b64, mimeType = mime)
             }
-            val rawText = callGenerateContent(
+            val rawText = callInteraction(
                 apiKey = apiKey,
-                parts = parts,
-                temperature = 0.25,
-                jsonMode = true
+                prompt = prompt,
+                images = encodedImages,
+                thinkingLevel = "medium",
+                systemInstruction = "Respond strictly with JSON matching the schema.",
+                jsonSchema = GeminiInteractionsCodec.REVIEW_SHEET_SCHEMA
             )
-            val obj = JSONObject(stripJsonFences(rawText))
+            val obj = JSONObject(GeminiInteractionsCodec.stripJsonFences(rawText))
             val summary = obj.optString("summary", "Gemini frame inspection finished.").trim()
             val arr = obj.optJSONArray("issues") ?: JSONArray()
             val issues = mutableListOf<SheetIssue>()
@@ -355,71 +294,53 @@ object GeminiClient {
                 $htmlCode
             """.trimIndent()
 
-            val parts = JSONArray().apply {
-                put(JSONObject().put("text", prompt))
-                sheetImages.take(2).forEach { file ->
-                    if (file.exists()) {
-                        val (b64, mime) = encodeFileForVision(file, maxDim = 1400)
-                        put(
-                            JSONObject().put(
-                                "inlineData",
-                                JSONObject().apply {
-                                    put("mimeType", mime)
-                                    put("data", b64)
-                                }
-                            )
-                        )
-                    }
-                }
+            val encodedImages = sheetImages.take(2).mapNotNull { file ->
+                if (!file.exists()) return@mapNotNull null
+                val (b64, mime) = encodeFileForVision(file, maxDim = 1400)
+                InteractionImageInput(base64Data = b64, mimeType = mime)
             }
-            val rawText = callGenerateContent(
+            val rawText = callInteraction(
                 apiKey = apiKey,
-                parts = parts,
-                temperature = 0.2,
-                jsonMode = false
+                prompt = prompt,
+                images = encodedImages,
+                thinkingLevel = "medium",
+                systemInstruction = "Output only a complete, valid self-contained HTML document from <!DOCTYPE html> to </html> with no markdown fences or explanation."
             )
             CodeValidator.unwrapMarkdownFences(rawText)
         }
     }
 
-    private fun callGenerateContent(
+    private fun callInteraction(
         apiKey: String,
-        parts: JSONArray,
-        temperature: Double,
-        jsonMode: Boolean
+        prompt: String,
+        images: List<InteractionImageInput> = emptyList(),
+        thinkingLevel: String = "medium",
+        systemInstruction: String? = null,
+        jsonSchema: JsonObject? = null
     ): String {
-        val cleanKey = apiKey.trim()
+        val cleanKey = GeminiInteractionsCodec.normalizeApiKey(apiKey)
         if (cleanKey.isEmpty()) throw IllegalStateException("Google AI Studio API key is missing.")
 
-        val encodedKey = URLEncoder.encode(cleanKey, "UTF-8")
-        val endpoint = URL("https://generativelanguage.googleapis.com/v1beta/models/$MODEL_ID:generateContent?key=$encodedKey")
+        val payload = GeminiInteractionsCodec.buildRequestJson(
+            prompt = prompt,
+            images = images,
+            thinkingLevel = thinkingLevel,
+            systemInstruction = systemInstruction,
+            jsonSchema = jsonSchema
+        )
 
-        val genConfig = JSONObject().apply {
-            put("temperature", temperature)
-            if (jsonMode) {
-                put("responseMimeType", "application/json")
-            }
-        }
-        val payload = JSONObject().apply {
-            put(
-                "contents",
-                JSONArray().apply {
-                    put(JSONObject().put("parts", parts))
-                }
-            )
-            put("generationConfig", genConfig)
-        }
-
+        val endpoint = URL(GeminiInteractionsCodec.INTERACTIONS_URL)
         val conn = (endpoint.openConnection() as HttpURLConnection).apply {
             requestMethod = "POST"
             connectTimeout = 15_000
-            readTimeout = 45_000
+            readTimeout = 60_000
             doOutput = true
             setRequestProperty("Content-Type", "application/json; charset=UTF-8")
+            setRequestProperty("x-goog-api-key", cleanKey)
         }
 
         try {
-            val bytes = payload.toString().toByteArray(Charsets.UTF_8)
+            val bytes = payload.toByteArray(Charsets.UTF_8)
             conn.outputStream.use { os -> os.write(bytes) }
 
             val code = conn.responseCode
@@ -427,27 +348,10 @@ object GeminiClient {
             val body = stream?.bufferedReader(Charsets.UTF_8)?.use { it.readText() }.orEmpty()
 
             if (code !in 200..299) {
-                val errMsg = runCatching {
-                    JSONObject(body).optJSONObject("error")?.optString("message")
-                }.getOrNull()
-                throw IllegalStateException(errMsg?.takeIf { it.isNotBlank() } ?: "Gemini HTTP $code")
+                throw IllegalStateException(GeminiInteractionsCodec.extractErrorMessage(body, code))
             }
 
-            val root = JSONObject(body)
-            val candidates = root.optJSONArray("candidates")
-                ?: throw IllegalStateException("Gemini returned no candidates.")
-            val first = candidates.optJSONObject(0)
-                ?: throw IllegalStateException("Empty Gemini response.")
-            val respParts = first.optJSONObject("content")?.optJSONArray("parts")
-                ?: throw IllegalStateException("Gemini returned empty parts.")
-
-            val textOut = buildString {
-                for (i in 0 until respParts.length()) {
-                    append(respParts.optJSONObject(i)?.optString("text", "").orEmpty())
-                }
-            }.trim()
-            if (textOut.isEmpty()) throw IllegalStateException("Gemini returned empty text.")
-            return textOut
+            return GeminiInteractionsCodec.extractResponseText(body)
         } finally {
             conn.disconnect()
         }
@@ -487,16 +391,5 @@ object GeminiClient {
         finalBmp.compress(Bitmap.CompressFormat.JPEG, 84, baos)
         finalBmp.recycle()
         return Base64.encodeToString(baos.toByteArray(), Base64.NO_WRAP) to "image/jpeg"
-    }
-
-    private fun stripJsonFences(raw: String): String {
-        val t = raw.trim()
-        return when {
-            t.startsWith("```json", ignoreCase = true) ->
-                t.removePrefix("```json").removePrefix("```JSON").removeSuffix("```").trim()
-            t.startsWith("```") ->
-                t.removePrefix("```").removeSuffix("```").trim()
-            else -> t
-        }
     }
 }
