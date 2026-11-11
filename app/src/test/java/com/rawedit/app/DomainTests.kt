@@ -6,15 +6,16 @@ import com.rawedit.app.domain.CodeValidator
 import com.rawedit.app.domain.CutoutAuditMath
 import com.rawedit.app.domain.CutoutAuditResult
 import com.rawedit.app.domain.CutoutPadRatios
-import com.rawedit.app.domain.GeminiFailureCategory
-import com.rawedit.app.domain.GeminiInteractionsCodec
-import com.rawedit.app.domain.InteractionImageInput
 import com.rawedit.app.domain.KeyframeSample
 import com.rawedit.app.domain.KeyframeSheetGenerator
 import com.rawedit.app.domain.PaletteColorMath
 import com.rawedit.app.domain.PaletteState
 import com.rawedit.app.domain.PaletteSwatch
 import com.rawedit.app.domain.PromptGenerator
+import com.rawedit.app.domain.PuterApiException
+import com.rawedit.app.domain.PuterCodec
+import com.rawedit.app.domain.PuterFailureCategory
+import com.rawedit.app.domain.PuterImageInput
 import com.rawedit.app.domain.SceneSpan
 import com.rawedit.app.domain.SheetSamplingMode
 import com.rawedit.app.domain.SrtParser
@@ -24,6 +25,7 @@ import com.rawedit.app.domain.WebUiElementBox
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
+import org.junit.Assert.fail
 import org.junit.Test
 
 class DomainTests {
@@ -361,128 +363,149 @@ Enjoy!
     }
 
     @Test
-    fun geminiInteractionsCodecBuildsCompliant38FlashPayloadsAndParsesSteps() {
-        assertEquals("gemini-3.8-flash", GeminiInteractionsCodec.MODEL_ID)
-        assertEquals("low", GeminiInteractionsCodec.normalizeThinkingLevel("minimal"))
-        assertEquals("minimal", GeminiInteractionsCodec.normalizeThinkingLevelForModel("minimal", "gemini-3.6-flash"))
-        assertEquals("minimal", GeminiInteractionsCodec.normalizeThinkingLevelForModel("minimal", "gemini-3.5-flash-lite"))
-        assertEquals("low", GeminiInteractionsCodec.normalizeThinkingLevel("LOW"))
-        assertEquals("AIzaTestKey123", GeminiInteractionsCodec.normalizeApiKey("  \"AIzaTest\nKey123\" "))
+    fun puterCodecBuildsDriversCallPayloadsVisionAndExtractsContent() {
+        assertEquals("tok_abc123", PuterCodec.normalizeAuthToken("  \"Bearer tok_abc\n123\" "))
 
-        val payload = GeminiInteractionsCodec.buildRequestJson(
-            prompt = "Inspect image",
-            images = listOf(InteractionImageInput(base64Data = "AQID", mimeType = "image/jpeg")),
-            thinkingLevel = "minimal",
-            systemInstruction = "Return valid JSON",
-            jsonSchema = GeminiInteractionsCodec.PALETTE_SCHEMA
+        val authUrl = PuterCodec.buildAuthMeUrl("http://127.0.0.1:45678/callback")
+        assertTrue(authUrl.startsWith("https://puter.com/action/authme?redirectURL="))
+        assertTrue(authUrl.contains("127.0.0.1"))
+
+        assertEquals(
+            "ptk_xyz_123",
+            PuterCodec.extractTokenFromCallbackUri("http://127.0.0.1:45678/callback?token=ptk_xyz_123")
         )
-        assertTrue(payload.contains("\"model\":\"gemini-3.8-flash\""))
-        assertTrue(payload.contains("\"thinking_level\":\"low\""))
-        assertTrue(payload.contains("\"type\":\"image\""))
-        assertTrue(payload.contains("\"mime_type\":\"image/jpeg\""))
-        assertTrue(payload.contains("\"response_format\":{"))
-        assertTrue(payload.contains("\"mime_type\":\"application/json\""))
-        assertFalse(payload.contains("temperature"))
-        assertFalse(payload.contains("response_mime_type"))
-        assertFalse(payload.contains("inlineData"))
+        assertEquals(
+            "ptk_deep_999",
+            PuterCodec.extractTokenFromCallbackUri("rawedit://puter-auth?token=ptk_deep_999")
+        )
 
-        val stepsResponse = """
+        val payload = PuterCodec.buildDriversCallJson(
+            authToken = "ptk_1",
+            prompt = "Inspect image",
+            images = listOf(PuterImageInput(base64Data = "AQID", mimeType = "image/jpeg")),
+            systemInstruction = "Return valid JSON",
+            model = PuterCodec.MODEL_GPT_4O_MINI
+        )
+        assertTrue(payload.contains("\"interface\":\"puter-chat-completion\""))
+        assertTrue(payload.contains("\"driver\":\"ai-chat\""))
+        assertTrue(payload.contains("\"method\":\"complete\""))
+        assertTrue(payload.contains("\"auth_token\":\"ptk_1\""))
+        assertTrue(payload.contains("\"model\":\"gpt-4o-mini\""))
+        assertTrue(payload.contains("\"vision\":true"))
+        assertTrue(payload.contains("\"url\":\"data:image/jpeg;base64,AQID\""))
+
+        val strResponse = """{"success":true,"result":{"message":{"role":"assistant","content":"READY"}}}"""
+        assertEquals("READY", PuterCodec.extractResponseText(strResponse))
+
+        val arrayResponse = """
             {
-              "id": "int_abc",
-              "model": "gemini-3.8-flash",
-              "status": "completed",
-              "steps": [
-                {
-                  "type": "thought",
-                  "summary": [{"type": "text", "text": "internal thought"}]
-                },
-                {
-                  "type": "model_output",
+              "success": true,
+              "result": {
+                "message": {
+                  "role": "assistant",
                   "content": [
-                    {"type": "text", "text": "READY"}
+                    {"type": "text", "text": "{\"ok\":"},
+                    {"type": "output_text", "text": "true}"}
                   ]
                 }
-              ]
+              }
             }
         """.trimIndent()
-        assertEquals("READY", GeminiInteractionsCodec.extractResponseText(stepsResponse))
+        assertEquals("{\"ok\":true}", PuterCodec.extractResponseText(arrayResponse))
 
-        val errorBody = """{"error":{"code":400,"message":"API key not valid."}}"""
-        assertEquals("API key not valid.", GeminiInteractionsCodec.extractErrorMessage(errorBody, 400))
+        val fundingError = """{"success":false,"error":{"code":"insufficient_funds","message":"Not enough funding","metadata":{"usage_limited":true}}}"""
+        try {
+            PuterCodec.extractResponseText(fundingError)
+            fail("Expected PuterApiException")
+        } catch (ex: PuterApiException) {
+            assertEquals("insufficient_funds", ex.errorCode)
+            assertTrue(ex.usageLimited)
+        }
     }
 
     @Test
-    fun geminiCodecRoutesFallbackChainsAndClassifiesTrafficTimeouts() {
-        assertEquals("auto", GeminiInteractionsCodec.normalizeModelPref(""))
-        assertEquals("auto", GeminiInteractionsCodec.normalizeModelPref("unknown-model"))
-        assertEquals("gemini-3.6-flash", GeminiInteractionsCodec.normalizeModelPref("gemini-3.6-flash"))
+    fun puterCodecParsesUsageCreditsRoutesModelsAndClassifiesExhaustion() {
+        assertEquals("alice", PuterCodec.parseWhoamiUsername("""{"username":"alice","uuid":"u123456"}"""))
 
-        val lightAuto = GeminiInteractionsCodec.buildCandidateModels(
-            modelPref = GeminiInteractionsCodec.PREF_AUTO,
-            heavyTask = false
-        )
+        val usdUsageJson = """
+            {
+              "usage": {"total": 325000000, "allowanceUsed": 325000000},
+              "allowanceInfo": {"monthUsageAllowance": 500000000, "remaining": 175000000}
+            }
+        """.trimIndent()
+        val usdReport = PuterCodec.parseUsageReport(usdUsageJson)
+        assertFalse(usdReport.isCreditsUnit)
+        assertFalse(usdReport.isExhausted)
+        assertEquals(35, usdReport.remainingPercent)
+        assertEquals("$1.75", usdReport.formattedRemaining())
         assertEquals(
-            listOf("gemini-3.6-flash", "gemini-3.5-flash-lite", "gemini-3.8-flash", "gemini-3.1-flash-lite"),
-            lightAuto
+            "$1.75 left",
+            PuterCodec.formatUsageBannerLabel(
+                remainingRaw = usdReport.totalRemainingRaw,
+                allowanceRaw = usdReport.monthlyAllowanceRaw,
+                isCreditsUnit = usdReport.isCreditsUnit,
+                exhausted = usdReport.isExhausted
+            )
         )
 
-        val heavyAuto = GeminiInteractionsCodec.buildCandidateModels(
-            modelPref = GeminiInteractionsCodec.PREF_AUTO,
-            heavyTask = true
-        )
-        assertEquals("gemini-3.8-flash", heavyAuto.first())
-        assertTrue(heavyAuto.contains("gemini-3.6-flash"))
+        val creditsExhaustedJson = """
+            {
+              "usage": {"total": 1000, "allowanceUsed": 1000},
+              "allowanceInfo": {"monthUsageAllowance": 1000, "remaining": 0, "unit": "credits"}
+            }
+        """.trimIndent()
+        val crReport = PuterCodec.parseUsageReport(creditsExhaustedJson)
+        assertTrue(crReport.isCreditsUnit)
+        assertTrue(crReport.isExhausted)
+        assertEquals(0, crReport.remainingPercent)
+        assertEquals("0 cr", crReport.formattedRemaining())
+        assertEquals("0 cr left", PuterCodec.formatUsageBannerLabel(0.0, 1000.0, isCreditsUnit = true, exhausted = true))
 
-        // Auto mode shifts cooled-down congested models to the tail
-        val cooledAuto = GeminiInteractionsCodec.buildCandidateModels(
-            modelPref = GeminiInteractionsCodec.PREF_AUTO,
+        val lightAuto = PuterCodec.buildCandidateModels(modelPref = PuterCodec.PREF_AUTO, heavyTask = false)
+        assertEquals("gpt-4o-mini", lightAuto.first())
+        assertTrue(lightAuto.none { it.contains("gemini", ignoreCase = true) })
+
+        val heavyAuto = PuterCodec.buildCandidateModels(modelPref = PuterCodec.PREF_AUTO, heavyTask = true)
+        assertEquals("claude-sonnet-4-6", heavyAuto.first())
+
+        val cooledAuto = PuterCodec.buildCandidateModels(
+            modelPref = PuterCodec.PREF_AUTO,
             heavyTask = false,
-            cooledDownModels = setOf("gemini-3.6-flash")
+            cooledDownModels = setOf("gpt-4o-mini")
         )
-        assertEquals("gemini-3.5-flash-lite", cooledAuto.first())
-        assertEquals("gemini-3.6-flash", cooledAuto.last())
+        assertEquals("gpt-5-nano", cooledAuto.first())
+        assertEquals("gpt-4o-mini", cooledAuto.last())
 
-        // Explicitly pinned preference stays first even if previously cooled down
-        val pinned = GeminiInteractionsCodec.buildCandidateModels(
-            modelPref = "gemini-3.8-flash",
+        val pinned = PuterCodec.buildCandidateModels(
+            modelPref = PuterCodec.MODEL_CLAUDE_SONNET,
             heavyTask = false,
-            cooledDownModels = setOf("gemini-3.8-flash", "gemini-3.6-flash")
+            cooledDownModels = setOf(PuterCodec.MODEL_CLAUDE_SONNET, PuterCodec.MODEL_GPT_5_MINI)
         )
-        assertEquals("gemini-3.8-flash", pinned.first())
-        assertEquals("gemini-3.5-flash-lite", pinned[1])
+        assertEquals("claude-sonnet-4-6", pinned.first())
 
         assertEquals(
-            GeminiFailureCategory.RATE_OR_OVERLOAD,
-            GeminiInteractionsCodec.classifyFailure(503, "Model is experiencing high traffic right now")
+            PuterFailureCategory.INSUFFICIENT_CREDITS,
+            PuterCodec.classifyFailure(402, "Error", errorCode = "insufficient_funds", usageLimited = true)
         )
         assertEquals(
-            GeminiFailureCategory.RATE_OR_OVERLOAD,
-            GeminiInteractionsCodec.classifyFailure(429, "Quota exceeded")
+            PuterFailureCategory.FATAL_AUTH,
+            PuterCodec.classifyFailure(401, "Unauthorized")
         )
         assertEquals(
-            GeminiFailureCategory.NETWORK_TIMEOUT,
-            GeminiInteractionsCodec.classifyFailure(null, "Read timed out", isTimeout = true)
+            PuterFailureCategory.RATE_OR_OVERLOAD,
+            PuterCodec.classifyFailure(429, "Rate limit exceeded")
         )
         assertEquals(
-            GeminiFailureCategory.FATAL_CLIENT,
-            GeminiInteractionsCodec.classifyFailure(400, "API key not valid")
+            PuterFailureCategory.NETWORK_TIMEOUT,
+            PuterCodec.classifyFailure(null, "Read timed out", isTimeout = true)
         )
 
-        val offlineMsg = GeminiInteractionsCodec.buildFriendlyErrorMessage(
-            lastCategory = GeminiFailureCategory.NETWORK_TIMEOUT,
-            lastRawMessage = "Read timed out",
-            attemptedModels = listOf("gemini-3.6-flash", "gemini-3.5-flash-lite"),
-            sawAnyHttpResponse = false
-        )
-        assertTrue(offlineMsg.contains("Wi-Fi"))
-
-        val highTrafficMsg = GeminiInteractionsCodec.buildFriendlyErrorMessage(
-            lastCategory = GeminiFailureCategory.RATE_OR_OVERLOAD,
-            lastRawMessage = "high traffic",
-            attemptedModels = listOf("gemini-3.6-flash", "gemini-3.5-flash-lite"),
+        val outMsg = PuterCodec.buildFriendlyErrorMessage(
+            lastCategory = PuterFailureCategory.INSUFFICIENT_CREDITS,
+            lastRawMessage = "insufficient_funds",
+            attemptedModels = listOf("gpt-4o-mini"),
             sawAnyHttpResponse = true
         )
-        assertTrue(highTrafficMsg.contains("High traffic"))
-        assertTrue(highTrafficMsg.contains("3.5 Lite"))
+        assertTrue(outMsg.contains("Switch to another Puter or Google account"))
     }
 }

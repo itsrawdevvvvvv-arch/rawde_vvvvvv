@@ -61,7 +61,8 @@ import com.rawedit.app.data.CacheManager
 import com.rawedit.app.data.local.LocalAssetEntity
 import com.rawedit.app.data.local.ProjectEntity
 import com.rawedit.app.data.repository.RawEditRepository
-import com.rawedit.app.domain.GeminiClient
+import com.rawedit.app.domain.PuterClient
+import com.rawedit.app.domain.PuterOutOfCreditsException
 import com.rawedit.app.ui.components.BigPrimaryButton
 import com.rawedit.app.ui.components.CircleActionButton
 import com.rawedit.app.ui.components.FormatHelpers
@@ -87,8 +88,11 @@ import java.io.File
 fun AssetLockerScreen(
     project: ProjectEntity,
     allAssets: List<LocalAssetEntity>,
-    apiKey: String,
+    authToken: String,
+    puterUsername: String,
     modelPref: String,
+    creditsExhausted: Boolean,
+    creditsBadgeText: String,
     cacheManager: CacheManager,
     onBack: () -> Unit,
     onImportAsset: (uri: Uri, isVideo: Boolean) -> Unit,
@@ -103,7 +107,10 @@ fun AssetLockerScreen(
     onUpdateAssetNotes: (assetId: Long, description: String, safeZone: String) -> Unit,
     onToggleAttach: (assetId: Long) -> Unit,
     onDeleteAsset: (LocalAssetEntity) -> Unit,
-    onOpenApiKey: () -> Unit
+    onOpenPuterAuth: () -> Unit,
+    onSwitchPuterAccount: () -> Unit,
+    onRefreshPuterCredits: () -> Unit,
+    onMarkCreditsExhausted: () -> Unit
 ) {
     val scope = rememberCoroutineScope()
     val listState = rememberLazyListState()
@@ -165,13 +172,56 @@ fun AssetLockerScreen(
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(10.dp)
                 ) {
-                    CircleActionButton(
-                        icon = RawIconType.KEY,
-                        size = 42.dp,
-                        backgroundColor = if (apiKey.isNotBlank()) RawColors.AccentSoft else RawColors.RaisedCard,
-                        iconTint = if (apiKey.isNotBlank()) RawColors.Tan else RawColors.TextMuted,
-                        onClick = onOpenApiKey
-                    )
+                    val isSignedIn = authToken.isNotBlank()
+                    Row(
+                        modifier = Modifier
+                            .clip(CircleShape)
+                            .background(
+                                when {
+                                    creditsExhausted -> RawColors.ErrorSoft
+                                    isSignedIn -> RawColors.AccentSoft
+                                    else -> RawColors.RaisedCard
+                                }
+                            )
+                            .border(
+                                width = 1.dp,
+                                color = if (creditsExhausted) RawColors.ErrorBorder else Color.Transparent,
+                                shape = CircleShape
+                            )
+                            .clickable {
+                                if (creditsExhausted) onSwitchPuterAccount() else onOpenPuterAuth()
+                            }
+                            .padding(horizontal = 12.dp, vertical = 7.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        RawIcon(
+                            type = RawIconType.GLOBE,
+                            size = 14.dp,
+                            tint = when {
+                                creditsExhausted -> RawColors.ErrorCoral
+                                isSignedIn -> RawColors.Tan
+                                else -> RawColors.TextMuted
+                            }
+                        )
+                        Text(
+                            text = when {
+                                !isSignedIn -> "Sign in"
+                                creditsExhausted -> "0 left \u2022 Switch"
+                                else -> creditsBadgeText
+                            },
+                            fontFamily = JetBrainsMonoFamily,
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 11.5.sp,
+                            color = when {
+                                creditsExhausted -> RawColors.ErrorCoral
+                                isSignedIn -> RawColors.Tan
+                                else -> RawColors.TextMuted
+                            },
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                    }
                     RawPixelMascot(kind = PixelMascotKind.LENS_BOT, size = 38.dp)
                 }
             }
@@ -229,21 +279,21 @@ fun AssetLockerScreen(
                         }
                     }
 
-                    if (apiKey.isBlank()) {
+                    if (authToken.isBlank()) {
                         item {
                             Row(
                                 modifier = Modifier
                                     .fillMaxWidth()
                                     .clip(RoundedCornerShape(24.dp))
                                     .background(RawColors.CardSurface)
-                                    .clickable { onOpenApiKey() }
+                                    .clickable { onOpenPuterAuth() }
                                     .padding(horizontal = 16.dp, vertical = 14.dp),
                                 verticalAlignment = Alignment.CenterVertically,
                                 horizontalArrangement = Arrangement.spacedBy(12.dp)
                             ) {
-                                RawIcon(RawIconType.SPARK, size = 18.dp, tint = RawColors.Tan)
+                                RawIcon(RawIconType.GLOBE, size = 18.dp, tint = RawColors.Tan)
                                 Text(
-                                    text = "Add a Gemini API key to auto-describe images and safe typography zones.",
+                                    text = "Sign in with Google / Puter to auto-describe images and safe typography zones.",
                                     style = RawTypography.bodyMedium.copy(fontSize = 13.5.sp, lineHeight = 19.sp),
                                     color = RawColors.TextMuted,
                                     modifier = Modifier.weight(1f)
@@ -255,11 +305,47 @@ fun AssetLockerScreen(
                                         .padding(horizontal = 11.dp, vertical = 5.dp)
                                 ) {
                                     Text(
-                                        text = "Add key",
+                                        text = "Sign in",
                                         fontFamily = BricolageFamily,
                                         fontWeight = FontWeight.Bold,
                                         fontSize = 12.sp,
                                         color = RawColors.Tan
+                                    )
+                                }
+                            }
+                        }
+                    } else if (creditsExhausted) {
+                        item {
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clip(RoundedCornerShape(24.dp))
+                                    .background(RawColors.ErrorSoft)
+                                    .border(1.dp, RawColors.ErrorBorder, RoundedCornerShape(24.dp))
+                                    .clickable { onSwitchPuterAccount() }
+                                    .padding(horizontal = 16.dp, vertical = 14.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(12.dp)
+                            ) {
+                                RawIcon(RawIconType.WARN, size = 18.dp, tint = RawColors.ErrorCoral)
+                                Text(
+                                    text = "Puter credits ran out${if (puterUsername.isNotBlank()) " on @$puterUsername" else ""}. Switch account to run AI auto-describe or cutout audit.",
+                                    style = RawTypography.bodyMedium.copy(fontSize = 13.5.sp, lineHeight = 19.sp),
+                                    color = RawColors.ErrorCoral,
+                                    modifier = Modifier.weight(1f)
+                                )
+                                Box(
+                                    modifier = Modifier
+                                        .clip(CircleShape)
+                                        .background(RawColors.Cream)
+                                        .padding(horizontal = 11.dp, vertical = 5.dp)
+                                ) {
+                                    Text(
+                                        text = "Switch",
+                                        fontFamily = BricolageFamily,
+                                        fontWeight = FontWeight.Bold,
+                                        fontSize = 12.sp,
+                                        color = RawColors.Ink
                                     )
                                 }
                             }
@@ -308,8 +394,12 @@ fun AssetLockerScreen(
                                     onToggleAttach = { onToggleAttach(asset.id) },
                                     onDelete = { deleteConfirmTarget = asset },
                                     onAutoDescribe = {
-                                        if (apiKey.isBlank()) {
-                                            onOpenApiKey()
+                                        if (authToken.isBlank()) {
+                                            onOpenPuterAuth()
+                                            return@AssetLockerCard
+                                        }
+                                        if (creditsExhausted) {
+                                            onSwitchPuterAccount()
                                             return@AssetLockerCard
                                         }
                                         val imgFile = if (asset.kind == LocalAssetEntity.KIND_CLIP) {
@@ -323,8 +413,8 @@ fun AssetLockerScreen(
                                         }
                                         describingAssetId = asset.id
                                         scope.launch {
-                                            val res = GeminiClient.describeAsset(
-                                                apiKey = apiKey,
+                                            val res = PuterClient.describeAsset(
+                                                authToken = authToken,
                                                 asset = asset,
                                                 imageFile = imgFile,
                                                 modelPref = modelPref
@@ -332,8 +422,12 @@ fun AssetLockerScreen(
                                             describingAssetId = null
                                             res.onSuccess { (desc, safe) ->
                                                 onUpdateAssetNotes(asset.id, desc, safe)
-                                                toastMsg = "Gemini note updated"
+                                                onRefreshPuterCredits()
+                                                toastMsg = "Puter AI note updated"
                                             }.onFailure { err ->
+                                                if (err is PuterOutOfCreditsException) {
+                                                    onMarkCreditsExhausted()
+                                                }
                                                 toastMsg = err.message ?: "Auto-describe failed"
                                             }
                                         }
@@ -516,9 +610,13 @@ fun AssetLockerScreen(
     cutoutStudioTarget?.let { target ->
         CutoutStudioDialog(
             input = target,
-            apiKey = apiKey,
+            authToken = authToken,
             modelPref = modelPref,
-            onOpenApiKey = onOpenApiKey,
+            creditsExhausted = creditsExhausted,
+            onOpenPuterAuth = onOpenPuterAuth,
+            onSwitchPuterAccount = onSwitchPuterAccount,
+            onRefreshPuterCredits = onRefreshPuterCredits,
+            onMarkCreditsExhausted = onMarkCreditsExhausted,
             onDismiss = { cutoutStudioTarget = null },
             onConfirmSave = { finalBmp, isCutout, suggestedName, desc, safe ->
                 cutoutStudioTarget = null
@@ -709,7 +807,7 @@ private fun AssetLockerCard(
                 color = RawColors.TextMuted
             )
             Text(
-                text = asset.description.ifBlank { "No description yet. Run Auto-describe with Gemini or edit note." },
+                text = asset.description.ifBlank { "No description yet. Run Auto-describe with Puter AI or edit note." },
                 fontFamily = BricolageFamily,
                 fontWeight = FontWeight.Medium,
                 fontSize = 13.5.sp,

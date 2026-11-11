@@ -158,8 +158,9 @@ private const val DESKTOP_USER_AGENT =
 @SuppressLint("SetJavaScriptEnabled")
 @Composable
 fun WebBrowserAssetScreen(
-    apiKey: String,
+    authToken: String,
     modelPref: String,
+    creditsExhausted: Boolean,
     onBack: () -> Unit,
     onSaveCapturedBitmap: (
         bitmap: Bitmap,
@@ -168,7 +169,10 @@ fun WebBrowserAssetScreen(
         defaultDescription: String?,
         defaultSafeZone: String?
     ) -> Unit,
-    onOpenApiKey: () -> Unit
+    onOpenPuterAuth: () -> Unit,
+    onSwitchPuterAccount: () -> Unit,
+    onRefreshPuterCredits: () -> Unit,
+    onMarkCreditsExhausted: () -> Unit
 ) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
@@ -1187,13 +1191,17 @@ fun WebBrowserAssetScreen(
         }
     }
 
-    // PNG Cutout Studio with Gemini Edge Audit
+    // PNG Cutout Studio with Puter AI Edge Audit
     cutoutTarget?.let { target ->
         CutoutStudioDialog(
             input = target,
-            apiKey = apiKey,
+            authToken = authToken,
             modelPref = modelPref,
-            onOpenApiKey = onOpenApiKey,
+            creditsExhausted = creditsExhausted,
+            onOpenPuterAuth = onOpenPuterAuth,
+            onSwitchPuterAccount = onSwitchPuterAccount,
+            onRefreshPuterCredits = onRefreshPuterCredits,
+            onMarkCreditsExhausted = onMarkCreditsExhausted,
             onDismiss = { cutoutTarget = null },
             onConfirmSave = { finalBmp, isCutout, name, desc, safe ->
                 cutoutTarget = null

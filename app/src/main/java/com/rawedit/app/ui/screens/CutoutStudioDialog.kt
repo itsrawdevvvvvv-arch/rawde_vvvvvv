@@ -53,8 +53,9 @@ import com.rawedit.app.domain.CutoutAuditMath
 import com.rawedit.app.domain.CutoutAuditResult
 import com.rawedit.app.domain.CutoutPadRatios
 import com.rawedit.app.domain.CutoutProcessor
-import com.rawedit.app.domain.GeminiClient
-import com.rawedit.app.domain.GeminiInteractionsCodec
+import com.rawedit.app.domain.PuterClient
+import com.rawedit.app.domain.PuterCodec
+import com.rawedit.app.domain.PuterOutOfCreditsException
 import com.rawedit.app.ui.components.BigPrimaryButton
 import com.rawedit.app.ui.components.CircleActionButton
 import com.rawedit.app.ui.components.RawSecondaryButton
@@ -106,9 +107,13 @@ private val SVG_TINT_OPTIONS = listOf(
 @Composable
 fun CutoutStudioDialog(
     input: CutoutStudioInput,
-    apiKey: String,
-    modelPref: String = GeminiInteractionsCodec.PREF_AUTO,
-    onOpenApiKey: () -> Unit,
+    authToken: String,
+    modelPref: String = PuterCodec.PREF_AUTO,
+    creditsExhausted: Boolean = false,
+    onOpenPuterAuth: () -> Unit,
+    onSwitchPuterAccount: () -> Unit,
+    onRefreshPuterCredits: () -> Unit,
+    onMarkCreditsExhausted: () -> Unit,
     onDismiss: () -> Unit,
     onConfirmSave: (
         bitmap: Bitmap,
@@ -187,8 +192,8 @@ fun CutoutStudioDialog(
         }
     }
 
-    suspend fun runGeminiAudit(origBmp: Bitmap?, cutoutBmp: Bitmap) {
-        if (apiKey.isBlank()) return
+    suspend fun runPuterAudit(origBmp: Bitmap?, cutoutBmp: Bitmap) {
+        if (authToken.isBlank() || creditsExhausted) return
         isAiChecking = true
         auditError = null
         val compareFile = runCatching {
@@ -199,8 +204,8 @@ fun CutoutStudioDialog(
             auditError = "Could not build comparison preview."
             return
         }
-        val res = GeminiClient.auditCutout(
-            apiKey = apiKey,
+        val res = PuterClient.auditCutout(
+            authToken = authToken,
             comparisonFile = compareFile,
             currentTolerance = tolerance,
             currentPad = currentPad,
@@ -210,6 +215,7 @@ fun CutoutStudioDialog(
         )
         runCatching { compareFile.delete() }
         res.onSuccess { audit ->
+            onRefreshPuterCredits()
             auditResult = audit
             if (audit.needsReprocess) {
                 val adj = CutoutAuditMath.applyAdjustment(
@@ -227,6 +233,9 @@ fun CutoutStudioDialog(
                 previewResultImage = refinedBmp.asImageBitmap()
             }
         }.onFailure { err ->
+            if (err is PuterOutOfCreditsException) {
+                onMarkCreditsExhausted()
+            }
             auditError = err.message ?: "AI edge check failed"
         }
         isAiChecking = false
@@ -242,9 +251,9 @@ fun CutoutStudioDialog(
         if (bmp != null) {
             previewResultBmp = bmp
             previewResultImage = bmp.asImageBitmap()
-            if (!initialAiDone && apiKey.isNotBlank()) {
+            if (!initialAiDone && authToken.isNotBlank() && !creditsExhausted) {
                 initialAiDone = true
-                runGeminiAudit(previewSourceBmp, bmp)
+                runPuterAudit(previewSourceBmp, bmp)
             }
         }
         isProcessing = false
@@ -253,7 +262,7 @@ fun CutoutStudioDialog(
     LaunchedEffect(manualRecheckNonce) {
         if (manualRecheckNonce > 0) {
             val bmp = previewResultBmp ?: return@LaunchedEffect
-            runGeminiAudit(previewSourceBmp, bmp)
+            runPuterAudit(previewSourceBmp, bmp)
         }
     }
 
@@ -384,7 +393,7 @@ fun CutoutStudioDialog(
                 }
             }
 
-            // Gemini AI Verification Card
+            // Puter AI Verification Card
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -410,9 +419,10 @@ fun CutoutStudioDialog(
                         RawIcon(RawIconType.SPARK, size = 16.dp, tint = RawColors.Tan)
                         val title = when {
                             isAiChecking -> "AI inspecting edges..."
+                            creditsExhausted -> "Out of Puter credits"
                             auditResult?.status == "ADJUST" -> "AI REFINED OUTPUT"
                             auditResult != null -> "AI VERIFIED CLEAN"
-                            apiKey.isBlank() -> "Gemini Cutout Check (Optional)"
+                            authToken.isBlank() -> "Puter Cutout Check (Optional)"
                             else -> "AI edge audit ready"
                         }
                         Text(
@@ -420,38 +430,44 @@ fun CutoutStudioDialog(
                             fontFamily = JetBrainsMonoFamily,
                             fontWeight = FontWeight.Bold,
                             fontSize = 11.sp,
-                            color = RawColors.Tan
+                            color = if (creditsExhausted) RawColors.ErrorCoral else RawColors.Tan
                         )
                     }
 
                     Box(
                         modifier = Modifier
                             .clip(CircleShape)
-                            .background(RawColors.AccentSoft)
+                            .background(if (creditsExhausted) RawColors.ErrorSoft else RawColors.AccentSoft)
                             .clickable(enabled = !isAiChecking && !isProcessing && !isSavingFinal) {
-                                if (apiKey.isBlank()) {
-                                    onOpenApiKey()
-                                } else {
-                                    manualRecheckNonce++
+                                when {
+                                    authToken.isBlank() -> onOpenPuterAuth()
+                                    creditsExhausted -> onSwitchPuterAccount()
+                                    else -> manualRecheckNonce++
                                 }
                             }
                             .padding(horizontal = 10.dp, vertical = 4.dp)
                     ) {
                         Text(
-                            text = if (apiKey.isBlank()) "Add key" else if (isAiChecking) "Checking..." else "Re-check",
+                            text = when {
+                                authToken.isBlank() -> "Sign in"
+                                creditsExhausted -> "Switch account"
+                                isAiChecking -> "Checking..."
+                                else -> "Re-check"
+                            },
                             fontFamily = BricolageFamily,
                             fontWeight = FontWeight.Bold,
                             fontSize = 11.5.sp,
-                            color = RawColors.Tan
+                            color = if (creditsExhausted) RawColors.ErrorCoral else RawColors.Tan
                         )
                     }
                 }
 
                 val statusLine = when {
                     isAiChecking -> "Checking whether strokes, inner details, or corners were unnecessarily cropped or erased."
+                    creditsExhausted -> "Puter credits ran out on this account. Tap Switch account above to continue AI edge inspection."
                     auditError != null -> auditError!!
                     auditResult != null -> auditResult!!.diagnosis
-                    apiKey.isBlank() -> "Add your Google AI Studio key so Gemini checks cutouts for accidental crops or erased inner details."
+                    authToken.isBlank() -> "Sign in with Google / Puter so AI checks cutouts for accidental crops or erased inner details."
                     else -> "Tap Re-check after slider changes to re-verify edges."
                 }
                 Text(
@@ -459,7 +475,7 @@ fun CutoutStudioDialog(
                     fontFamily = BricolageFamily,
                     fontSize = 13.sp,
                     lineHeight = 18.sp,
-                    color = if (auditError != null) RawColors.ErrorCoral else RawColors.TextMuted
+                    color = if (auditError != null || creditsExhausted) RawColors.ErrorCoral else RawColors.TextMuted
                 )
             }
 

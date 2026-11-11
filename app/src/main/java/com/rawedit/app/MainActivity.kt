@@ -1,5 +1,6 @@
 package com.rawedit.app
 
+import android.content.Intent
 import android.graphics.Bitmap
 import android.os.Bundle
 import androidx.activity.ComponentActivity
@@ -29,9 +30,11 @@ import com.rawedit.app.data.local.LocalAssetEntity
 import com.rawedit.app.data.local.ProjectEntity
 import com.rawedit.app.data.local.UserProfile
 import com.rawedit.app.data.repository.RawEditRepository
-import com.rawedit.app.domain.GeminiClient
 import com.rawedit.app.domain.PaletteJsonCodec
 import com.rawedit.app.domain.PaletteState
+import com.rawedit.app.domain.PuterClient
+import com.rawedit.app.domain.PuterCodec
+import com.rawedit.app.domain.PuterOutOfCreditsException
 import com.rawedit.app.ui.components.MainTab
 import com.rawedit.app.ui.components.RawBottomNavBar
 import com.rawedit.app.ui.components.RawToastBanner
@@ -42,7 +45,6 @@ import com.rawedit.app.ui.screens.AssetLockerScreen
 import com.rawedit.app.ui.screens.CodePasteScreen
 import com.rawedit.app.ui.screens.CopyPromptScreen
 import com.rawedit.app.ui.screens.CreateHubScreen
-import com.rawedit.app.ui.screens.GeminiApiKeyDialog
 import com.rawedit.app.ui.screens.HomeScreen
 import com.rawedit.app.ui.screens.KeyframeSheetScreen
 import com.rawedit.app.ui.screens.MyReelsScreen
@@ -50,6 +52,7 @@ import com.rawedit.app.ui.screens.OnboardingScreen
 import com.rawedit.app.ui.screens.PaletteScreen
 import com.rawedit.app.ui.screens.ProfileScreen
 import com.rawedit.app.ui.screens.ProfileSetupScreen
+import com.rawedit.app.ui.screens.PuterAuthDialog
 import com.rawedit.app.ui.screens.RenderingScreen
 import com.rawedit.app.ui.screens.ResultScreen
 import com.rawedit.app.ui.screens.WebBrowserAssetScreen
@@ -57,6 +60,8 @@ import com.rawedit.app.ui.theme.RawColors
 import com.rawedit.app.ui.theme.RawEditTheme
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.io.File
@@ -81,8 +86,11 @@ private sealed interface AppRoute {
 }
 
 class MainActivity : ComponentActivity() {
+    private val incomingDeepLinkToken = MutableStateFlow<String?>(null)
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        handleAuthIntent(intent)
         val bgArgb = RawColors.BgPrimary.toArgb()
         enableEdgeToEdge(
             statusBarStyle = SystemBarStyle.dark(bgArgb),
@@ -92,14 +100,36 @@ class MainActivity : ComponentActivity() {
 
         setContent {
             RawEditTheme {
-                RawEditAppRoot(container = container)
+                RawEditAppRoot(
+                    container = container,
+                    pendingAuthTokenFlow = incomingDeepLinkToken,
+                    onConsumePendingAuthToken = { incomingDeepLinkToken.value = null }
+                )
             }
+        }
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        handleAuthIntent(intent)
+    }
+
+    private fun handleAuthIntent(intent: Intent?) {
+        val uriStr = intent?.dataString ?: return
+        val token = PuterCodec.extractTokenFromCallbackUri(uriStr)
+        if (!token.isNullOrBlank()) {
+            incomingDeepLinkToken.value = token
         }
     }
 }
 
 @Composable
-private fun RawEditAppRoot(container: AppContainer) {
+private fun RawEditAppRoot(
+    container: AppContainer,
+    pendingAuthTokenFlow: StateFlow<String?>,
+    onConsumePendingAuthToken: () -> Unit
+) {
     val profileFlow = remember { container.userPreferences.userProfile }
     val profileOrNull by profileFlow.collectAsState(initial = null)
     val scope = rememberCoroutineScope()
@@ -147,7 +177,9 @@ private fun RawEditAppRoot(container: AppContainer) {
 
             RootStage.MAIN -> MainAuthenticatedHost(
                 container = container,
-                userProfile = profile
+                userProfile = profile,
+                pendingAuthTokenFlow = pendingAuthTokenFlow,
+                onConsumePendingAuthToken = onConsumePendingAuthToken
             )
         }
     }
@@ -156,12 +188,15 @@ private fun RawEditAppRoot(container: AppContainer) {
 @Composable
 private fun MainAuthenticatedHost(
     container: AppContainer,
-    userProfile: UserProfile
+    userProfile: UserProfile,
+    pendingAuthTokenFlow: StateFlow<String?>,
+    onConsumePendingAuthToken: () -> Unit
 ) {
     val scope = rememberCoroutineScope()
     val projects by container.repository.allProjects.collectAsState(initial = emptyList())
     val videos by container.repository.allVideos.collectAsState(initial = emptyList())
     val allAssets by container.repository.allAssets.collectAsState(initial = emptyList())
+    val pendingDeepLinkToken by pendingAuthTokenFlow.collectAsState()
 
     val activePalette = remember(userProfile.paletteJson, userProfile.paletteCounter) {
         PaletteJsonCodec.decode(userProfile.paletteJson)
@@ -172,9 +207,77 @@ private fun MainAuthenticatedHost(
     var currentTab by remember { mutableStateOf(MainTab.HOME) }
     var isForward by remember { mutableStateOf(true) }
     var navigatingNewDraft by remember { mutableStateOf(false) }
-    var showApiKeyDialog by remember { mutableStateOf(false) }
+    var showPuterAuthDialog by remember { mutableStateOf(false) }
+    var puterDialogSwitchMode by remember { mutableStateOf(false) }
     var hostToastMsg by remember { mutableStateOf<String?>(null) }
     val currentRoute = backStack.last()
+
+    fun openPuterAuthDialog(switchMode: Boolean) {
+        puterDialogSwitchMode = switchMode
+        showPuterAuthDialog = true
+    }
+
+    fun refreshPuterCredits(silent: Boolean) {
+        val tok = userProfile.puterAuthToken
+        if (tok.isBlank()) return
+        scope.launch {
+            val who = PuterClient.fetchWhoami(tok).getOrNull()
+            val res = PuterClient.fetchUsage(tok)
+            res.onSuccess { report ->
+                container.userPreferences.savePuterUsage(who, report)
+                if (!silent) {
+                    hostToastMsg = if (report.isExhausted) {
+                        "0 Puter credits left — switch account"
+                    } else {
+                        "Puter credits left: ${report.formattedRemaining()}"
+                    }
+                }
+            }.onFailure { err ->
+                if (!silent) {
+                    hostToastMsg = err.message ?: "Could not refresh Puter credits"
+                }
+            }
+        }
+    }
+
+    fun markCreditsExhausted() {
+        scope.launch {
+            container.userPreferences.markPuterCreditsExhausted()
+            hostToastMsg = "Puter credits ran out — switch account"
+        }
+    }
+
+    LaunchedEffect(pendingDeepLinkToken) {
+        val deepToken = pendingDeepLinkToken
+        if (!deepToken.isNullOrBlank()) {
+            onConsumePendingAuthToken()
+            if (!showPuterAuthDialog && deepToken != userProfile.puterAuthToken) {
+                val who = PuterClient.fetchWhoami(deepToken).getOrNull().orEmpty().ifBlank { "puter_user" }
+                val usage = PuterClient.fetchUsage(deepToken).getOrNull()
+                container.userPreferences.savePuterSession(
+                    authToken = deepToken,
+                    username = who,
+                    modelPref = userProfile.puterModelPref,
+                    usage = usage
+                )
+                val leftStr = usage?.let { " \u2022 ${it.formattedRemaining()} left" }.orEmpty()
+                hostToastMsg = "Signed in as @$who$leftStr"
+            }
+        }
+    }
+
+    LaunchedEffect(userProfile.puterAuthToken) {
+        if (userProfile.isPuterSignedIn) {
+            val ageMs = System.currentTimeMillis() - userProfile.puterUsageUpdatedAtMs
+            if (userProfile.puterUsageUpdatedAtMs <= 0L || ageMs > 90_000L) {
+                val who = PuterClient.fetchWhoami(userProfile.puterAuthToken).getOrNull()
+                val usage = PuterClient.fetchUsage(userProfile.puterAuthToken).getOrNull()
+                if (usage != null) {
+                    container.userPreferences.savePuterUsage(who, usage)
+                }
+            }
+        }
+    }
 
     LaunchedEffect(hostToastMsg) {
         if (hostToastMsg != null) {
@@ -228,20 +331,26 @@ private fun MainAuthenticatedHost(
                 )
                 val newId = container.repository.insertAsset(entity)
                 container.repository.attachAssetToProject(projectId, newId)
-                if (userProfile.geminiApiKey.isNotBlank()) {
+                if (userProfile.isPuterSignedIn && !userProfile.puterCreditsExhausted) {
                     val visionFile = container.cacheManager.getAssetFile(imp.fileName)
                     if (visionFile != null && visionFile.exists()) {
-                        val descRes = GeminiClient.describeAsset(
-                            apiKey = userProfile.geminiApiKey,
+                        val descRes = PuterClient.describeAsset(
+                            authToken = userProfile.puterAuthToken,
                             asset = entity.copy(id = newId),
                             imageFile = visionFile,
-                            modelPref = userProfile.geminiModelPref
+                            modelPref = userProfile.puterModelPref
                         )
                         descRes.onSuccess { (desc, safe) ->
                             container.repository.updateAssetDescription(newId, desc, safe)
+                            refreshPuterCredits(silent = true)
                             hostToastMsg = "Saved & described ${imp.relativePath}"
-                        }.onFailure {
-                            hostToastMsg = "Saved ${imp.relativePath}"
+                        }.onFailure { err ->
+                            if (err is PuterOutOfCreditsException) {
+                                container.userPreferences.markPuterCreditsExhausted()
+                                hostToastMsg = "Saved ${imp.relativePath} (out of Puter credits)"
+                            } else {
+                                hostToastMsg = "Saved ${imp.relativePath}"
+                            }
                         }
                     } else {
                         hostToastMsg = "Saved ${imp.relativePath}"
@@ -332,7 +441,10 @@ private fun MainAuthenticatedHost(
                                             container.userPreferences.savePaletteState(counter, json)
                                         }
                                     },
-                                    onOpenApiKey = { showApiKeyDialog = true }
+                                    onOpenPuterAuth = { openPuterAuthDialog(switchMode = false) },
+                                    onSwitchPuterAccount = { openPuterAuthDialog(switchMode = true) },
+                                    onRefreshPuterCredits = { refreshPuterCredits(silent = false) },
+                                    onMarkCreditsExhausted = { markCreditsExhausted() }
                                 )
 
                                 MainTab.CREATE -> Unit
@@ -367,7 +479,9 @@ private fun MainAuthenticatedHost(
                                     onUpdatePhoto = { newPath ->
                                         scope.launch { container.userPreferences.updateProfilePhoto(newPath) }
                                     },
-                                    onOpenApiKey = { showApiKeyDialog = true }
+                                    onOpenPuterAuth = { openPuterAuthDialog(switchMode = false) },
+                                    onSwitchPuterAccount = { openPuterAuthDialog(switchMode = true) },
+                                    onRefreshPuterCredits = { refreshPuterCredits(silent = false) }
                                 )
                             }
                         }
@@ -435,8 +549,11 @@ private fun MainAuthenticatedHost(
                         AssetLockerScreen(
                             project = proj,
                             allAssets = allAssets,
-                            apiKey = userProfile.geminiApiKey,
-                            modelPref = userProfile.geminiModelPref,
+                            authToken = userProfile.puterAuthToken,
+                            puterUsername = userProfile.puterUsername,
+                            modelPref = userProfile.puterModelPref,
+                            creditsExhausted = userProfile.puterCreditsExhausted,
+                            creditsBadgeText = userProfile.creditsSummaryText(),
                             cacheManager = container.cacheManager,
                             onBack = ::popRoute,
                             onImportAsset = { uri, isVideo ->
@@ -458,24 +575,30 @@ private fun MainAuthenticatedHost(
                                         )
                                         val newId = container.repository.insertAsset(entity)
                                         container.repository.attachAssetToProject(proj.id, newId)
-                                        if (userProfile.geminiApiKey.isNotBlank()) {
+                                        if (userProfile.isPuterSignedIn && !userProfile.puterCreditsExhausted) {
                                             val visionFile = if (imp.kind == LocalAssetEntity.KIND_CLIP) {
                                                 imp.thumbPath.takeIf { it.isNotBlank() }?.let(::File)
                                             } else {
                                                 container.cacheManager.getAssetFile(imp.fileName)
                                             }
                                             if (visionFile != null && visionFile.exists()) {
-                                                val descRes = GeminiClient.describeAsset(
-                                                    apiKey = userProfile.geminiApiKey,
+                                                val descRes = PuterClient.describeAsset(
+                                                    authToken = userProfile.puterAuthToken,
                                                     asset = entity.copy(id = newId),
                                                     imageFile = visionFile,
-                                                    modelPref = userProfile.geminiModelPref
+                                                    modelPref = userProfile.puterModelPref
                                                 )
                                                 descRes.onSuccess { (desc, safe) ->
                                                     container.repository.updateAssetDescription(newId, desc, safe)
+                                                    refreshPuterCredits(silent = true)
                                                     hostToastMsg = "Added & described ${imp.relativePath}"
-                                                }.onFailure {
-                                                    hostToastMsg = "Added ${imp.relativePath} (Gemini note skipped)"
+                                                }.onFailure { err ->
+                                                    if (err is PuterOutOfCreditsException) {
+                                                        container.userPreferences.markPuterCreditsExhausted()
+                                                        hostToastMsg = "Added ${imp.relativePath} (out of Puter credits)"
+                                                    } else {
+                                                        hostToastMsg = "Added ${imp.relativePath} (Puter AI note skipped)"
+                                                    }
                                                 }
                                             } else {
                                                 hostToastMsg = "Added ${imp.relativePath}"
@@ -505,20 +628,27 @@ private fun MainAuthenticatedHost(
                             onDeleteAsset = { asset ->
                                 scope.launch { container.repository.deleteAsset(asset) }
                             },
-                            onOpenApiKey = { showApiKeyDialog = true }
+                            onOpenPuterAuth = { openPuterAuthDialog(switchMode = false) },
+                            onSwitchPuterAccount = { openPuterAuthDialog(switchMode = true) },
+                            onRefreshPuterCredits = { refreshPuterCredits(silent = false) },
+                            onMarkCreditsExhausted = { markCreditsExhausted() }
                         )
                     }
                 }
 
                 is AppRoute.WebBrowser -> {
                     WebBrowserAssetScreen(
-                        apiKey = userProfile.geminiApiKey,
-                        modelPref = userProfile.geminiModelPref,
+                        authToken = userProfile.puterAuthToken,
+                        modelPref = userProfile.puterModelPref,
+                        creditsExhausted = userProfile.puterCreditsExhausted,
                         onBack = ::popRoute,
                         onSaveCapturedBitmap = { bmp, isCutout, name, desc, safe ->
                             saveCapturedBitmapToLocker(route.projectId, bmp, isCutout, name, desc, safe)
                         },
-                        onOpenApiKey = { showApiKeyDialog = true }
+                        onOpenPuterAuth = { openPuterAuthDialog(switchMode = false) },
+                        onSwitchPuterAccount = { openPuterAuthDialog(switchMode = true) },
+                        onRefreshPuterCredits = { refreshPuterCredits(silent = false) },
+                        onMarkCreditsExhausted = { markCreditsExhausted() }
                     )
                 }
 
@@ -578,8 +708,10 @@ private fun MainAuthenticatedHost(
                         KeyframeSheetScreen(
                             project = proj,
                             cacheManager = container.cacheManager,
-                            geminiApiKey = userProfile.geminiApiKey,
-                            modelPref = userProfile.geminiModelPref,
+                            authToken = userProfile.puterAuthToken,
+                            modelPref = userProfile.puterModelPref,
+                            creditsExhausted = userProfile.puterCreditsExhausted,
+                            creditsBadgeText = userProfile.creditsSummaryText(),
                             onBack = ::popRoute,
                             onEditCode = {
                                 if (backStack.getOrNull(backStack.lastIndex - 1) is AppRoute.CodePaste) {
@@ -604,7 +736,10 @@ private fun MainAuthenticatedHost(
                                     )
                                 }
                             },
-                            onOpenApiKey = { showApiKeyDialog = true },
+                            onOpenPuterAuth = { openPuterAuthDialog(switchMode = false) },
+                            onSwitchPuterAccount = { openPuterAuthDialog(switchMode = true) },
+                            onRefreshPuterCredits = { refreshPuterCredits(silent = false) },
+                            onMarkCreditsExhausted = { markCreditsExhausted() },
                             onRenderNow = {
                                 isForward = true
                                 backStack = backStack.dropLast(1) + AppRoute.Rendering(proj.id)
@@ -686,22 +821,39 @@ private fun MainAuthenticatedHost(
         )
     }
 
-    if (showApiKeyDialog) {
-        GeminiApiKeyDialog(
-            currentKey = userProfile.geminiApiKey,
-            currentModelPref = userProfile.geminiModelPref,
-            onSaveKey = { key, modelPref ->
+    if (showPuterAuthDialog) {
+        PuterAuthDialog(
+            currentToken = userProfile.puterAuthToken,
+            currentUsername = userProfile.puterUsername,
+            currentModelPref = userProfile.puterModelPref,
+            initialUsage = userProfile.toUsageReportOrNull(),
+            startInSwitchMode = puterDialogSwitchMode,
+            onAuthConnected = { token, username, modelPref, usage ->
                 scope.launch {
-                    container.userPreferences.saveGeminiConfig(key, modelPref)
-                    showApiKeyDialog = false
-                    hostToastMsg = if (key.isBlank()) {
-                        "API key removed"
-                    } else {
-                        "Saved (${com.rawedit.app.domain.GeminiInteractionsCodec.optionForPref(modelPref).shortLabel})"
-                    }
+                    container.userPreferences.savePuterSession(
+                        authToken = token,
+                        username = username,
+                        modelPref = modelPref,
+                        usage = usage
+                    )
+                    showPuterAuthDialog = false
+                    val leftStr = usage?.let { " \u2022 ${it.formattedRemaining()} left" }.orEmpty()
+                    hostToastMsg = "Signed in as @$username$leftStr"
                 }
             },
-            onDismiss = { showApiKeyDialog = false }
+            onSaveModelPref = { modelPref ->
+                scope.launch {
+                    container.userPreferences.savePuterModelPref(modelPref)
+                }
+            },
+            onSignOut = {
+                scope.launch {
+                    container.userPreferences.clearPuterSession()
+                    showPuterAuthDialog = false
+                    hostToastMsg = "Signed out of Puter"
+                }
+            },
+            onDismiss = { showPuterAuthDialog = false }
         )
     }
 }

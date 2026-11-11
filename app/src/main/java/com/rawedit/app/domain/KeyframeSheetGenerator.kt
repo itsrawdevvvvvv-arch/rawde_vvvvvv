@@ -435,7 +435,7 @@ Return ONLY the updated self-contained `<!DOCTYPE html>...</html>` file with zer
         }
     }
 
-    suspend fun buildGeminiSheetImages(
+    suspend fun buildReviewSheetImages(
         samples: List<KeyframeSample>,
         title: String,
         outDir: File,
@@ -461,7 +461,7 @@ Return ONLY the updated self-contained `<!DOCTYPE html>...</html>` file with zer
                     p = paintPack
                 )
                 val scaled = Bitmap.createScaledBitmap(pageBmp, 1120, 1440, true)
-                val outFile = File(outDir, "gemini_sheet_${pageIdx + 1}.jpg")
+                val outFile = File(outDir, "review_sheet_${pageIdx + 1}.jpg")
                 FileOutputStream(outFile).use { fos ->
                     scaled.compress(Bitmap.CompressFormat.JPEG, 86, fos)
                 }

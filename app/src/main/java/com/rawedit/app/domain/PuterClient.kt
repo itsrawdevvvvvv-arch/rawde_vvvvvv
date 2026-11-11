@@ -10,7 +10,6 @@ import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.withContext
-import kotlinx.serialization.json.JsonObject
 import org.json.JSONArray
 import org.json.JSONObject
 import java.io.ByteArrayOutputStream
@@ -37,24 +36,20 @@ data class SheetReviewResult(
     val issues: List<SheetIssue>
 )
 
-data class GeminiConnectionInfo(
+data class PuterConnectionInfo(
     val latencyMs: Long,
+    val username: String,
     val modelUsed: String,
     val usedFallback: Boolean,
-    val endpointLatencyMs: Long? = null
+    val usage: PuterUsageReport?
 )
 
-private class GeminiHttpException(
-    val httpCode: Int,
-    override val message: String
-) : IllegalStateException(message)
-
-private data class InteractionResult(
+private data class PuterCompletionResult(
     val text: String,
     val modelUsed: String
 )
 
-object GeminiClient {
+object PuterClient {
 
     private const val COOLDOWN_MS = 4 * 60_000L
 
@@ -93,46 +88,116 @@ object GeminiClient {
         modelCooldownUntilMs.clear()
     }
 
-    suspend fun testConnection(
-        apiKey: String,
-        modelPref: String = GeminiInteractionsCodec.PREF_AUTO
-    ): Result<Long> {
-        return testConnectionDetailed(apiKey = apiKey, modelPref = modelPref).map { it.latencyMs }
+    suspend fun fetchWhoami(authToken: String): Result<String> = withContext(Dispatchers.IO) {
+        try {
+            val clean = PuterCodec.normalizeAuthToken(authToken)
+            if (clean.isEmpty()) {
+                return@withContext Result.failure(IllegalStateException("Puter session token is missing."))
+            }
+            val conn = (URL(PuterCodec.WHOAMI_URL).openConnection() as HttpURLConnection).apply {
+                requestMethod = "GET"
+                connectTimeout = 9_000
+                readTimeout = 9_000
+                setRequestProperty("Authorization", "Bearer $clean")
+                setRequestProperty("Accept", "application/json")
+            }
+            try {
+                val code = conn.responseCode
+                val stream = if (code in 200..299) conn.inputStream else conn.errorStream
+                val body = stream?.bufferedReader(Charsets.UTF_8)?.use { it.readText() }.orEmpty()
+                if (code !in 200..299) {
+                    val err = PuterCodec.extractErrorDetail(body, code)
+                    throw PuterApiException(code, err.message, err.code, err.usageLimited)
+                }
+                val username = PuterCodec.parseWhoamiUsername(body)
+                    ?: throw IllegalStateException("Signed in, but username could not be read.")
+                Result.success(username)
+            } finally {
+                conn.disconnect()
+            }
+        } catch (ce: CancellationException) {
+            throw ce
+        } catch (t: Throwable) {
+            Result.failure(t)
+        }
+    }
+
+    suspend fun fetchUsage(authToken: String): Result<PuterUsageReport> = withContext(Dispatchers.IO) {
+        try {
+            val clean = PuterCodec.normalizeAuthToken(authToken)
+            if (clean.isEmpty()) {
+                return@withContext Result.failure(IllegalStateException("Puter session token is missing."))
+            }
+            val conn = (URL(PuterCodec.USAGE_URL).openConnection() as HttpURLConnection).apply {
+                requestMethod = "GET"
+                connectTimeout = 9_000
+                readTimeout = 9_000
+                setRequestProperty("Authorization", "Bearer $clean")
+                setRequestProperty("Accept", "application/json")
+            }
+            try {
+                val code = conn.responseCode
+                val stream = if (code in 200..299) conn.inputStream else conn.errorStream
+                val body = stream?.bufferedReader(Charsets.UTF_8)?.use { it.readText() }.orEmpty()
+                if (code !in 200..299) {
+                    val err = PuterCodec.extractErrorDetail(body, code)
+                    throw PuterApiException(code, err.message, err.code, err.usageLimited)
+                }
+                Result.success(PuterCodec.parseUsageReport(body))
+            } finally {
+                conn.disconnect()
+            }
+        } catch (ce: CancellationException) {
+            throw ce
+        } catch (t: Throwable) {
+            Result.failure(t)
+        }
     }
 
     suspend fun testConnectionDetailed(
-        apiKey: String,
-        modelPref: String = GeminiInteractionsCodec.PREF_AUTO
-    ): Result<GeminiConnectionInfo> = withContext(Dispatchers.IO) {
+        authToken: String,
+        modelPref: String = PuterCodec.PREF_AUTO
+    ): Result<PuterConnectionInfo> = withContext(Dispatchers.IO) {
         try {
-            val cleanKey = GeminiInteractionsCodec.normalizeApiKey(apiKey)
-            if (cleanKey.isEmpty()) {
-                return@withContext Result.failure(IllegalStateException("Google AI Studio API key is missing."))
+            val cleanToken = PuterCodec.normalizeAuthToken(authToken)
+            if (cleanToken.isEmpty()) {
+                return@withContext Result.failure(IllegalStateException("Not signed in to Puter.js yet."))
             }
 
             val t0 = System.currentTimeMillis()
-            val endpointLatency = verifyEndpointAndKey(cleanKey)
-            val expectedPrimary = GeminiInteractionsCodec.buildCandidateModels(
+            val username = fetchWhoami(cleanToken).getOrElse { err ->
+                throw err
+            }
+            val usage = fetchUsage(cleanToken).getOrNull()
+            if (usage != null && usage.isExhausted) {
+                throw PuterOutOfCreditsException(
+                    "Signed in as @$username, but Puter.js credits ran out. Switch account to continue.",
+                    httpCode = 402
+                )
+            }
+
+            val expectedPrimary = PuterCodec.buildCandidateModels(
                 modelPref = modelPref,
                 heavyTask = false
             ).first()
 
-            val probeRes = callInteractionWithFallback(
-                apiKey = cleanKey,
+            val probeRes = callChatWithFallback(
+                authToken = cleanToken,
                 modelPref = modelPref,
                 prompt = "Reply with the single word READY.",
-                requestedThinkingLevel = "minimal",
                 heavyTask = false,
                 systemInstruction = "Output only the word READY."
             )
 
+            val refreshedUsage = fetchUsage(cleanToken).getOrNull() ?: usage
             val totalMs = (System.currentTimeMillis() - t0).coerceAtLeast(1L)
             Result.success(
-                GeminiConnectionInfo(
+                PuterConnectionInfo(
                     latencyMs = totalMs,
+                    username = username,
                     modelUsed = probeRes.modelUsed,
                     usedFallback = probeRes.modelUsed != expectedPrimary,
-                    endpointLatencyMs = endpointLatency
+                    usage = refreshedUsage
                 )
             )
         } catch (ce: CancellationException) {
@@ -143,10 +208,10 @@ object GeminiClient {
     }
 
     suspend fun generatePalette(
-        apiKey: String,
+        authToken: String,
         nextNumber: Int,
         previousMood: String? = null,
-        modelPref: String = GeminiInteractionsCodec.PREF_AUTO
+        modelPref: String = PuterCodec.PREF_AUTO
     ): Result<PaletteState> = withContext(Dispatchers.IO) {
         try {
             val themeHint = PALETTE_THEMES[Random.nextInt(PALETTE_THEMES.size)]
@@ -155,24 +220,22 @@ object GeminiClient {
             val prompt = """
                 Generate a completely original, curated 3-color editorial palette for a kinetic-typography video edit (variation seed: $seed, aesthetic direction: "$themeHint"). $prevNote
                 Choose 3 distinct harmonious hex colors usable together as background, dominant display type, and accent. Avoid near-black muddy duplicates.
-                Respond with JSON matching the requested schema:
-                - colors: exactly 3 items, each with "hex" (#XXXXXX) and "name" (2 lowercase words)
-                - mood: 2-4 word vibe
-                - pairing: one concise sentence explaining background vs headline vs accent usage
+                Respond strictly with a single JSON object (no markdown fences, no prose) containing:
+                - "colors": array of exactly 3 objects, each with "hex" (#XXXXXX) and "name" (2 lowercase words)
+                - "mood": 2-4 word vibe
+                - "pairing": one concise sentence explaining background vs headline vs accent usage
             """.trimIndent()
 
-            val res = callInteractionWithFallback(
-                apiKey = apiKey,
+            val res = callChatWithFallback(
+                authToken = authToken,
                 modelPref = modelPref,
                 prompt = prompt,
-                requestedThinkingLevel = "minimal",
                 heavyTask = false,
-                systemInstruction = "You are a bold editorial color director. Always respond with valid JSON matching the schema.",
-                jsonSchema = GeminiInteractionsCodec.PALETTE_SCHEMA
+                systemInstruction = "You are a bold editorial color director. Respond ONLY with raw valid JSON."
             )
-            val obj = JSONObject(GeminiInteractionsCodec.stripJsonFences(res.text))
+            val obj = JSONObject(PuterCodec.stripJsonFences(res.text))
             val arr = obj.optJSONArray("colors")
-                ?: throw IllegalStateException("Gemini palette did not contain colors array.")
+                ?: throw IllegalStateException("Puter AI palette response did not contain a colors array.")
             val swatches = mutableListOf<PaletteSwatch>()
             for (i in 0 until minOf(3, arr.length())) {
                 val cObj = arr.optJSONObject(i) ?: continue
@@ -202,38 +265,36 @@ object GeminiClient {
     }
 
     suspend fun describeAsset(
-        apiKey: String,
+        authToken: String,
         asset: LocalAssetEntity,
         imageFile: File,
-        modelPref: String = GeminiInteractionsCodec.PREF_AUTO
+        modelPref: String = PuterCodec.PREF_AUTO
     ): Result<Pair<String, String>> = withContext(Dispatchers.IO) {
         try {
             val (b64, mime) = encodeFileForVision(imageFile, maxDim = 960)
             val isWebShot = asset.description.contains("Interactive UI targets", ignoreCase = true)
             val prompt = when {
                 asset.kind == LocalAssetEntity.KIND_CLIP -> {
-                    "This 3-frame storyboard is sampled at 10%, 50%, 85% from the video clip ${asset.relativePath} (${asset.width}x${asset.height}, ${String.format(Locale.US, "%.1f", asset.durationSec)}s). Return JSON with keys: \"description\" (1 concise sentence describing visual motion/content across the clip) and \"safeZone\" (1 concise sentence stating where kinetic overlay typography can sit safely with high contrast)."
+                    "This 3-frame storyboard is sampled at 10%, 50%, 85% from the video clip ${asset.relativePath} (${asset.width}x${asset.height}, ${String.format(Locale.US, "%.1f", asset.durationSec)}s). Respond strictly with raw JSON with keys: \"description\" (1 concise sentence describing visual motion/content across the clip) and \"safeZone\" (1 concise sentence stating where kinetic overlay typography can sit safely with high contrast)."
                 }
                 isWebShot -> {
-                    "Analyze this tutorial UI screenshot (${asset.relativePath}, ${asset.width}x${asset.height}). Extracted UI context: ${asset.description.take(700)}. Return JSON with keys: \"description\" (1-2 concise sentences describing the UI screen AND preserving key target [x,y,wxh] boxes for tutorial cursor/highlight animation) and \"safeZone\" (1 concise sentence stating which region is safest for kinetic titles without covering interactive controls)."
+                    "Analyze this tutorial UI screenshot (${asset.relativePath}, ${asset.width}x${asset.height}). Extracted UI context: ${asset.description.take(700)}. Respond strictly with raw JSON with keys: \"description\" (1-2 concise sentences describing the UI screen AND preserving key target [x,y,wxh] boxes for tutorial cursor/highlight animation) and \"safeZone\" (1 concise sentence stating which region is safest for kinetic titles without covering interactive controls)."
                 }
                 else -> {
                     val label = if (asset.kind == LocalAssetEntity.KIND_CUTOUT) "PNG cutout" else "image"
-                    "Analyze this $label (${asset.relativePath}, ${asset.width}x${asset.height}). Return JSON with keys: \"description\" (1 concise sentence describing visual subject and lighting/palette) and \"safeZone\" (1 concise sentence stating where kinetic overlay text can be placed cleanly without obscuring the subject)."
+                    "Analyze this $label (${asset.relativePath}, ${asset.width}x${asset.height}). Respond strictly with raw JSON with keys: \"description\" (1 concise sentence describing visual subject and lighting/palette) and \"safeZone\" (1 concise sentence stating where kinetic overlay text can be placed cleanly without obscuring the subject)."
                 }
             }
 
-            val res = callInteractionWithFallback(
-                apiKey = apiKey,
+            val res = callChatWithFallback(
+                authToken = authToken,
                 modelPref = modelPref,
                 prompt = prompt,
-                images = listOf(InteractionImageInput(base64Data = b64, mimeType = mime)),
-                requestedThinkingLevel = "minimal",
+                images = listOf(PuterImageInput(base64Data = b64, mimeType = mime)),
                 heavyTask = false,
-                systemInstruction = "Respond strictly with JSON matching the schema.",
-                jsonSchema = GeminiInteractionsCodec.DESCRIBE_ASSET_SCHEMA
+                systemInstruction = "Respond strictly with raw valid JSON containing keys \"description\" and \"safeZone\"."
             )
-            val obj = JSONObject(GeminiInteractionsCodec.stripJsonFences(res.text))
+            val obj = JSONObject(PuterCodec.stripJsonFences(res.text))
             val desc = obj.optString("description", asset.description).trim().ifBlank { asset.description }
             val safe = obj.optString("safeZone", asset.safeZone).trim().ifBlank { asset.safeZone }
             Result.success(desc to safe)
@@ -245,13 +306,13 @@ object GeminiClient {
     }
 
     suspend fun auditCutout(
-        apiKey: String,
+        authToken: String,
         comparisonFile: File,
         currentTolerance: Int,
         currentPad: CutoutPadRatios,
         isSvgSource: Boolean,
         keepOriginalMode: Boolean,
-        modelPref: String = GeminiInteractionsCodec.PREF_AUTO
+        modelPref: String = PuterCodec.PREF_AUTO
     ): Result<CutoutAuditResult> = withContext(Dispatchers.IO) {
         try {
             val (b64, mime) = encodeFileForVision(comparisonFile, maxDim = 1024)
@@ -272,25 +333,26 @@ object GeminiClient {
                 1. UNNECESSARY CROPPING: outer vector strokes, rounded corners, drop shadows, circular rings, or thin edges clipped/cut off at the top, right, bottom, or left border of the RIGHT cutout.
                 2. OVER-REMOVAL / ACCIDENTAL ERASURE: bright foreground details, inner logo text, eyes, shiny highlights, or anti-aliased edges erased into checkerboard tiles (comparing RIGHT vs LEFT), OR the LEFT image is a full rectangular UI screenshot/scene that should keep its background intact rather than keying out corners.
 
-                Rules:
-                - status: "OK" or "ADJUST"
-                - diagnosis: 1 concise honest sentence summarizing whether clipping or accidental erasure was seen and what you fixed (or 'Cutout edges and interior details look clean.')
-                - For isSvg=true, keep recommendedTolerance=0 and focus extraPad* (0.04..0.16) if strokes/shadows appear tight at edges.
-                - If inner light shapes or text were accidentally removed on a raster logo/icon, lower recommendedTolerance (6..20). Otherwise keep recommendedTolerance=$currentTolerance and extraPad*=0.0.
-                - Set keepOriginal=true ONLY if background removal destroyed a complex UI card, photo, or non-transparent scene that looks better un-keyed.
+                Respond ONLY with raw valid JSON containing exact keys:
+                - "status": "OK" or "ADJUST"
+                - "diagnosis": 1 concise honest sentence summarizing whether clipping or accidental erasure was seen and what you fixed (or "Cutout edges and interior details look clean.")
+                - "keepOriginal": boolean (set true ONLY if background removal destroyed a complex UI card, photo, or non-transparent scene)
+                - "recommendedTolerance": integer (if isSvg=true, use 0; if inner light shapes/text were erased on a raster logo, lower to 6..20; otherwise $currentTolerance)
+                - "extraPadTop": number 0.0..0.16
+                - "extraPadRight": number 0.0..0.16
+                - "extraPadBottom": number 0.0..0.16
+                - "extraPadLeft": number 0.0..0.16
             """.trimIndent()
 
-            val res = callInteractionWithFallback(
-                apiKey = apiKey,
+            val res = callChatWithFallback(
+                authToken = authToken,
                 modelPref = modelPref,
                 prompt = prompt,
-                images = listOf(InteractionImageInput(base64Data = b64, mimeType = mime)),
-                requestedThinkingLevel = "minimal",
+                images = listOf(PuterImageInput(base64Data = b64, mimeType = mime)),
                 heavyTask = false,
-                systemInstruction = "Respond strictly with JSON matching the schema.",
-                jsonSchema = GeminiInteractionsCodec.AUDIT_CUTOUT_SCHEMA
+                systemInstruction = "Respond strictly with raw valid JSON matching the exact schema keys."
             )
-            val obj = JSONObject(GeminiInteractionsCodec.stripJsonFences(res.text))
+            val obj = JSONObject(PuterCodec.stripJsonFences(res.text))
             val statusRaw = obj.optString("status", "OK").trim().uppercase(Locale.US)
             val keepOrig = obj.optBoolean("keepOriginal", false)
             val recTol = if (isSvgSource) {
@@ -309,9 +371,9 @@ object GeminiClient {
             Result.success(
                 CutoutAuditResult(
                     status = if (statusRaw == "ADJUST" || hasDelta) "ADJUST" else "OK",
-                    diagnosis = obj.optString("diagnosis", "Cutout edges and interior details verified by Gemini.")
+                    diagnosis = obj.optString("diagnosis", "Cutout edges and interior details verified by Puter AI.")
                         .trim()
-                        .ifBlank { "Cutout verified by Gemini." },
+                        .ifBlank { "Cutout verified by Puter AI." },
                     keepOriginal = keepOrig,
                     recommendedTolerance = recTol,
                     extraPadTop = exT,
@@ -329,11 +391,11 @@ object GeminiClient {
     }
 
     suspend fun reviewContactSheet(
-        apiKey: String,
+        authToken: String,
         sheetImages: List<File>,
         htmlCode: String,
         frameCount: Int,
-        modelPref: String = GeminiInteractionsCodec.PREF_AUTO
+        modelPref: String = PuterCodec.PREF_AUTO
     ): Result<SheetReviewResult> = withContext(Dispatchers.IO) {
         try {
             val prompt = """
@@ -342,28 +404,26 @@ object GeminiClient {
                 Also inspect the HTML source below:
                 ${htmlCode.take(65_000)}
 
-                Return JSON with:
-                - summary: short overall diagnostic sentence
-                - issues: array of visual defects, each with "frame" (e.g. "#09"), "time" (e.g. "t=4.00s"), "problem", and "fix" (exact CSS/JS adjustment needed)
+                Respond ONLY with raw valid JSON containing:
+                - "summary": short overall diagnostic sentence
+                - "issues": array of visual defects, each with "frame" (e.g. "#09"), "time" (e.g. "t=4.00s"), "problem", and "fix" (exact CSS/JS adjustment needed)
             """.trimIndent()
 
             val encodedImages = sheetImages.take(2).mapNotNull { file ->
                 if (!file.exists()) return@mapNotNull null
                 val (b64, mime) = encodeFileForVision(file, maxDim = 1400)
-                InteractionImageInput(base64Data = b64, mimeType = mime)
+                PuterImageInput(base64Data = b64, mimeType = mime)
             }
-            val res = callInteractionWithFallback(
-                apiKey = apiKey,
+            val res = callChatWithFallback(
+                authToken = authToken,
                 modelPref = modelPref,
                 prompt = prompt,
                 images = encodedImages,
-                requestedThinkingLevel = "medium",
                 heavyTask = true,
-                systemInstruction = "Respond strictly with JSON matching the schema.",
-                jsonSchema = GeminiInteractionsCodec.REVIEW_SHEET_SCHEMA
+                systemInstruction = "Respond strictly with raw valid JSON containing \"summary\" and \"issues\"."
             )
-            val obj = JSONObject(GeminiInteractionsCodec.stripJsonFences(res.text))
-            val summary = obj.optString("summary", "Gemini frame inspection finished.").trim()
+            val obj = JSONObject(PuterCodec.stripJsonFences(res.text))
+            val summary = obj.optString("summary", "Puter AI frame inspection finished.").trim()
             val arr = obj.optJSONArray("issues") ?: JSONArray()
             val issues = mutableListOf<SheetIssue>()
             for (i in 0 until arr.length()) {
@@ -386,12 +446,12 @@ object GeminiClient {
     }
 
     suspend fun autoFixHtmlWithSheet(
-        apiKey: String,
+        authToken: String,
         sheetImages: List<File>,
         htmlCode: String,
         issuesSummary: String,
         durationSec: Double,
-        modelPref: String = GeminiInteractionsCodec.PREF_AUTO
+        modelPref: String = PuterCodec.PREF_AUTO
     ): Result<String> = withContext(Dispatchers.IO) {
         try {
             val durStr = String.format(Locale.US, "%.2f", durationSec)
@@ -414,14 +474,13 @@ object GeminiClient {
             val encodedImages = sheetImages.take(2).mapNotNull { file ->
                 if (!file.exists()) return@mapNotNull null
                 val (b64, mime) = encodeFileForVision(file, maxDim = 1400)
-                InteractionImageInput(base64Data = b64, mimeType = mime)
+                PuterImageInput(base64Data = b64, mimeType = mime)
             }
-            val res = callInteractionWithFallback(
-                apiKey = apiKey,
+            val res = callChatWithFallback(
+                authToken = authToken,
                 modelPref = modelPref,
                 prompt = prompt,
                 images = encodedImages,
-                requestedThinkingLevel = "medium",
                 heavyTask = true,
                 systemInstruction = "Output only a complete, valid self-contained HTML document from <!DOCTYPE html> to </html> with no markdown fences or explanation."
             )
@@ -433,82 +492,27 @@ object GeminiClient {
         }
     }
 
-    private suspend fun verifyEndpointAndKey(cleanKey: String): Long? {
-        var lastError: Throwable? = null
-        for (attempt in 0 until 2) {
-            currentCoroutineContext().ensureActive()
-            val t0 = System.currentTimeMillis()
-            val endpoint = URL(GeminiInteractionsCodec.MODELS_CHECK_URL)
-            val conn = (endpoint.openConnection() as HttpURLConnection).apply {
-                requestMethod = "GET"
-                connectTimeout = 8_000
-                readTimeout = 8_000
-                setRequestProperty("x-goog-api-key", cleanKey)
-            }
-            try {
-                val code = conn.responseCode
-                val stream = if (code in 200..299) conn.inputStream else conn.errorStream
-                val body = stream?.bufferedReader(Charsets.UTF_8)?.use { it.readText() }.orEmpty()
-                if (code in 200..299) {
-                    return (System.currentTimeMillis() - t0).coerceAtLeast(1L)
-                }
-                val errMsg = GeminiInteractionsCodec.extractErrorMessage(body, code)
-                val cat = GeminiInteractionsCodec.classifyFailure(httpCode = code, rawMessage = errMsg)
-                if (cat == GeminiFailureCategory.FATAL_CLIENT) {
-                    throw IllegalStateException(errMsg)
-                }
-                // Transient 5xx/429 on models.list: continue into fallback interaction probes
-                return null
-            } catch (ce: CancellationException) {
-                throw ce
-            } catch (t: UnknownHostException) {
-                throw IllegalStateException(
-                    "Cannot reach generativelanguage.googleapis.com (DNS lookup failed). Check internet connection or disable VPN / Private DNS, then retry.",
-                    t
-                )
-            } catch (t: SocketTimeoutException) {
-                lastError = t
-            } catch (t: ConnectException) {
-                lastError = t
-            } catch (t: InterruptedIOException) {
-                lastError = t
-            } finally {
-                conn.disconnect()
-            }
-            if (attempt == 0) {
-                delay(450L)
-            }
-        }
-        if (lastError != null) {
-            throw IllegalStateException(
-                "Connection to Google AI (generativelanguage.googleapis.com) timed out before reaching Gemini models. Try switching Wi-Fi <-> 4G/5G or disabling VPN / Private DNS.",
-                lastError
-            )
-        }
-        return null
-    }
-
-    private suspend fun callInteractionWithFallback(
-        apiKey: String,
+    private suspend fun callChatWithFallback(
+        authToken: String,
         modelPref: String,
         prompt: String,
-        images: List<InteractionImageInput> = emptyList(),
-        requestedThinkingLevel: String = "medium",
+        images: List<PuterImageInput> = emptyList(),
         heavyTask: Boolean = false,
-        systemInstruction: String? = null,
-        jsonSchema: JsonObject? = null
-    ): InteractionResult {
-        val cleanKey = GeminiInteractionsCodec.normalizeApiKey(apiKey)
-        if (cleanKey.isEmpty()) throw IllegalStateException("Google AI Studio API key is missing.")
+        systemInstruction: String? = null
+    ): PuterCompletionResult {
+        val cleanToken = PuterCodec.normalizeAuthToken(authToken)
+        if (cleanToken.isEmpty()) {
+            throw IllegalStateException("Please sign in with Puter / Google first.")
+        }
 
-        val candidates = GeminiInteractionsCodec.buildCandidateModels(
+        val candidates = PuterCodec.buildCandidateModels(
             modelPref = modelPref,
             heavyTask = heavyTask,
             cooledDownModels = activeCooledModels()
         )
         val attemptedModels = mutableListOf<String>()
         var sawAnyHttpResponse = false
-        var lastCategory = GeminiFailureCategory.TRANSIENT_SERVER
+        var lastCategory = PuterFailureCategory.TRANSIENT_SERVER
         var lastRawMessage = ""
         var lastCause: Throwable? = null
 
@@ -516,56 +520,69 @@ object GeminiClient {
             currentCoroutineContext().ensureActive()
             attemptedModels.add(model)
 
-            val connectTimeoutMs = if (heavyTask) 11_000 else 9_000
+            val connectTimeoutMs = if (heavyTask) 12_000 else 10_000
             val readTimeoutMs = when {
-                heavyTask -> 42_000
-                index == 0 -> 14_000
-                else -> 18_000
+                heavyTask -> 55_000
+                index == 0 -> 18_000
+                else -> 22_000
             }
 
             try {
-                val text = callSingleInteraction(
-                    cleanKey = cleanKey,
+                val text = callSingleDriverCompletion(
+                    cleanToken = cleanToken,
                     model = model,
                     prompt = prompt,
                     images = images,
-                    requestedThinkingLevel = requestedThinkingLevel,
                     systemInstruction = systemInstruction,
-                    jsonSchema = jsonSchema,
                     connectTimeoutMs = connectTimeoutMs,
                     readTimeoutMs = readTimeoutMs
                 )
                 modelCooldownUntilMs.remove(model)
-                return InteractionResult(text = text, modelUsed = model)
+                return PuterCompletionResult(text = text, modelUsed = model)
             } catch (ce: CancellationException) {
                 throw ce
             } catch (t: UnknownHostException) {
                 throw IllegalStateException(
-                    "Cannot reach generativelanguage.googleapis.com (DNS lookup failed). Check internet connection or VPN/Private DNS and retry.",
+                    "Cannot reach api.puter.com (DNS lookup failed). Check internet connection or VPN/Private DNS and retry.",
                     t
                 )
             } catch (t: Throwable) {
                 lastCause = t
-                val httpCode = (t as? GeminiHttpException)?.httpCode
-                if (httpCode != null) {
+                val apiEx = t as? PuterApiException
+                val httpCode = apiEx?.httpCode
+                if (httpCode != null || apiEx != null) {
                     sawAnyHttpResponse = true
                 }
                 val isTimeout = t is SocketTimeoutException ||
                     (t is InterruptedIOException && (t.message ?: "").contains("time", ignoreCase = true))
                 val isConnectErr = t is ConnectException
                 val rawMsg = (t.message ?: t.javaClass.simpleName).trim()
-                val category = GeminiInteractionsCodec.classifyFailure(
+                val category = PuterCodec.classifyFailure(
                     httpCode = httpCode,
                     rawMessage = rawMsg,
+                    errorCode = apiEx?.errorCode,
+                    usageLimited = apiEx?.usageLimited == true,
                     isTimeout = isTimeout,
                     isDnsOrConnectError = isConnectErr
                 )
                 lastCategory = category
                 lastRawMessage = rawMsg
 
-                if (category == GeminiFailureCategory.FATAL_CLIENT) {
+                if (category == PuterFailureCategory.INSUFFICIENT_CREDITS) {
+                    throw PuterOutOfCreditsException(
+                        PuterCodec.buildFriendlyErrorMessage(
+                            lastCategory = category,
+                            lastRawMessage = rawMsg,
+                            attemptedModels = attemptedModels,
+                            sawAnyHttpResponse = sawAnyHttpResponse
+                        ),
+                        httpCode = httpCode ?: 402
+                    )
+                }
+
+                if (category == PuterFailureCategory.FATAL_AUTH) {
                     throw IllegalStateException(
-                        GeminiInteractionsCodec.buildFriendlyErrorMessage(
+                        PuterCodec.buildFriendlyErrorMessage(
                             lastCategory = category,
                             lastRawMessage = rawMsg,
                             attemptedModels = attemptedModels,
@@ -575,55 +592,15 @@ object GeminiClient {
                     )
                 }
 
-                // Mark model as temporarily congested so subsequent calls skip it automatically
                 modelCooldownUntilMs[model] = System.currentTimeMillis() + COOLDOWN_MS
 
                 if (index < candidates.lastIndex) {
-                    delay(Random.nextLong(220L, 480L))
+                    delay(Random.nextLong(220L, 450L))
                 }
             }
         }
 
-        // If every model returned HTTP traffic overload (never dead network), do one brief retry on lowest-latency Flash-Lite
-        if (sawAnyHttpResponse &&
-            (lastCategory == GeminiFailureCategory.RATE_OR_OVERLOAD || lastCategory == GeminiFailureCategory.TRANSIENT_SERVER)
-        ) {
-            currentCoroutineContext().ensureActive()
-            delay(Random.nextLong(900L, 1_400L))
-            val backupModel = GeminiInteractionsCodec.MODEL_LITE_FAST
-            attemptedModels.add(backupModel)
-            try {
-                val text = callSingleInteraction(
-                    cleanKey = cleanKey,
-                    model = backupModel,
-                    prompt = prompt,
-                    images = images,
-                    requestedThinkingLevel = if (heavyTask) "low" else "minimal",
-                    systemInstruction = systemInstruction,
-                    jsonSchema = jsonSchema,
-                    connectTimeoutMs = if (heavyTask) 11_000 else 9_000,
-                    readTimeoutMs = if (heavyTask) 42_000 else 18_000
-                )
-                modelCooldownUntilMs.remove(backupModel)
-                return InteractionResult(text = text, modelUsed = backupModel)
-            } catch (ce: CancellationException) {
-                throw ce
-            } catch (t: Throwable) {
-                lastCause = t
-                val httpCode = (t as? GeminiHttpException)?.httpCode
-                val isTimeout = t is SocketTimeoutException
-                val rawMsg = (t.message ?: t.javaClass.simpleName).trim()
-                lastCategory = GeminiInteractionsCodec.classifyFailure(
-                    httpCode = httpCode,
-                    rawMessage = rawMsg,
-                    isTimeout = isTimeout,
-                    isDnsOrConnectError = t is ConnectException
-                )
-                lastRawMessage = rawMsg
-            }
-        }
-
-        val friendly = GeminiInteractionsCodec.buildFriendlyErrorMessage(
+        val friendly = PuterCodec.buildFriendlyErrorMessage(
             lastCategory = lastCategory,
             lastRawMessage = lastRawMessage,
             attemptedModels = attemptedModels,
@@ -632,34 +609,31 @@ object GeminiClient {
         throw IllegalStateException(friendly, lastCause)
     }
 
-    private fun callSingleInteraction(
-        cleanKey: String,
+    private fun callSingleDriverCompletion(
+        cleanToken: String,
         model: String,
         prompt: String,
-        images: List<InteractionImageInput>,
-        requestedThinkingLevel: String,
+        images: List<PuterImageInput>,
         systemInstruction: String?,
-        jsonSchema: JsonObject?,
         connectTimeoutMs: Int,
         readTimeoutMs: Int
     ): String {
-        val payload = GeminiInteractionsCodec.buildRequestJson(
+        val payload = PuterCodec.buildDriversCallJson(
+            authToken = cleanToken,
             prompt = prompt,
             images = images,
-            thinkingLevel = requestedThinkingLevel,
             systemInstruction = systemInstruction,
-            jsonSchema = jsonSchema,
             model = model
         )
 
-        val endpoint = URL(GeminiInteractionsCodec.INTERACTIONS_URL)
+        val endpoint = URL(PuterCodec.DRIVERS_CALL_URL)
         val conn = (endpoint.openConnection() as HttpURLConnection).apply {
             requestMethod = "POST"
             connectTimeout = connectTimeoutMs
             readTimeout = readTimeoutMs
             doOutput = true
-            setRequestProperty("Content-Type", "application/json; charset=UTF-8")
-            setRequestProperty("x-goog-api-key", cleanKey)
+            setRequestProperty("Content-Type", "text/plain;actually=json")
+            setRequestProperty("Authorization", "Bearer $cleanToken")
         }
 
         try {
@@ -671,10 +645,16 @@ object GeminiClient {
             val body = stream?.bufferedReader(Charsets.UTF_8)?.use { it.readText() }.orEmpty()
 
             if (code !in 200..299) {
-                throw GeminiHttpException(code, GeminiInteractionsCodec.extractErrorMessage(body, code))
+                val parsed = PuterCodec.extractErrorDetail(body, code)
+                throw PuterApiException(
+                    httpCode = code,
+                    message = parsed.message,
+                    errorCode = parsed.code,
+                    usageLimited = parsed.usageLimited
+                )
             }
 
-            return GeminiInteractionsCodec.extractResponseText(body)
+            return PuterCodec.extractResponseText(body)
         } finally {
             conn.disconnect()
         }

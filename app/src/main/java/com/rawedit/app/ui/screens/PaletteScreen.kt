@@ -53,13 +53,13 @@ import androidx.compose.ui.unit.sp
 import androidx.core.content.FileProvider
 import com.rawedit.app.data.CacheManager
 import com.rawedit.app.data.local.UserProfile
-import com.rawedit.app.domain.GeminiClient
 import com.rawedit.app.domain.PaletteColorMath
 import com.rawedit.app.domain.PaletteExporter
 import com.rawedit.app.domain.PaletteJsonCodec
 import com.rawedit.app.domain.PaletteState
+import com.rawedit.app.domain.PuterClient
+import com.rawedit.app.domain.PuterOutOfCreditsException
 import com.rawedit.app.ui.components.BigPrimaryButton
-import com.rawedit.app.ui.components.CircleActionButton
 import com.rawedit.app.ui.components.RawSecondaryButton
 import com.rawedit.app.ui.components.RawToastBanner
 import com.rawedit.app.ui.icons.PixelMascotKind
@@ -82,7 +82,10 @@ fun PaletteScreen(
     userProfile: UserProfile,
     cacheManager: CacheManager,
     onSavePaletteState: (counter: Int, json: String) -> Unit,
-    onOpenApiKey: () -> Unit
+    onOpenPuterAuth: () -> Unit,
+    onSwitchPuterAccount: () -> Unit,
+    onRefreshPuterCredits: () -> Unit,
+    onMarkCreditsExhausted: () -> Unit
 ) {
     val context = LocalContext.current
     val haptic = LocalHapticFeedback.current
@@ -128,9 +131,16 @@ fun PaletteScreen(
         }
     }
 
+    val isSignedIn = userProfile.isPuterSignedIn
+    val isExhausted = userProfile.puterCreditsExhausted
+
     fun regeneratePalette() {
-        if (userProfile.geminiApiKey.isBlank()) {
-            onOpenApiKey()
+        if (!isSignedIn) {
+            onOpenPuterAuth()
+            return
+        }
+        if (isExhausted) {
+            onSwitchPuterAccount()
             return
         }
         if (generating) return
@@ -142,25 +152,29 @@ fun PaletteScreen(
             maxOf(userProfile.paletteCounter, currentPalette.number + 1)
         }
         scope.launch {
-            val res = GeminiClient.generatePalette(
-                apiKey = userProfile.geminiApiKey,
+            val res = PuterClient.generatePalette(
+                authToken = userProfile.puterAuthToken,
                 nextNumber = targetNumber,
                 previousMood = currentPalette.mood,
-                modelPref = userProfile.geminiModelPref
+                modelPref = userProfile.puterModelPref
             )
             generating = false
             res.onSuccess { palette ->
                 onSavePaletteState(targetNumber + 1, PaletteJsonCodec.encode(palette))
+                onRefreshPuterCredits()
                 haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
                 toastMsg = "Palette #${palette.numFormatted} ready"
             }.onFailure { err ->
-                errorMsg = err.message ?: "Gemini palette request failed"
+                if (err is PuterOutOfCreditsException) {
+                    onMarkCreditsExhausted()
+                }
+                errorMsg = err.message ?: "Puter AI palette request failed"
             }
         }
     }
 
-    LaunchedEffect(userProfile.geminiApiKey, userProfile.paletteJson) {
-        if (userProfile.geminiApiKey.isNotBlank() && userProfile.paletteJson.isBlank() && !autoFetchedOnce) {
+    LaunchedEffect(userProfile.puterAuthToken, userProfile.puterCreditsExhausted, userProfile.paletteJson) {
+        if (userProfile.isPuterSignedIn && !userProfile.puterCreditsExhausted && userProfile.paletteJson.isBlank() && !autoFetchedOnce) {
             autoFetchedOnce = true
             regeneratePalette()
         }
@@ -248,28 +262,70 @@ fun PaletteScreen(
                     horizontalArrangement = Arrangement.spacedBy(10.dp)
                 ) {
                     RawPixelMascot(kind = PixelMascotKind.PEEKING_CAT, size = 34.dp)
-                    CircleActionButton(
-                        icon = RawIconType.KEY,
-                        size = 40.dp,
-                        backgroundColor = if (userProfile.geminiApiKey.isNotBlank()) RawColors.AccentSoft else RawColors.RaisedCard,
-                        iconTint = if (userProfile.geminiApiKey.isNotBlank()) RawColors.Tan else RawColors.TextMuted,
-                        onClick = onOpenApiKey
-                    )
+                    Row(
+                        modifier = Modifier
+                            .clip(CircleShape)
+                            .background(
+                                when {
+                                    isExhausted -> RawColors.ErrorSoft
+                                    isSignedIn -> RawColors.AccentSoft
+                                    else -> RawColors.RaisedCard
+                                }
+                            )
+                            .border(
+                                width = 1.dp,
+                                color = if (isExhausted) RawColors.ErrorBorder else Color.Transparent,
+                                shape = CircleShape
+                            )
+                            .clickable {
+                                if (isExhausted) onSwitchPuterAccount() else onOpenPuterAuth()
+                            }
+                            .padding(horizontal = 12.dp, vertical = 7.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        RawIcon(
+                            type = RawIconType.GLOBE,
+                            size = 14.dp,
+                            tint = when {
+                                isExhausted -> RawColors.ErrorCoral
+                                isSignedIn -> RawColors.Tan
+                                else -> RawColors.TextMuted
+                            }
+                        )
+                        Text(
+                            text = when {
+                                !isSignedIn -> "Sign in"
+                                isExhausted -> "0 left \u2022 Switch"
+                                else -> userProfile.creditsSummaryText()
+                            },
+                            fontFamily = JetBrainsMonoFamily,
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 11.5.sp,
+                            color = when {
+                                isExhausted -> RawColors.ErrorCoral
+                                isSignedIn -> RawColors.Tan
+                                else -> RawColors.TextMuted
+                            },
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                    }
                 }
             }
 
-            if (userProfile.geminiApiKey.isBlank()) {
+            if (!isSignedIn) {
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
                         .clip(RoundedCornerShape(24.dp))
                         .background(RawColors.CardSurface)
-                        .clickable { onOpenApiKey() }
+                        .clickable { onOpenPuterAuth() }
                         .padding(horizontal = 16.dp, vertical = 14.dp),
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(12.dp)
                 ) {
-                    RawIcon(type = RawIconType.KEY, size = 18.dp, tint = RawColors.Tan)
+                    RawIcon(type = RawIconType.GLOBE, size = 18.dp, tint = RawColors.Tan)
                     Column(modifier = Modifier.weight(1f)) {
                         Text(
                             text = "Offline starter palette #${currentPalette.numFormatted}",
@@ -279,7 +335,7 @@ fun PaletteScreen(
                             color = RawColors.TextPrimary
                         )
                         Text(
-                            text = "Add your free Google AI Studio key for live Gemini palettes.",
+                            text = "Sign in with Google / Puter to generate live AI palettes.",
                             style = RawTypography.bodyMedium.copy(fontSize = 13.sp, lineHeight = 18.sp),
                             color = RawColors.TextMuted
                         )
@@ -291,7 +347,49 @@ fun PaletteScreen(
                             .padding(horizontal = 12.dp, vertical = 6.dp)
                     ) {
                         Text(
-                            text = "Add key",
+                            text = "Sign in",
+                            fontFamily = BricolageFamily,
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 12.5.sp,
+                            color = RawColors.Ink
+                        )
+                    }
+                }
+            } else if (isExhausted) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(24.dp))
+                        .background(RawColors.ErrorSoft)
+                        .border(1.dp, RawColors.ErrorBorder, RoundedCornerShape(24.dp))
+                        .clickable { onSwitchPuterAccount() }
+                        .padding(horizontal = 16.dp, vertical = 14.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
+                    RawIcon(type = RawIconType.WARN, size = 18.dp, tint = RawColors.ErrorCoral)
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            text = "Out of Puter credits",
+                            fontFamily = BricolageFamily,
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 15.sp,
+                            color = RawColors.ErrorCoral
+                        )
+                        Text(
+                            text = "Switch to another Google or Puter account to generate more palettes.",
+                            style = RawTypography.bodyMedium.copy(fontSize = 13.sp, lineHeight = 18.sp),
+                            color = RawColors.TextMuted
+                        )
+                    }
+                    Box(
+                        modifier = Modifier
+                            .clip(CircleShape)
+                            .background(RawColors.Cream)
+                            .padding(horizontal = 12.dp, vertical = 6.dp)
+                    ) {
+                        Text(
+                            text = "Switch",
                             fontFamily = BricolageFamily,
                             fontWeight = FontWeight.Bold,
                             fontSize = 12.5.sp,
@@ -302,12 +400,13 @@ fun PaletteScreen(
             }
 
             errorMsg?.let { err ->
-                Box(
+                Column(
                     modifier = Modifier
                         .fillMaxWidth()
                         .clip(RoundedCornerShape(20.dp))
                         .background(RawColors.ErrorSoft)
-                        .padding(14.dp)
+                        .padding(14.dp),
+                    verticalArrangement = Arrangement.spacedBy(10.dp)
                 ) {
                     Text(
                         text = err,
@@ -316,6 +415,14 @@ fun PaletteScreen(
                         fontSize = 14.sp,
                         color = RawColors.ErrorCoral
                     )
+                    if (isExhausted || err.contains("credit", ignoreCase = true)) {
+                        RawSecondaryButton(
+                            text = "Switch Puter Account",
+                            height = 42.dp,
+                            leadingIcon = RawIconType.GLOBE,
+                            onClick = onSwitchPuterAccount
+                        )
+                    }
                 }
             }
 

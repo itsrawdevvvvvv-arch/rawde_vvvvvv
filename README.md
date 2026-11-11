@@ -4,15 +4,16 @@ On-device Android Studio app that turns a voiceover (and optional SRT subtitles)
 
 ## Features
 
-- **Offline On-Device Render Stage (Android 9.0+ / API 28+)**: The WebView render engine (`LocalAssetServer`) strictly blocks all external network loads (`blockNetworkLoads = true`), runs with bundled OFL fonts and local files, and requires zero server or ads. Optional **Google AI Studio (`v1beta/interactions`)** integration uses the user's own API key solely on explicit tap with **Auto Smart Fallback** across `gemini-3.6-flash`, `gemini-3.5-flash-lite`, `gemini-3.8-flash`, and `gemini-3.1-flash-lite` (plus a per-model congestion cooldown & manual route selector in Key settings to bypass free-tier high traffic or timeouts).
+- **Offline On-Device Render Stage (Android 9.0+ / API 28+)**: The WebView render engine (`LocalAssetServer`) strictly blocks all external network loads (`blockNetworkLoads = true`), runs with bundled OFL fonts and local files, and requires zero server or ads. AI features use **Puter.js (`api.puter.com`)** via one-tap **Chrome / Google OAuth** sign-in with automatic smart failover across `gpt-4o-mini`, `gpt-5-nano`, `claude-haiku-5-5`, `gpt-5-mini`, `claude-sonnet-4-6`, and `gpt-4.1-mini`.
+- **Puter.js Credits Meter & Account Switching**: Live remaining balance & quota meter pulled from `https://api.puter.com/metering/usage`, displayed in **Profile**, **Puter Auth Dialog**, **Palette**, **Asset Locker**, and **Contact Sheet**, with immediate **"Switch account"** detection and Chrome sign-out helper whenever credits run out.
 - **Warm Wallet UI & Zero-Lag Motion**: Dark obsidian `#0D0D0F` canvas with Cream (`#F7ECE6`), Tan (`#CAA07D`), `Bricolage Grotesque`, and `JetBrains Mono` typography, borderless `28.dp` wallet cards, `FeatheredScrollEdges`, slide-to-start Big Type Home screen, 5-tab navigation dock (`Home`, `Palette`, `Create`, `Reels`, `Profile`), and interactive Canvas pixel mascots (`TV_BOT`, `PEEKING_CAT`, `MIC_BOT`, `ZIP_BOT`, `CODE_BOT`, `LENS_BOT`, `PHANTOM_BUDDY`).
 - **Offline Asset Locker (`assets/` Interception + HTTP 206 Range Streaming)**: Import photos, transparent PNG cutouts (checkerboard preview), and MP4 video clips (with 3-frame storyboard strips). Intercepted cleanly offline under `assets/<filename>` via `LocalAssetServer`, including `206 Partial Content` byte-range streaming for `<video>` seeking.
 - **In-App Web Capture Browser & Icon Finder**: Built directly into the Asset Locker (`WebBrowserAssetScreen`) with Mobile/Desktop `1280px` viewport toggling so tutorial creators can log in, snap crisp UI screenshots (with automatic interactive DOM button/field coordinates mapped for cursor & highlight animations), extract page `<svg>`/`<img>` elements, and search open-source SVG icon sets via Iconify.
-- **Automatic PNG Cutout Studio with Gemini AI Edge Verification**: Rasterizes sanitized `<svg>` assets (with expanded safe viewBox margins and optional monochrome color tinting) or removes uniform raster mattes via feathered boundary keying (`CutoutProcessor`). When a Google AI Studio key is configured, `GeminiClient.auditCutout` compares the original and cutout side-by-side to detect unnecessary edge clipping or accidentally erased interior highlights and automatically refines padding/tolerance.
-- **Gemini Auto-Description & Safe Text Zones**: Analyzes imported images, tutorial UI screenshots, or video clip storyboards via `gemini-3.8-flash` to record a concise visual description and safe typography placement zone, injected directly into the Cloud AI prompt.
-- **Studio Palette Generator & Card Exporter (`#0D0D0D` 3-Swatch Card)**: Generates fresh 3-color editorial palettes via `gemini-3.8-flash`, renders the `01 / 02 / 03` numbered dark editorial palette card with contrast-aware ink, saves/shares high-res `1080x1440` PNG cards ready for Cloud AI, and injects active palette tokens automatically into `PromptGenerator`.
+- **Automatic PNG Cutout Studio with Puter Vision AI Verification**: Rasterizes sanitized `<svg>` assets (with expanded safe viewBox margins and optional monochrome color tinting) or removes uniform raster mattes via feathered boundary keying (`CutoutProcessor`). When signed in to Puter, `PuterClient.auditCutout` compares the original and cutout side-by-side to detect unnecessary edge clipping or accidentally erased interior highlights and automatically refines padding/tolerance.
+- **Puter AI Auto-Description & Safe Text Zones**: Analyzes imported images, tutorial UI screenshots, or video clip storyboards via Puter Vision AI to record a concise visual description and safe typography placement zone, injected directly into the Cloud AI prompt.
+- **Studio Palette Generator & Card Exporter (`#0D0D0D` 3-Swatch Card)**: Generates fresh 3-color editorial palettes via Puter AI, renders the `01 / 02 / 03` numbered dark editorial palette card with contrast-aware ink, saves/shares high-res `1080x1440` PNG cards ready for Cloud AI, and injects active palette tokens automatically into `PromptGenerator`.
 - **`RAW.syncVideo` Video Sync Helper & Bundled Style Pack ZIP (`kinetic-explainer-style.zip`)**: Ships `kinetic-explainer-style/SKILL.md`, `engine/raw-helpers.js` (`RAW.syncVideo(videoEl, t, start, end, speed)`), `docs/ASSETS_GUIDE.md`, and tokens inside `app/src/main/assets/`. Auto-injected at runtime by `LocalAssetServer` and inspectable inside Step 3.
-- **Pre-Render Keyframe Contact Sheet & Gemini Frame Inspector**: Samples every keyframe (`Every 0.5s`, `Dense 0.25s`, `Scene beats`) with deterministic live DOM auto-fit (`__rawAutoFitStage`), exports timestamped PDF / ZIP contact sheets and targeted Cloud AI fix prompts (0 API cost), or runs optional 1-tap Gemini visual review & HTML auto-fix.
+- **Pre-Render Keyframe Contact Sheet & Puter Frame Inspector**: Samples every keyframe (`Every 0.5s`, `Dense 0.25s`, `Scene beats`) with deterministic live DOM auto-fit (`__rawAutoFitStage`), exports timestamped PDF / ZIP contact sheets and targeted Cloud AI fix prompts (0 API cost), or runs optional 1-tap Puter AI visual review & HTML auto-fix.
 - **On-Device Hardware MP4 Rendering**: Foreground service renders 1920x1080 @ 30 fps H.264 + 128 kbps AAC MP4, saves to `Movies/raw_edit` via MediaStore, and shares via `FileProvider`.
 
 ## Architecture
@@ -20,13 +21,13 @@ On-device Android Studio app that turns a voiceover (and optional SRT subtitles)
 ```
 com.rawedit.app/
   RawEditApplication.kt          # Enables WebView slow whole-document draw & notification channel
-  MainActivity.kt                # Compose host, morphing transitions, 5-tab liquid dock & API key dialog
+  MainActivity.kt                # Compose host, morphing transitions, rawedit://puter-auth deep link, 5-tab dock & Puter auth dialog
   data/
     CacheManager.kt              # Audio/image/video locker import, HTTP media storage, unlimited script/SRT/HTML storage
     local/
       Entities.kt                # Room ProjectEntity, VideoEntity & LocalAssetEntity (DB v2)
       RawEditDatabase.kt         # Room DAOs, DB singleton & MIGRATION_1_2
-      UserPreferences.kt         # DataStore user name, avatar, palette state/counter & Gemini API key
+      UserPreferences.kt         # DataStore user name, avatar, palette state, Puter auth session & live credits balance
     repository/RawEditRepository.kt
   domain/
     SrtParser.kt                 # Defensive SRT parser (up to 4 MB / 20,000 cues, control-char stripping)
@@ -35,10 +36,11 @@ com.rawedit.app/
     CutoutMath.kt                # Pure-Kotlin SVG sanitizer/viewBox padding, flood-key math & UI coord formatter
     CutoutProcessor.kt           # Offline WebView SVG batch rasterizer, PNG cutout flood-keyer & comparison cards
     WebAssetFetcher.kt           # Iconify open-source SVG search & safe HTTP/data-URI media downloader
-    GeminiInteractionsCodec.kt   # Pure-Kotlin Interactions API request builder, fallback routing, error classification & parser
-    GeminiClient.kt              # Resilient Interactions API client w/ auto-failover across 3.6 Flash, 3.5 Flash-Lite, 3.8 Flash & 3.1 Flash-Lite
+    PuterCodec.kt                # Puter.js drivers/call JSON codec, usage/credits parser, model router & failure classifier
+    PuterAuthBridge.kt           # Localhost 127.0.0.1 OAuth loopback receiver + Chrome Google/Puter launch + deep link return
+    PuterClient.kt               # Resilient Puter.js AI client (whoami, credits metering, fallback & 402 credit exhaustion handling)
     CodeValidator.kt             # Static checks + 20s network-blocked WebView dry-run + JS error capture
-    KeyframeSheetGenerator.kt    # Pre-render timestamped keyframe capture, PDF/ZIP export, Gemini sheets & fix prompt
+    KeyframeSheetGenerator.kt    # Pre-render timestamped keyframe capture, PDF/ZIP export, review sheets & fix prompt
   render/
     LocalAssetServer.kt          # Offline https://raw.local & https://assets.local interceptor, HTTP 206 Range, __rawSyncVideo & DOM auto-fit
     InputSurface.kt              # EGL14 + OpenGL ES 2.0 Bitmap -> MediaCodec Surface helper

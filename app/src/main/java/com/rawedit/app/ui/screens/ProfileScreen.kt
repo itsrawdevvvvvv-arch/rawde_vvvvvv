@@ -13,6 +13,7 @@ import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.shrinkVertically
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -71,7 +72,7 @@ import com.rawedit.app.BuildConfig
 import com.rawedit.app.data.CacheManager
 import com.rawedit.app.data.local.UserProfile
 import com.rawedit.app.data.local.VideoEntity
-import com.rawedit.app.domain.GeminiInteractionsCodec
+import com.rawedit.app.domain.PuterCodec
 import com.rawedit.app.ui.components.BigPrimaryButton
 import com.rawedit.app.ui.components.CircleActionButton
 import com.rawedit.app.ui.components.CircleAvatarCropperDialog
@@ -103,7 +104,9 @@ fun ProfileScreen(
     cacheManager: CacheManager,
     onUpdateName: (String) -> Unit,
     onUpdatePhoto: (String?) -> Unit,
-    onOpenApiKey: () -> Unit
+    onOpenPuterAuth: () -> Unit,
+    onSwitchPuterAccount: () -> Unit,
+    onRefreshPuterCredits: () -> Unit
 ) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
@@ -523,72 +526,197 @@ fun ProfileScreen(
                 }
             }
 
-            // Google AI Studio Key card (F5)
+            // Puter.js AI Account & Credits Left card
             item {
                 Spacer(modifier = Modifier.height(4.dp))
-                val hasKey = userProfile.geminiApiKey.isNotBlank()
-                val routeLabel = GeminiInteractionsCodec.routeDisplayLabel(userProfile.geminiModelPref)
-                val keySubtitle = if (hasKey) {
-                    val tail = userProfile.geminiApiKey.takeLast(4)
-                    "Saved (\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022$tail)  \u2022  $routeLabel"
+                val signedIn = userProfile.isPuterSignedIn
+                val usage = userProfile.toUsageReportOrNull()
+                val isExhausted = userProfile.puterCreditsExhausted || usage?.isExhausted == true
+                val isLow = usage?.isLow == true
+                val routeLabel = PuterCodec.routeDisplayLabel(userProfile.puterModelPref)
+                val creditsLabel = userProfile.creditsSummaryText()
+                val subtitle = if (signedIn) {
+                    "@${userProfile.puterUsername.ifBlank { "puter_user" }}  \u2022  $routeLabel"
                 } else {
-                    "Not set  \u2022  $routeLabel  \u2022  optional"
+                    "Not signed in  \u2022  Google / Puter OAuth"
                 }
-                Row(
+                val cardShape = RoundedCornerShape(28.dp)
+                Column(
                     modifier = Modifier
                         .padding(horizontal = 18.dp)
                         .fillMaxWidth()
-                        .clip(RoundedCornerShape(28.dp))
+                        .clip(cardShape)
                         .background(RawColors.CardSurface)
-                        .clickable(onClick = onOpenApiKey)
-                        .padding(horizontal = 18.dp, vertical = 18.dp),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
+                        .then(
+                            if (isExhausted) {
+                                Modifier.border(1.dp, RawColors.ErrorBorder, cardShape)
+                            } else Modifier
+                        )
+                        .clickable(onClick = onOpenPuterAuth)
+                        .padding(18.dp),
+                    verticalArrangement = Arrangement.spacedBy(12.dp)
                 ) {
                     Row(
-                        modifier = Modifier.weight(1f).padding(end = 12.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(12.dp)
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Box(
-                            modifier = Modifier
-                                .size(42.dp)
-                                .clip(CircleShape)
-                                .background(if (hasKey) RawColors.AccentSoft else RawColors.RaisedCard),
-                            contentAlignment = Alignment.Center
+                        Row(
+                            modifier = Modifier.weight(1f).padding(end = 10.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(12.dp)
                         ) {
-                            RawIcon(
-                                type = RawIconType.KEY,
-                                size = 19.dp,
-                                tint = if (hasKey) RawColors.Tan else RawColors.TextMuted
-                            )
+                            Box(
+                                modifier = Modifier
+                                    .size(42.dp)
+                                    .clip(CircleShape)
+                                    .background(
+                                        when {
+                                            isExhausted -> RawColors.ErrorSoft
+                                            signedIn -> RawColors.AccentSoft
+                                            else -> RawColors.RaisedCard
+                                        }
+                                    ),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                RawIcon(
+                                    type = RawIconType.GLOBE,
+                                    size = 19.dp,
+                                    tint = when {
+                                        isExhausted -> RawColors.ErrorCoral
+                                        signedIn -> RawColors.Tan
+                                        else -> RawColors.TextMuted
+                                    }
+                                )
+                            }
+                            Column {
+                                Text(
+                                    text = "Puter.js AI & Credits",
+                                    fontFamily = BricolageFamily,
+                                    fontWeight = FontWeight.Bold,
+                                    fontSize = 18.sp,
+                                    color = RawColors.TextPrimary
+                                )
+                                Spacer(modifier = Modifier.height(2.dp))
+                                Text(
+                                    text = subtitle,
+                                    fontFamily = JetBrainsMonoFamily,
+                                    fontWeight = FontWeight.Medium,
+                                    fontSize = 12.sp,
+                                    color = if (signedIn) RawColors.Tan else RawColors.TextMuted,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
+                                )
+                            }
                         }
-                        Column {
-                            Text(
-                                text = "Google AI Studio Key",
-                                fontFamily = BricolageFamily,
-                                fontWeight = FontWeight.Bold,
-                                fontSize = 18.sp,
-                                color = RawColors.TextPrimary
-                            )
-                            Spacer(modifier = Modifier.height(2.dp))
-                            Text(
-                                text = keySubtitle,
-                                fontFamily = JetBrainsMonoFamily,
-                                fontWeight = FontWeight.Medium,
-                                fontSize = 12.5.sp,
-                                color = if (hasKey) RawColors.Tan else RawColors.TextMuted,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis
+
+                        if (signedIn) {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                CircleActionButton(
+                                    icon = RawIconType.REFRESH,
+                                    size = 38.dp,
+                                    onClick = onRefreshPuterCredits
+                                )
+                                RawSecondaryButton(
+                                    text = "Manage",
+                                    height = 42.dp,
+                                    fillWidth = false,
+                                    onClick = onOpenPuterAuth
+                                )
+                            }
+                        } else {
+                            RawSecondaryButton(
+                                text = "Sign in",
+                                height = 46.dp,
+                                leadingIcon = RawIconType.GLOBE,
+                                fillWidth = false,
+                                onClick = onOpenPuterAuth
                             )
                         }
                     }
-                    RawSecondaryButton(
-                        text = if (hasKey) "Manage" else "Add key",
-                        height = 46.dp,
-                        fillWidth = false,
-                        onClick = onOpenApiKey
-                    )
+
+                    if (signedIn) {
+                        Column(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clip(RoundedCornerShape(18.dp))
+                                .background(RawColors.RaisedCard)
+                                .padding(14.dp),
+                            verticalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Column(modifier = Modifier.weight(1f)) {
+                                    Text(
+                                        text = "PUTER CREDITS LEFT",
+                                        fontFamily = JetBrainsMonoFamily,
+                                        fontWeight = FontWeight.Bold,
+                                        fontSize = 10.5.sp,
+                                        color = RawColors.TextMuted
+                                    )
+                                    Text(
+                                        text = creditsLabel,
+                                        fontFamily = BricolageFamily,
+                                        fontWeight = FontWeight.Bold,
+                                        fontSize = 18.sp,
+                                        color = if (isExhausted || isLow) RawColors.ErrorCoral else RawColors.Tan,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis
+                                    )
+                                }
+
+                                Box(
+                                    modifier = Modifier
+                                        .clip(CircleShape)
+                                        .background(if (isExhausted) RawColors.Cream else RawColors.CardSurface)
+                                        .clickable(onClick = onSwitchPuterAccount)
+                                        .padding(horizontal = 12.dp, vertical = 7.dp)
+                                ) {
+                                    Text(
+                                        text = "Switch account",
+                                        fontFamily = BricolageFamily,
+                                        fontWeight = FontWeight.Bold,
+                                        fontSize = 12.5.sp,
+                                        color = if (isExhausted) RawColors.Ink else RawColors.TextPrimary
+                                    )
+                                }
+                            }
+
+                            if (usage != null && usage.totalCapacityRaw > 0.0) {
+                                Box(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .height(6.dp)
+                                        .clip(CircleShape)
+                                        .background(RawColors.BgPrimary)
+                                ) {
+                                    Box(
+                                        modifier = Modifier
+                                            .fillMaxWidth(usage.remainingFraction)
+                                            .height(6.dp)
+                                            .clip(CircleShape)
+                                            .background(if (isExhausted || isLow) RawColors.ErrorCoral else RawColors.Tan)
+                                    )
+                                }
+                            }
+
+                            if (isExhausted) {
+                                Text(
+                                    text = "Credits ran out on this account. Tap Switch account to sign in with another Google or Puter account.",
+                                    fontFamily = BricolageFamily,
+                                    fontSize = 12.5.sp,
+                                    lineHeight = 17.5.sp,
+                                    color = RawColors.ErrorCoral
+                                )
+                            }
+                        }
+                    }
                 }
             }
 

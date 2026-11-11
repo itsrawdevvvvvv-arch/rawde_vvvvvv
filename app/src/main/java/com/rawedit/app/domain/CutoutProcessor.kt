@@ -561,7 +561,7 @@ object CutoutProcessor {
         canvas.drawRect(leftRect, solidBg)
         canvas.drawRect(leftRect, borderPaint)
 
-        // Right high-contrast checkerboard so accidental erasures are obvious to Gemini Vision
+        // Right high-contrast checkerboard so accidental erasures are obvious to Puter Vision AI
         val lightCell = Paint().apply { color = Color.parseColor("#47474E") }
         val darkCell = Paint().apply { color = Color.parseColor("#232328") }
         val cell = 18f

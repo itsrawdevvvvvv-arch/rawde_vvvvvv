@@ -83,10 +83,11 @@ import coil.request.ImageRequest
 import com.rawedit.app.data.CacheManager
 import com.rawedit.app.data.local.ProjectEntity
 import com.rawedit.app.domain.CodeValidator
-import com.rawedit.app.domain.GeminiClient
 import com.rawedit.app.domain.KeyframeSample
 import com.rawedit.app.domain.KeyframeSheetGenerator
 import com.rawedit.app.domain.KeyframeSheetResult
+import com.rawedit.app.domain.PuterClient
+import com.rawedit.app.domain.PuterOutOfCreditsException
 import com.rawedit.app.domain.SheetReviewResult
 import com.rawedit.app.domain.SheetSamplingMode
 import com.rawedit.app.ui.components.BigPrimaryButton
@@ -120,12 +121,17 @@ import java.util.Locale
 fun KeyframeSheetScreen(
     project: ProjectEntity,
     cacheManager: CacheManager,
-    geminiApiKey: String,
+    authToken: String,
     modelPref: String,
+    creditsExhausted: Boolean,
+    creditsBadgeText: String,
     onBack: () -> Unit,
     onEditCode: () -> Unit,
     onApplyFixedHtml: (String, Double) -> Unit,
-    onOpenApiKey: () -> Unit,
+    onOpenPuterAuth: () -> Unit,
+    onSwitchPuterAccount: () -> Unit,
+    onRefreshPuterCredits: () -> Unit,
+    onMarkCreditsExhausted: () -> Unit,
     onRenderNow: () -> Unit
 ) {
     val context = LocalContext.current
@@ -697,7 +703,7 @@ fun KeyframeSheetScreen(
                                 }
                             }
 
-                            // Gemini Frame Inspector Card (optional, uses user's own API key)
+                            // Puter AI Frame Inspector Card (optional)
                             item(span = { GridItemSpan(2) }) {
                                 Column(
                                     modifier = Modifier
@@ -720,25 +726,49 @@ fun KeyframeSheetScreen(
                                             RawIcon(RawIconType.SPARK, size = 18.dp, tint = RawColors.Tan)
                                             Column {
                                                 Text(
-                                                    text = "Gemini Frame Inspector",
+                                                    text = "Puter AI Frame Inspector",
                                                     fontFamily = BricolageFamily,
                                                     fontWeight = FontWeight.Bold,
                                                     fontSize = 18.5.sp,
                                                     color = RawColors.TextPrimary
                                                 )
                                                 Text(
-                                                    text = if (geminiApiKey.isBlank()) "Optional \u2022 Add API key to enable" else "Visual inspection + 1-tap HTML auto-fix",
-                                                    style = RawTypography.labelMedium
+                                                    text = when {
+                                                        authToken.isBlank() -> "Optional \u2022 Sign in with Google / Puter"
+                                                        creditsExhausted -> "Out of Puter credits \u2022 Switch account"
+                                                        else -> "Visual inspection + auto-fix \u2022 $creditsBadgeText"
+                                                    },
+                                                    style = RawTypography.labelMedium,
+                                                    color = if (creditsExhausted) RawColors.ErrorCoral else RawColors.TextMuted
                                                 )
                                             }
                                         }
-                                        CircleActionButton(
-                                            icon = RawIconType.KEY,
-                                            size = 38.dp,
-                                            backgroundColor = if (geminiApiKey.isNotBlank()) RawColors.AccentSoft else RawColors.RaisedCard,
-                                            iconTint = if (geminiApiKey.isNotBlank()) RawColors.Tan else RawColors.TextMuted,
-                                            onClick = onOpenApiKey
-                                        )
+                                        if (creditsExhausted) {
+                                            Box(
+                                                modifier = Modifier
+                                                    .clip(CircleShape)
+                                                    .background(RawColors.ErrorSoft)
+                                                    .border(1.dp, RawColors.ErrorBorder, CircleShape)
+                                                    .clickable(onClick = onSwitchPuterAccount)
+                                                    .padding(horizontal = 12.dp, vertical = 7.dp)
+                                            ) {
+                                                Text(
+                                                    text = "Switch",
+                                                    fontFamily = BricolageFamily,
+                                                    fontWeight = FontWeight.Bold,
+                                                    fontSize = 12.5.sp,
+                                                    color = RawColors.ErrorCoral
+                                                )
+                                            }
+                                        } else {
+                                            CircleActionButton(
+                                                icon = RawIconType.GLOBE,
+                                                size = 38.dp,
+                                                backgroundColor = if (authToken.isNotBlank()) RawColors.AccentSoft else RawColors.RaisedCard,
+                                                iconTint = if (authToken.isNotBlank()) RawColors.Tan else RawColors.TextMuted,
+                                                onClick = onOpenPuterAuth
+                                            )
+                                        }
                                     }
 
                                     Row(
@@ -751,22 +781,26 @@ fun KeyframeSheetScreen(
                                             enabled = !aiBusy,
                                             leadingIcon = RawIconType.LENS,
                                             onClick = {
-                                                if (geminiApiKey.isBlank()) {
-                                                    onOpenApiKey()
+                                                if (authToken.isBlank()) {
+                                                    onOpenPuterAuth()
+                                                    return@RawSecondaryButton
+                                                }
+                                                if (creditsExhausted) {
+                                                    onSwitchPuterAccount()
                                                     return@RawSecondaryButton
                                                 }
                                                 aiBusy = true
                                                 aiAction = "review"
                                                 aiError = null
                                                 scope.launch {
-                                                    val imgs = KeyframeSheetGenerator.buildGeminiSheetImages(
+                                                    val imgs = KeyframeSheetGenerator.buildReviewSheetImages(
                                                         samples = res.samples,
                                                         title = project.title.ifBlank { "Untitled Reel" },
                                                         outDir = cacheManager.sheetTempDir(project.id),
                                                         maxPages = 2
                                                     )
-                                                    val review = GeminiClient.reviewContactSheet(
-                                                        apiKey = geminiApiKey,
+                                                    val review = PuterClient.reviewContactSheet(
+                                                        authToken = authToken,
                                                         sheetImages = imgs,
                                                         htmlCode = resolvedHtml,
                                                         frameCount = res.samples.size,
@@ -775,10 +809,14 @@ fun KeyframeSheetScreen(
                                                     aiBusy = false
                                                     aiAction = ""
                                                     review.onSuccess { r ->
+                                                        onRefreshPuterCredits()
                                                         reviewResult = r
                                                         toastMsg = if (r.issues.isEmpty()) "No visual glitches spotted" else "Found ${r.issues.size} frame notes"
                                                     }.onFailure { err ->
-                                                        aiError = err.message ?: "Gemini inspection failed."
+                                                        if (err is PuterOutOfCreditsException) {
+                                                            onMarkCreditsExhausted()
+                                                        }
+                                                        aiError = err.message ?: "Puter AI inspection failed."
                                                     }
                                                 }
                                             },
@@ -793,15 +831,19 @@ fun KeyframeSheetScreen(
                                             containerColor = RawColors.Tan,
                                             contentColor = RawColors.Ink,
                                             onClick = {
-                                                if (geminiApiKey.isBlank()) {
-                                                    onOpenApiKey()
+                                                if (authToken.isBlank()) {
+                                                    onOpenPuterAuth()
+                                                    return@BigPrimaryButton
+                                                }
+                                                if (creditsExhausted) {
+                                                    onSwitchPuterAccount()
                                                     return@BigPrimaryButton
                                                 }
                                                 aiBusy = true
                                                 aiAction = "fix"
                                                 aiError = null
                                                 scope.launch {
-                                                    val imgs = KeyframeSheetGenerator.buildGeminiSheetImages(
+                                                    val imgs = KeyframeSheetGenerator.buildReviewSheetImages(
                                                         samples = res.samples,
                                                         title = project.title.ifBlank { "Untitled Reel" },
                                                         outDir = cacheManager.sheetTempDir(project.id),
@@ -825,8 +867,8 @@ fun KeyframeSheetScreen(
                                                         }
                                                     }.ifBlank { "Inspect all frames for text overflow, overlap, margin clipping, or contrast issues." }
 
-                                                    val fixRes = GeminiClient.autoFixHtmlWithSheet(
-                                                        apiKey = geminiApiKey,
+                                                    val fixRes = PuterClient.autoFixHtmlWithSheet(
+                                                        authToken = authToken,
                                                         sheetImages = imgs,
                                                         htmlCode = resolvedHtml,
                                                         issuesSummary = issuesText,
@@ -834,6 +876,7 @@ fun KeyframeSheetScreen(
                                                         modelPref = modelPref
                                                     )
                                                     fixRes.onSuccess { fixedHtml ->
+                                                        onRefreshPuterCredits()
                                                         val validation = CodeValidator.validateFull(context, cacheManager, fixedHtml)
                                                         aiBusy = false
                                                         aiAction = ""
@@ -842,7 +885,7 @@ fun KeyframeSheetScreen(
                                                             onApplyFixedHtml(validation.cleanedHtml, validation.durationSec)
                                                             reviewResult = null
                                                             aiError = null
-                                                            toastMsg = "Gemini fix applied — re-capturing sheet"
+                                                            toastMsg = "Puter AI fix applied — re-capturing sheet"
                                                             captureGen++
                                                         } else {
                                                             aiError = "Auto-fix failed offline check: ${validation.summaryMessage}"
@@ -850,7 +893,10 @@ fun KeyframeSheetScreen(
                                                     }.onFailure { err ->
                                                         aiBusy = false
                                                         aiAction = ""
-                                                        aiError = err.message ?: "Gemini auto-fix failed."
+                                                        if (err is PuterOutOfCreditsException) {
+                                                            onMarkCreditsExhausted()
+                                                        }
+                                                        aiError = err.message ?: "Puter AI auto-fix failed."
                                                     }
                                                 }
                                             },
@@ -859,12 +905,13 @@ fun KeyframeSheetScreen(
                                     }
 
                                     aiError?.let { msg ->
-                                        Box(
+                                        Column(
                                             modifier = Modifier
                                                 .fillMaxWidth()
                                                 .clip(RoundedCornerShape(16.dp))
                                                 .background(RawColors.ErrorSoft)
-                                                .padding(12.dp)
+                                                .padding(12.dp),
+                                            verticalArrangement = Arrangement.spacedBy(8.dp)
                                         ) {
                                             Text(
                                                 text = msg,
@@ -873,6 +920,14 @@ fun KeyframeSheetScreen(
                                                 fontSize = 13.5.sp,
                                                 color = RawColors.ErrorCoral
                                             )
+                                            if (creditsExhausted || msg.contains("credit", ignoreCase = true)) {
+                                                RawSecondaryButton(
+                                                    text = "Switch Puter Account",
+                                                    height = 42.dp,
+                                                    leadingIcon = RawIconType.GLOBE,
+                                                    onClick = onSwitchPuterAccount
+                                                )
+                                            }
                                         }
                                     }
 
