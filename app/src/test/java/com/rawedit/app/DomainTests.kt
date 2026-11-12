@@ -208,6 +208,11 @@ Enjoy!
         assertTrue(prompt.contains("#0D0D0D dark"))
         assertTrue(prompt.contains("#F7ECE6 (warm cream)"))
         assertTrue(prompt.contains("#CAA07D (roasted tan)"))
+        assertTrue(prompt.contains("Colour Palette"))
+        assertTrue(prompt.contains("Fonts"))
+        assertTrue(prompt.contains("Text Animation Style"))
+        assertTrue(prompt.contains("Apple-Style Bouncy"))
+        assertTrue(prompt.contains("Zero static frames"))
     }
 
     @Test
