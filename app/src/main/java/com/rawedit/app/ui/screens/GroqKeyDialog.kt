@@ -216,7 +216,7 @@ fun GroqKeyDialog(
                 text = if (startInSwitchMode || quotaExhausted) {
                     "Your current key hit its daily/minute quota. Create or copy a fresh gsk_... key in Groq Console and paste it below to keep inspecting frames, describing assets, and generating palettes."
                 } else {
-                    "Fast Llama 4 Vision & Llama 3.3 / GPT-OSS reasoning via api.groq.com. Offline render never leaves your phone."
+                    "Fast Qwen 3.8 Vision & GPT-OSS reasoning via api.groq.com. Offline render never leaves your phone."
                 },
                 fontFamily = BricolageFamily,
                 fontSize = 13.5.sp,
@@ -228,7 +228,9 @@ fun GroqKeyDialog(
                 text = "Get free key at console.groq.com/keys \u2197",
                 fontFamily = BricolageFamily,
                 fontWeight = FontWeight.SemiBold,
-                fontSize = 14.sp,
+                fontSize = 13.sp,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
                 color = RawColors.Tan,
                 textDecoration = TextDecoration.Underline,
                 modifier = Modifier.clickable {

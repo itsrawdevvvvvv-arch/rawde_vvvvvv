@@ -379,28 +379,55 @@ Enjoy!
         assertEquals("gsk_...c123", GroqCodec.maskApiKey("gsk_abcc123"))
 
         val sevenImages = (1..7).map { GroqImageInput(base64Data = "AQID$it", mimeType = "image/jpeg") }
-        val payload = GroqCodec.buildChatCompletionJson(
+        val qwenVisionPayload = GroqCodec.buildChatCompletionJson(
             prompt = "Inspect frames",
             images = sevenImages,
             systemInstruction = "Return valid JSON",
-            model = GroqCodec.MODEL_LLAMA4_SCOUT,
+            model = GroqCodec.MODEL_QWEN38_27B,
             jsonObjectMode = true,
             maxCompletionTokens = 1024,
             temperature = 0.15
         )
-        assertTrue(payload.contains("\"model\":\"meta-llama/llama-4-scout-17b-16e-instruct\""))
-        assertTrue(payload.contains("\"type\":\"json_object\""))
-        assertTrue(payload.contains("data:image/jpeg;base64,AQID5"))
-        assertFalse(payload.contains("AQID6"))
+        assertTrue(qwenVisionPayload.contains("\"model\":\"qwen/qwen3.8-27b\""))
+        assertTrue(qwenVisionPayload.contains("\"type\":\"json_object\""))
+        assertTrue(qwenVisionPayload.contains("\"reasoning_effort\":\"none\""))
+        assertTrue(qwenVisionPayload.contains("data:image/jpeg;base64,AQID3"))
+        assertFalse(qwenVisionPayload.contains("AQID4"))
 
-        val qwenPayload = GroqCodec.buildChatCompletionJson(
+        val scoutPayload = GroqCodec.buildChatCompletionJson(
+            prompt = "Inspect frames",
+            images = sevenImages,
+            model = GroqCodec.MODEL_LLAMA4_SCOUT
+        )
+        assertTrue(scoutPayload.contains("data:image/jpeg;base64,AQID5"))
+        assertFalse(scoutPayload.contains("AQID6"))
+
+        val ossProbePayload = GroqCodec.buildChatCompletionJson(
+            prompt = "Reply READY",
+            model = GroqCodec.MODEL_GPT_OSS_120B,
+            maxCompletionTokens = 4,
+            heavyTask = false
+        )
+        assertTrue(ossProbePayload.contains("\"max_completion_tokens\":256"))
+        assertTrue(ossProbePayload.contains("\"reasoning_effort\":\"low\""))
+
+        val qwenLegacyPayload = GroqCodec.buildChatCompletionJson(
             prompt = "Patch HTML",
             model = GroqCodec.MODEL_QWEN3_32B
         )
-        assertTrue(qwenPayload.contains("\"reasoning_format\":\"hidden\""))
+        assertTrue(qwenLegacyPayload.contains("\"reasoning_format\":\"hidden\""))
 
-        val thinkingResp = """{"choices":[{"message":{"role":"assistant","content":"<think>check margin</think>{\"status\":\"OK\"}"}}]}"""
-        assertEquals("{\"status\":\"OK\"}", GroqCodec.extractResponseText(thinkingResp))
+        val thinkingResp = """{"choices":[{"message":{"role":"assistant","content":"<think>check margin</think>{\"status\":\"OK\"}"},"finish_reason":"stop"}],"error":null}"""
+        assertEquals("{\"status\":\"OK\"}", GroqCodec.extractResponseText(thinkingResp, modelId = GroqCodec.MODEL_QWEN38_27B))
+
+        val lengthTruncatedResp = """{"choices":[{"message":{"role":"assistant","content":""},"finish_reason":"length"}]}"""
+        try {
+            GroqCodec.extractResponseText(lengthTruncatedResp, modelId = GroqCodec.MODEL_GPT_OSS_120B)
+            fail("Expected GroqApiException on finish_reason=length")
+        } catch (ex: GroqApiException) {
+            assertEquals("length_truncated", ex.errorCode)
+            assertTrue(ex.message.contains("finish_reason=length"))
+        }
 
         val authErrJson = """{"error":{"message":"Invalid API Key","type":"invalid_request_error","code":"invalid_api_key"}}"""
         try {
@@ -409,6 +436,21 @@ Enjoy!
         } catch (ex: GroqApiException) {
             assertEquals("invalid_api_key", ex.errorCode)
         }
+
+        val modelsJson = """{"data":[{"id":"whisper-large-v3"},{"id":"canopylabs/orpheus-v1-english"},{"id":"openai/gpt-oss-120b"},{"id":"openai/gpt-oss-20b"},{"id":"qwen/qwen3.8-27b"}]}"""
+        val parsedIds = GroqCodec.parseAvailableChatModelIds(modelsJson)
+        assertEquals(
+            setOf(GroqCodec.MODEL_GPT_OSS_120B, GroqCodec.MODEL_GPT_OSS_20B, GroqCodec.MODEL_QWEN38_27B),
+            parsedIds
+        )
+
+        val filteredHeavy = GroqCodec.buildCandidateModels(
+            GroqCodec.PREF_AUTO,
+            requiresVision = false,
+            heavyTask = true,
+            availableModels = parsedIds
+        )
+        assertEquals(listOf(GroqCodec.MODEL_GPT_OSS_120B, GroqCodec.MODEL_QWEN38_27B, GroqCodec.MODEL_GPT_OSS_20B), filteredHeavy)
 
         val headers = mapOf<String?, List<String>>(
             "x-ratelimit-remaining-requests" to listOf("0"),
@@ -425,14 +467,25 @@ Enjoy!
         assertEquals(0, report.remainingPercent)
 
         val visionModels = GroqCodec.buildCandidateModels(GroqCodec.PREF_AUTO, requiresVision = true, heavyTask = false)
-        assertEquals(listOf(GroqCodec.MODEL_LLAMA4_SCOUT, GroqCodec.MODEL_LLAMA4_MAVERICK), visionModels)
+        assertEquals(
+            listOf(GroqCodec.MODEL_QWEN38_27B, GroqCodec.MODEL_MUSE_SPARK, GroqCodec.MODEL_LLAMA4_SCOUT, GroqCodec.MODEL_LLAMA4_MAVERICK),
+            visionModels
+        )
 
         val heavyTextModels = GroqCodec.buildCandidateModels(GroqCodec.PREF_AUTO, requiresVision = false, heavyTask = true)
-        assertEquals(GroqCodec.MODEL_LLAMA33_70B, heavyTextModels.first())
+        assertEquals(GroqCodec.MODEL_GPT_OSS_120B, heavyTextModels.first())
 
         assertEquals(
             GroqFailureCategory.FATAL_AUTH,
             GroqCodec.classifyFailure(401, "Invalid API key", errorCode = "invalid_api_key")
+        )
+        assertEquals(
+            GroqFailureCategory.MODEL_UNAVAILABLE,
+            GroqCodec.classifyFailure(400, "model decommissioned", errorCode = "model_decommissioned")
+        )
+        assertEquals(
+            GroqFailureCategory.MODEL_UNAVAILABLE,
+            GroqCodec.classifyFailure(403, "blocked at the organization level", errorCode = "model_permission_blocked_org")
         )
         assertEquals(
             GroqFailureCategory.QUOTA_OR_CREDITS_EXHAUSTED,
@@ -454,7 +507,7 @@ Enjoy!
         val quotaMsg = GroqCodec.buildFriendlyErrorMessage(
             lastCategory = GroqFailureCategory.QUOTA_OR_CREDITS_EXHAUSTED,
             lastRawMessage = "limit reached",
-            attemptedModels = listOf(GroqCodec.MODEL_LLAMA33_70B),
+            attemptedModels = listOf(GroqCodec.MODEL_GPT_OSS_120B),
             sawAnyHttpResponse = true,
             quota = report
         )

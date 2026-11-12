@@ -63,10 +63,17 @@ private data class GroqCompletionResult(
 object GroqClient {
 
     private const val COOLDOWN_MS = 3 * 60_000L
+    private const val MODELS_CACHE_TTL_MS = 5 * 60_000L
     private const val SMALL_HTML_FULL_REWRITE_BYTES = 12 * 1024
+
+    private data class CachedModels(
+        val ids: Set<String>,
+        val fetchedAtMs: Long
+    )
 
     private val modelCooldownUntilMs = ConcurrentHashMap<String, Long>()
     private val latestQuotaByKey = ConcurrentHashMap<String, GroqQuotaReport>()
+    private val availableModelsByKey = ConcurrentHashMap<String, CachedModels>()
 
     private val PALETTE_THEMES = listOf(
         "brutalist swiss",
@@ -136,7 +143,14 @@ object GroqClient {
                     val err = GroqCodec.extractErrorDetail(body, code)
                     throw GroqApiException(code, err.message, err.code, err.type, quota)
                 }
-                val count = runCatching { JSONObject(body).optJSONArray("data")?.length() ?: 0 }.getOrDefault(0)
+                val chatIds = GroqCodec.parseAvailableChatModelIds(body)
+                if (chatIds.isNotEmpty()) {
+                    availableModelsByKey[clean] = CachedModels(
+                        ids = chatIds,
+                        fetchedAtMs = System.currentTimeMillis()
+                    )
+                }
+                val count = runCatching { JSONObject(body).optJSONArray("data")?.length() ?: 0 }.getOrDefault(chatIds.size)
                 Result.success(count)
             } finally {
                 conn.disconnect()
@@ -146,6 +160,16 @@ object GroqClient {
         } catch (t: Throwable) {
             Result.failure(t)
         }
+    }
+
+    private suspend fun resolveAvailableChatModels(cleanKey: String): Set<String> {
+        val now = System.currentTimeMillis()
+        val cached = availableModelsByKey[cleanKey]
+        if (cached != null && (now - cached.fetchedAtMs) <= MODELS_CACHE_TTL_MS && cached.ids.isNotEmpty()) {
+            return cached.ids
+        }
+        verifyModelsEndpoint(cleanKey)
+        return availableModelsByKey[cleanKey]?.ids ?: emptySet()
     }
 
     suspend fun refreshQuota(
@@ -160,12 +184,12 @@ object GroqClient {
             val res = callChatWithFallback(
                 apiKey = clean,
                 modelPref = modelPref,
-                prompt = "Reply with OK.",
+                prompt = "Reply with only the word OK.",
                 requiresVision = false,
                 heavyTask = false,
-                systemInstruction = "Output OK.",
+                systemInstruction = "Reply with only OK.",
                 jsonObjectMode = false,
-                maxCompletionTokens = 2,
+                maxCompletionTokens = 256,
                 temperature = 0.0
             )
             val quota = res.quota ?: getLatestQuota(clean) ?: GroqQuotaReport(updatedAtMs = System.currentTimeMillis())
@@ -187,26 +211,29 @@ object GroqClient {
                 return@withContext Result.failure(IllegalStateException("Paste your Groq API key (gsk_...) first."))
             }
 
+            clearModelCooldowns()
             val t0 = System.currentTimeMillis()
             val modelsCount = verifyModelsEndpoint(cleanKey).getOrElse { err ->
                 throw err
             }
+            val liveModels = availableModelsByKey[cleanKey]?.ids ?: emptySet()
 
             val expectedPrimary = GroqCodec.buildCandidateModels(
                 modelPref = modelPref,
                 requiresVision = false,
-                heavyTask = false
+                heavyTask = false,
+                availableModels = liveModels
             ).first()
 
             val probeRes = callChatWithFallback(
                 apiKey = cleanKey,
                 modelPref = modelPref,
-                prompt = "Reply with the single word READY.",
+                prompt = "Reply with only the word READY.",
                 requiresVision = false,
                 heavyTask = false,
                 systemInstruction = "Output only the word READY.",
                 jsonObjectMode = false,
-                maxCompletionTokens = 4,
+                maxCompletionTokens = 256,
                 temperature = 0.0
             )
 
@@ -254,7 +281,7 @@ object GroqClient {
                 heavyTask = false,
                 systemInstruction = "You are a bold editorial color director. Respond ONLY with raw valid JSON.",
                 jsonObjectMode = true,
-                maxCompletionTokens = 320,
+                maxCompletionTokens = 1024,
                 temperature = 0.7
             )
             val obj = JSONObject(GroqCodec.stripJsonFences(res.text))
@@ -319,7 +346,7 @@ object GroqClient {
                 heavyTask = false,
                 systemInstruction = "Respond strictly with raw valid JSON containing keys \"description\" and \"safeZone\".",
                 jsonObjectMode = true,
-                maxCompletionTokens = 360,
+                maxCompletionTokens = 1024,
                 temperature = 0.2
             )
             val obj = JSONObject(GroqCodec.stripJsonFences(res.text))
@@ -381,7 +408,7 @@ object GroqClient {
                 heavyTask = false,
                 systemInstruction = "Respond strictly with raw valid JSON matching the exact schema keys.",
                 jsonObjectMode = true,
-                maxCompletionTokens = 360,
+                maxCompletionTokens = 1024,
                 temperature = 0.15
             )
             val obj = JSONObject(GroqCodec.stripJsonFences(res.text))
@@ -585,7 +612,7 @@ object GroqClient {
                     heavyTask = true,
                     systemInstruction = PROMPT_C2_SYSTEM,
                     jsonObjectMode = true,
-                    maxCompletionTokens = 3_200,
+                    maxCompletionTokens = 6_144,
                     temperature = 0.1
                 )
                 lastModelUsed = stage2Res.modelUsed
@@ -747,7 +774,7 @@ object GroqClient {
             heavyTask = true,
             systemInstruction = PROMPT_C1_SYSTEM,
             jsonObjectMode = true,
-            maxCompletionTokens = 2_800,
+            maxCompletionTokens = 4_096,
             temperature = 0.15
         )
         val plan = GroqCodec.parseStage1Plan(res.text)
@@ -810,13 +837,16 @@ object GroqClient {
             throw IllegalStateException("Please add your Groq API key first.")
         }
 
+        val liveAvailable = resolveAvailableChatModels(cleanKey)
         val candidates = GroqCodec.buildCandidateModels(
             modelPref = modelPref,
             requiresVision = requiresVision,
             heavyTask = heavyTask,
-            cooledDownModels = activeCooledModels()
+            cooledDownModels = activeCooledModels(),
+            availableModels = liveAvailable
         )
         val attemptedModels = mutableListOf<String>()
+        val modelErrors = mutableListOf<String>()
         var sawAnyHttpResponse = false
         var lastCategory = GroqFailureCategory.TRANSIENT_SERVER
         var lastRawMessage = ""
@@ -844,6 +874,7 @@ object GroqClient {
                     jsonObjectMode = jsonObjectMode,
                     maxCompletionTokens = maxCompletionTokens,
                     temperature = temperature,
+                    heavyTask = heavyTask,
                     connectTimeoutMs = connectTimeoutMs,
                     readTimeoutMs = readTimeoutMs
                 )
@@ -872,6 +903,9 @@ object GroqClient {
                     (t is InterruptedIOException && (t.message ?: "").contains("time", ignoreCase = true))
                 val isConnectErr = t is ConnectException
                 val rawMsg = (t.message ?: t.javaClass.simpleName).trim()
+                val shortCode = apiEx?.errorCode?.takeIf { it.isNotBlank() } ?: httpCode?.toString() ?: ""
+                val errSummary = if (shortCode.isNotEmpty()) "$model: $shortCode ($rawMsg)" else "$model: $rawMsg"
+                modelErrors.add(errSummary.take(120))
                 val category = GroqCodec.classifyFailure(
                     httpCode = httpCode,
                     rawMessage = rawMsg,
@@ -891,7 +925,8 @@ object GroqClient {
                             lastRawMessage = rawMsg,
                             attemptedModels = attemptedModels,
                             sawAnyHttpResponse = sawAnyHttpResponse,
-                            quota = lastQuota
+                            quota = lastQuota,
+                            modelErrors = modelErrors
                         ),
                         httpCode = httpCode ?: 429,
                         quota = lastQuota
@@ -905,7 +940,8 @@ object GroqClient {
                             lastRawMessage = rawMsg,
                             attemptedModels = attemptedModels,
                             sawAnyHttpResponse = sawAnyHttpResponse,
-                            quota = lastQuota
+                            quota = lastQuota,
+                            modelErrors = modelErrors
                         ),
                         t
                     )
@@ -924,7 +960,8 @@ object GroqClient {
             lastRawMessage = lastRawMessage,
             attemptedModels = attemptedModels,
             sawAnyHttpResponse = sawAnyHttpResponse,
-            quota = lastQuota
+            quota = lastQuota,
+            modelErrors = modelErrors
         )
         throw IllegalStateException(friendly, lastCause)
     }
@@ -938,6 +975,7 @@ object GroqClient {
         jsonObjectMode: Boolean,
         maxCompletionTokens: Int?,
         temperature: Double,
+        heavyTask: Boolean,
         connectTimeoutMs: Int,
         readTimeoutMs: Int
     ): Pair<String, GroqQuotaReport?> {
@@ -948,7 +986,8 @@ object GroqClient {
             model = model,
             jsonObjectMode = jsonObjectMode,
             maxCompletionTokens = maxCompletionTokens,
-            temperature = temperature
+            temperature = temperature,
+            heavyTask = heavyTask
         )
 
         val endpoint = URL(GroqCodec.CHAT_COMPLETIONS_URL)
@@ -982,7 +1021,7 @@ object GroqClient {
                 )
             }
 
-            return GroqCodec.extractResponseText(body, quota) to quota
+            return GroqCodec.extractResponseText(body, quota, modelId = model) to quota
         } finally {
             conn.disconnect()
         }
