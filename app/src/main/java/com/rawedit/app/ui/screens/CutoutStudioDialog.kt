@@ -53,9 +53,9 @@ import com.rawedit.app.domain.CutoutAuditMath
 import com.rawedit.app.domain.CutoutAuditResult
 import com.rawedit.app.domain.CutoutPadRatios
 import com.rawedit.app.domain.CutoutProcessor
-import com.rawedit.app.domain.PuterClient
-import com.rawedit.app.domain.PuterCodec
-import com.rawedit.app.domain.PuterOutOfCreditsException
+import com.rawedit.app.domain.GroqClient
+import com.rawedit.app.domain.GroqCodec
+import com.rawedit.app.domain.GroqQuotaExhaustedException
 import com.rawedit.app.ui.components.BigPrimaryButton
 import com.rawedit.app.ui.components.CircleActionButton
 import com.rawedit.app.ui.components.RawSecondaryButton
@@ -107,13 +107,13 @@ private val SVG_TINT_OPTIONS = listOf(
 @Composable
 fun CutoutStudioDialog(
     input: CutoutStudioInput,
-    authToken: String,
-    modelPref: String = PuterCodec.PREF_AUTO,
-    creditsExhausted: Boolean = false,
-    onOpenPuterAuth: () -> Unit,
-    onSwitchPuterAccount: () -> Unit,
-    onRefreshPuterCredits: () -> Unit,
-    onMarkCreditsExhausted: () -> Unit,
+    apiKey: String,
+    modelPref: String = GroqCodec.PREF_AUTO,
+    quotaExhausted: Boolean = false,
+    onOpenGroqKey: () -> Unit,
+    onSwitchGroqKey: () -> Unit,
+    onRefreshGroqQuota: () -> Unit,
+    onMarkQuotaExhausted: () -> Unit,
     onDismiss: () -> Unit,
     onConfirmSave: (
         bitmap: Bitmap,
@@ -192,8 +192,8 @@ fun CutoutStudioDialog(
         }
     }
 
-    suspend fun runPuterAudit(origBmp: Bitmap?, cutoutBmp: Bitmap) {
-        if (authToken.isBlank() || creditsExhausted) return
+    suspend fun runGroqAudit(origBmp: Bitmap?, cutoutBmp: Bitmap) {
+        if (apiKey.isBlank() || quotaExhausted) return
         isAiChecking = true
         auditError = null
         val compareFile = runCatching {
@@ -204,8 +204,8 @@ fun CutoutStudioDialog(
             auditError = "Could not build comparison preview."
             return
         }
-        val res = PuterClient.auditCutout(
-            authToken = authToken,
+        val res = GroqClient.auditCutout(
+            apiKey = apiKey,
             comparisonFile = compareFile,
             currentTolerance = tolerance,
             currentPad = currentPad,
@@ -215,7 +215,7 @@ fun CutoutStudioDialog(
         )
         runCatching { compareFile.delete() }
         res.onSuccess { audit ->
-            onRefreshPuterCredits()
+            onRefreshGroqQuota()
             auditResult = audit
             if (audit.needsReprocess) {
                 val adj = CutoutAuditMath.applyAdjustment(
@@ -233,8 +233,8 @@ fun CutoutStudioDialog(
                 previewResultImage = refinedBmp.asImageBitmap()
             }
         }.onFailure { err ->
-            if (err is PuterOutOfCreditsException) {
-                onMarkCreditsExhausted()
+            if (err is GroqQuotaExhaustedException) {
+                onMarkQuotaExhausted()
             }
             auditError = err.message ?: "AI edge check failed"
         }
@@ -251,9 +251,9 @@ fun CutoutStudioDialog(
         if (bmp != null) {
             previewResultBmp = bmp
             previewResultImage = bmp.asImageBitmap()
-            if (!initialAiDone && authToken.isNotBlank() && !creditsExhausted) {
+            if (!initialAiDone && apiKey.isNotBlank() && !quotaExhausted) {
                 initialAiDone = true
-                runPuterAudit(previewSourceBmp, bmp)
+                runGroqAudit(previewSourceBmp, bmp)
             }
         }
         isProcessing = false
@@ -262,7 +262,7 @@ fun CutoutStudioDialog(
     LaunchedEffect(manualRecheckNonce) {
         if (manualRecheckNonce > 0) {
             val bmp = previewResultBmp ?: return@LaunchedEffect
-            runPuterAudit(previewSourceBmp, bmp)
+            runGroqAudit(previewSourceBmp, bmp)
         }
     }
 
@@ -393,7 +393,7 @@ fun CutoutStudioDialog(
                 }
             }
 
-            // Puter AI Verification Card
+            // Groq Vision Verification Card
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -419,10 +419,10 @@ fun CutoutStudioDialog(
                         RawIcon(RawIconType.SPARK, size = 16.dp, tint = RawColors.Tan)
                         val title = when {
                             isAiChecking -> "AI inspecting edges..."
-                            creditsExhausted -> "Out of Puter credits"
+                            quotaExhausted -> "Groq quota exhausted"
                             auditResult?.status == "ADJUST" -> "AI REFINED OUTPUT"
                             auditResult != null -> "AI VERIFIED CLEAN"
-                            authToken.isBlank() -> "Puter Cutout Check (Optional)"
+                            apiKey.isBlank() -> "Groq Cutout Check (Optional)"
                             else -> "AI edge audit ready"
                         }
                         Text(
@@ -430,18 +430,18 @@ fun CutoutStudioDialog(
                             fontFamily = JetBrainsMonoFamily,
                             fontWeight = FontWeight.Bold,
                             fontSize = 11.sp,
-                            color = if (creditsExhausted) RawColors.ErrorCoral else RawColors.Tan
+                            color = if (quotaExhausted) RawColors.ErrorCoral else RawColors.Tan
                         )
                     }
 
                     Box(
                         modifier = Modifier
                             .clip(CircleShape)
-                            .background(if (creditsExhausted) RawColors.ErrorSoft else RawColors.AccentSoft)
+                            .background(if (quotaExhausted) RawColors.ErrorSoft else RawColors.AccentSoft)
                             .clickable(enabled = !isAiChecking && !isProcessing && !isSavingFinal) {
                                 when {
-                                    authToken.isBlank() -> onOpenPuterAuth()
-                                    creditsExhausted -> onSwitchPuterAccount()
+                                    apiKey.isBlank() -> onOpenGroqKey()
+                                    quotaExhausted -> onSwitchGroqKey()
                                     else -> manualRecheckNonce++
                                 }
                             }
@@ -449,25 +449,25 @@ fun CutoutStudioDialog(
                     ) {
                         Text(
                             text = when {
-                                authToken.isBlank() -> "Sign in"
-                                creditsExhausted -> "Switch account"
+                                apiKey.isBlank() -> "Add key"
+                                quotaExhausted -> "Switch key"
                                 isAiChecking -> "Checking..."
                                 else -> "Re-check"
                             },
                             fontFamily = BricolageFamily,
                             fontWeight = FontWeight.Bold,
                             fontSize = 11.5.sp,
-                            color = if (creditsExhausted) RawColors.ErrorCoral else RawColors.Tan
+                            color = if (quotaExhausted) RawColors.ErrorCoral else RawColors.Tan
                         )
                     }
                 }
 
                 val statusLine = when {
                     isAiChecking -> "Checking whether strokes, inner details, or corners were unnecessarily cropped or erased."
-                    creditsExhausted -> "Puter credits ran out on this account. Tap Switch account above to continue AI edge inspection."
+                    quotaExhausted -> "Groq quota ran out on this key. Tap Switch key above to continue AI edge inspection."
                     auditError != null -> auditError!!
                     auditResult != null -> auditResult!!.diagnosis
-                    authToken.isBlank() -> "Sign in with Google / Puter so AI checks cutouts for accidental crops or erased inner details."
+                    apiKey.isBlank() -> "Add a Groq API key so Llama 4 Vision checks cutouts for accidental crops or erased inner details."
                     else -> "Tap Re-check after slider changes to re-verify edges."
                 }
                 Text(
@@ -475,7 +475,7 @@ fun CutoutStudioDialog(
                     fontFamily = BricolageFamily,
                     fontSize = 13.sp,
                     lineHeight = 18.sp,
-                    color = if (auditError != null || creditsExhausted) RawColors.ErrorCoral else RawColors.TextMuted
+                    color = if (auditError != null || quotaExhausted) RawColors.ErrorCoral else RawColors.TextMuted
                 )
             }
 

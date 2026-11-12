@@ -1,6 +1,5 @@
 package com.rawedit.app
 
-import android.content.Intent
 import android.graphics.Bitmap
 import android.os.Bundle
 import androidx.activity.ComponentActivity
@@ -30,11 +29,11 @@ import com.rawedit.app.data.local.LocalAssetEntity
 import com.rawedit.app.data.local.ProjectEntity
 import com.rawedit.app.data.local.UserProfile
 import com.rawedit.app.data.repository.RawEditRepository
+import com.rawedit.app.domain.GroqClient
+import com.rawedit.app.domain.GroqCodec
+import com.rawedit.app.domain.GroqQuotaExhaustedException
 import com.rawedit.app.domain.PaletteJsonCodec
 import com.rawedit.app.domain.PaletteState
-import com.rawedit.app.domain.PuterClient
-import com.rawedit.app.domain.PuterCodec
-import com.rawedit.app.domain.PuterOutOfCreditsException
 import com.rawedit.app.ui.components.MainTab
 import com.rawedit.app.ui.components.RawBottomNavBar
 import com.rawedit.app.ui.components.RawToastBanner
@@ -45,6 +44,7 @@ import com.rawedit.app.ui.screens.AssetLockerScreen
 import com.rawedit.app.ui.screens.CodePasteScreen
 import com.rawedit.app.ui.screens.CopyPromptScreen
 import com.rawedit.app.ui.screens.CreateHubScreen
+import com.rawedit.app.ui.screens.GroqKeyDialog
 import com.rawedit.app.ui.screens.HomeScreen
 import com.rawedit.app.ui.screens.KeyframeSheetScreen
 import com.rawedit.app.ui.screens.MyReelsScreen
@@ -52,7 +52,6 @@ import com.rawedit.app.ui.screens.OnboardingScreen
 import com.rawedit.app.ui.screens.PaletteScreen
 import com.rawedit.app.ui.screens.ProfileScreen
 import com.rawedit.app.ui.screens.ProfileSetupScreen
-import com.rawedit.app.ui.screens.PuterAuthDialog
 import com.rawedit.app.ui.screens.RenderingScreen
 import com.rawedit.app.ui.screens.ResultScreen
 import com.rawedit.app.ui.screens.WebBrowserAssetScreen
@@ -60,8 +59,6 @@ import com.rawedit.app.ui.theme.RawColors
 import com.rawedit.app.ui.theme.RawEditTheme
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
-import kotlinx.coroutines.flow.MutableStateFlow
-import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.io.File
@@ -86,11 +83,8 @@ private sealed interface AppRoute {
 }
 
 class MainActivity : ComponentActivity() {
-    private val incomingDeepLinkToken = MutableStateFlow<String?>(null)
-
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        handleAuthIntent(intent)
         val bgArgb = RawColors.BgPrimary.toArgb()
         enableEdgeToEdge(
             statusBarStyle = SystemBarStyle.dark(bgArgb),
@@ -100,36 +94,14 @@ class MainActivity : ComponentActivity() {
 
         setContent {
             RawEditTheme {
-                RawEditAppRoot(
-                    container = container,
-                    pendingAuthTokenFlow = incomingDeepLinkToken,
-                    onConsumePendingAuthToken = { incomingDeepLinkToken.value = null }
-                )
+                RawEditAppRoot(container = container)
             }
-        }
-    }
-
-    override fun onNewIntent(intent: Intent) {
-        super.onNewIntent(intent)
-        setIntent(intent)
-        handleAuthIntent(intent)
-    }
-
-    private fun handleAuthIntent(intent: Intent?) {
-        val uriStr = intent?.dataString ?: return
-        val token = PuterCodec.extractTokenFromCallbackUri(uriStr)
-        if (!token.isNullOrBlank()) {
-            incomingDeepLinkToken.value = token
         }
     }
 }
 
 @Composable
-private fun RawEditAppRoot(
-    container: AppContainer,
-    pendingAuthTokenFlow: StateFlow<String?>,
-    onConsumePendingAuthToken: () -> Unit
-) {
+private fun RawEditAppRoot(container: AppContainer) {
     val profileFlow = remember { container.userPreferences.userProfile }
     val profileOrNull by profileFlow.collectAsState(initial = null)
     val scope = rememberCoroutineScope()
@@ -177,9 +149,7 @@ private fun RawEditAppRoot(
 
             RootStage.MAIN -> MainAuthenticatedHost(
                 container = container,
-                userProfile = profile,
-                pendingAuthTokenFlow = pendingAuthTokenFlow,
-                onConsumePendingAuthToken = onConsumePendingAuthToken
+                userProfile = profile
             )
         }
     }
@@ -188,15 +158,12 @@ private fun RawEditAppRoot(
 @Composable
 private fun MainAuthenticatedHost(
     container: AppContainer,
-    userProfile: UserProfile,
-    pendingAuthTokenFlow: StateFlow<String?>,
-    onConsumePendingAuthToken: () -> Unit
+    userProfile: UserProfile
 ) {
     val scope = rememberCoroutineScope()
     val projects by container.repository.allProjects.collectAsState(initial = emptyList())
     val videos by container.repository.allVideos.collectAsState(initial = emptyList())
     val allAssets by container.repository.allAssets.collectAsState(initial = emptyList())
-    val pendingDeepLinkToken by pendingAuthTokenFlow.collectAsState()
 
     val activePalette = remember(userProfile.paletteJson, userProfile.paletteCounter) {
         PaletteJsonCodec.decode(userProfile.paletteJson)
@@ -207,75 +174,53 @@ private fun MainAuthenticatedHost(
     var currentTab by remember { mutableStateOf(MainTab.HOME) }
     var isForward by remember { mutableStateOf(true) }
     var navigatingNewDraft by remember { mutableStateOf(false) }
-    var showPuterAuthDialog by remember { mutableStateOf(false) }
-    var puterDialogSwitchMode by remember { mutableStateOf(false) }
+    var showGroqKeyDialog by remember { mutableStateOf(false) }
+    var groqDialogSwitchMode by remember { mutableStateOf(false) }
     var hostToastMsg by remember { mutableStateOf<String?>(null) }
     val currentRoute = backStack.last()
 
-    fun openPuterAuthDialog(switchMode: Boolean) {
-        puterDialogSwitchMode = switchMode
-        showPuterAuthDialog = true
+    fun openGroqDialog(switchMode: Boolean) {
+        groqDialogSwitchMode = switchMode
+        showGroqKeyDialog = true
     }
 
-    fun refreshPuterCredits(silent: Boolean) {
-        val tok = userProfile.puterAuthToken
-        if (tok.isBlank()) return
+    fun refreshGroqQuota(silent: Boolean) {
+        val key = userProfile.groqApiKey
+        if (key.isBlank()) return
         scope.launch {
-            val who = PuterClient.fetchWhoami(tok).getOrNull()
-            val res = PuterClient.fetchUsage(tok)
+            if (silent) {
+                val cached = GroqClient.getLatestQuota(key)
+                if (cached != null) {
+                    container.userPreferences.saveGroqQuota(cached)
+                    return@launch
+                }
+            }
+            val res = GroqClient.refreshQuota(key, userProfile.groqModelPref)
             res.onSuccess { report ->
-                container.userPreferences.savePuterUsage(who, report)
+                container.userPreferences.saveGroqQuota(report)
                 if (!silent) {
                     hostToastMsg = if (report.isExhausted) {
-                        "0 Puter credits left — switch account"
+                        "Groq quota exhausted \u2014 switch API key"
                     } else {
-                        "Puter credits left: ${report.formattedRemaining()}"
+                        "Groq quota left: ${report.bannerLabel()}"
                     }
                 }
             }.onFailure { err ->
+                if (err is GroqQuotaExhaustedException) {
+                    container.userPreferences.markGroqQuotaExhausted(err.quota)
+                }
                 if (!silent) {
-                    hostToastMsg = err.message ?: "Could not refresh Puter credits"
+                    hostToastMsg = err.message ?: "Could not refresh Groq quota"
                 }
             }
         }
     }
 
-    fun markCreditsExhausted() {
+    fun markQuotaExhausted() {
         scope.launch {
-            container.userPreferences.markPuterCreditsExhausted()
-            hostToastMsg = "Puter credits ran out — switch account"
-        }
-    }
-
-    LaunchedEffect(pendingDeepLinkToken) {
-        val deepToken = pendingDeepLinkToken
-        if (!deepToken.isNullOrBlank()) {
-            onConsumePendingAuthToken()
-            if (!showPuterAuthDialog && deepToken != userProfile.puterAuthToken) {
-                val who = PuterClient.fetchWhoami(deepToken).getOrNull().orEmpty().ifBlank { "puter_user" }
-                val usage = PuterClient.fetchUsage(deepToken).getOrNull()
-                container.userPreferences.savePuterSession(
-                    authToken = deepToken,
-                    username = who,
-                    modelPref = userProfile.puterModelPref,
-                    usage = usage
-                )
-                val leftStr = usage?.let { " \u2022 ${it.formattedRemaining()} left" }.orEmpty()
-                hostToastMsg = "Signed in as @$who$leftStr"
-            }
-        }
-    }
-
-    LaunchedEffect(userProfile.puterAuthToken) {
-        if (userProfile.isPuterSignedIn) {
-            val ageMs = System.currentTimeMillis() - userProfile.puterUsageUpdatedAtMs
-            if (userProfile.puterUsageUpdatedAtMs <= 0L || ageMs > 90_000L) {
-                val who = PuterClient.fetchWhoami(userProfile.puterAuthToken).getOrNull()
-                val usage = PuterClient.fetchUsage(userProfile.puterAuthToken).getOrNull()
-                if (usage != null) {
-                    container.userPreferences.savePuterUsage(who, usage)
-                }
-            }
+            val latest = GroqClient.getLatestQuota(userProfile.groqApiKey)
+            container.userPreferences.markGroqQuotaExhausted(latest)
+            hostToastMsg = "Groq quota exhausted \u2014 switch API key"
         }
     }
 
@@ -331,23 +276,23 @@ private fun MainAuthenticatedHost(
                 )
                 val newId = container.repository.insertAsset(entity)
                 container.repository.attachAssetToProject(projectId, newId)
-                if (userProfile.isPuterSignedIn && !userProfile.puterCreditsExhausted) {
+                if (userProfile.hasGroqKey && !userProfile.groqQuotaExhausted) {
                     val visionFile = container.cacheManager.getAssetFile(imp.fileName)
                     if (visionFile != null && visionFile.exists()) {
-                        val descRes = PuterClient.describeAsset(
-                            authToken = userProfile.puterAuthToken,
+                        val descRes = GroqClient.describeAsset(
+                            apiKey = userProfile.groqApiKey,
                             asset = entity.copy(id = newId),
                             imageFile = visionFile,
-                            modelPref = userProfile.puterModelPref
+                            modelPref = userProfile.groqModelPref
                         )
                         descRes.onSuccess { (desc, safe) ->
                             container.repository.updateAssetDescription(newId, desc, safe)
-                            refreshPuterCredits(silent = true)
+                            refreshGroqQuota(silent = true)
                             hostToastMsg = "Saved & described ${imp.relativePath}"
                         }.onFailure { err ->
-                            if (err is PuterOutOfCreditsException) {
-                                container.userPreferences.markPuterCreditsExhausted()
-                                hostToastMsg = "Saved ${imp.relativePath} (out of Puter credits)"
+                            if (err is GroqQuotaExhaustedException) {
+                                container.userPreferences.markGroqQuotaExhausted(err.quota)
+                                hostToastMsg = "Saved ${imp.relativePath} (Groq quota exhausted)"
                             } else {
                                 hostToastMsg = "Saved ${imp.relativePath}"
                             }
@@ -441,10 +386,10 @@ private fun MainAuthenticatedHost(
                                             container.userPreferences.savePaletteState(counter, json)
                                         }
                                     },
-                                    onOpenPuterAuth = { openPuterAuthDialog(switchMode = false) },
-                                    onSwitchPuterAccount = { openPuterAuthDialog(switchMode = true) },
-                                    onRefreshPuterCredits = { refreshPuterCredits(silent = false) },
-                                    onMarkCreditsExhausted = { markCreditsExhausted() }
+                                    onOpenGroqKey = { openGroqDialog(switchMode = false) },
+                                    onSwitchGroqKey = { openGroqDialog(switchMode = true) },
+                                    onRefreshGroqQuota = { refreshGroqQuota(silent = true) },
+                                    onMarkQuotaExhausted = { markQuotaExhausted() }
                                 )
 
                                 MainTab.CREATE -> Unit
@@ -479,9 +424,9 @@ private fun MainAuthenticatedHost(
                                     onUpdatePhoto = { newPath ->
                                         scope.launch { container.userPreferences.updateProfilePhoto(newPath) }
                                     },
-                                    onOpenPuterAuth = { openPuterAuthDialog(switchMode = false) },
-                                    onSwitchPuterAccount = { openPuterAuthDialog(switchMode = true) },
-                                    onRefreshPuterCredits = { refreshPuterCredits(silent = false) }
+                                    onOpenGroqKey = { openGroqDialog(switchMode = false) },
+                                    onSwitchGroqKey = { openGroqDialog(switchMode = true) },
+                                    onRefreshGroqQuota = { refreshGroqQuota(silent = false) }
                                 )
                             }
                         }
@@ -549,11 +494,10 @@ private fun MainAuthenticatedHost(
                         AssetLockerScreen(
                             project = proj,
                             allAssets = allAssets,
-                            authToken = userProfile.puterAuthToken,
-                            puterUsername = userProfile.puterUsername,
-                            modelPref = userProfile.puterModelPref,
-                            creditsExhausted = userProfile.puterCreditsExhausted,
-                            creditsBadgeText = userProfile.creditsSummaryText(),
+                            apiKey = userProfile.groqApiKey,
+                            modelPref = userProfile.groqModelPref,
+                            quotaExhausted = userProfile.groqQuotaExhausted,
+                            quotaBadgeText = userProfile.quotaSummaryText(),
                             cacheManager = container.cacheManager,
                             onBack = ::popRoute,
                             onImportAsset = { uri, isVideo ->
@@ -575,29 +519,29 @@ private fun MainAuthenticatedHost(
                                         )
                                         val newId = container.repository.insertAsset(entity)
                                         container.repository.attachAssetToProject(proj.id, newId)
-                                        if (userProfile.isPuterSignedIn && !userProfile.puterCreditsExhausted) {
+                                        if (userProfile.hasGroqKey && !userProfile.groqQuotaExhausted) {
                                             val visionFile = if (imp.kind == LocalAssetEntity.KIND_CLIP) {
                                                 imp.thumbPath.takeIf { it.isNotBlank() }?.let(::File)
                                             } else {
                                                 container.cacheManager.getAssetFile(imp.fileName)
                                             }
                                             if (visionFile != null && visionFile.exists()) {
-                                                val descRes = PuterClient.describeAsset(
-                                                    authToken = userProfile.puterAuthToken,
+                                                val descRes = GroqClient.describeAsset(
+                                                    apiKey = userProfile.groqApiKey,
                                                     asset = entity.copy(id = newId),
                                                     imageFile = visionFile,
-                                                    modelPref = userProfile.puterModelPref
+                                                    modelPref = userProfile.groqModelPref
                                                 )
                                                 descRes.onSuccess { (desc, safe) ->
                                                     container.repository.updateAssetDescription(newId, desc, safe)
-                                                    refreshPuterCredits(silent = true)
+                                                    refreshGroqQuota(silent = true)
                                                     hostToastMsg = "Added & described ${imp.relativePath}"
                                                 }.onFailure { err ->
-                                                    if (err is PuterOutOfCreditsException) {
-                                                        container.userPreferences.markPuterCreditsExhausted()
-                                                        hostToastMsg = "Added ${imp.relativePath} (out of Puter credits)"
+                                                    if (err is GroqQuotaExhaustedException) {
+                                                        container.userPreferences.markGroqQuotaExhausted(err.quota)
+                                                        hostToastMsg = "Added ${imp.relativePath} (Groq quota exhausted)"
                                                     } else {
-                                                        hostToastMsg = "Added ${imp.relativePath} (Puter AI note skipped)"
+                                                        hostToastMsg = "Added ${imp.relativePath} (Groq note skipped)"
                                                     }
                                                 }
                                             } else {
@@ -628,27 +572,27 @@ private fun MainAuthenticatedHost(
                             onDeleteAsset = { asset ->
                                 scope.launch { container.repository.deleteAsset(asset) }
                             },
-                            onOpenPuterAuth = { openPuterAuthDialog(switchMode = false) },
-                            onSwitchPuterAccount = { openPuterAuthDialog(switchMode = true) },
-                            onRefreshPuterCredits = { refreshPuterCredits(silent = false) },
-                            onMarkCreditsExhausted = { markCreditsExhausted() }
+                            onOpenGroqKey = { openGroqDialog(switchMode = false) },
+                            onSwitchGroqKey = { openGroqDialog(switchMode = true) },
+                            onRefreshGroqQuota = { refreshGroqQuota(silent = true) },
+                            onMarkQuotaExhausted = { markQuotaExhausted() }
                         )
                     }
                 }
 
                 is AppRoute.WebBrowser -> {
                     WebBrowserAssetScreen(
-                        authToken = userProfile.puterAuthToken,
-                        modelPref = userProfile.puterModelPref,
-                        creditsExhausted = userProfile.puterCreditsExhausted,
+                        apiKey = userProfile.groqApiKey,
+                        modelPref = userProfile.groqModelPref,
+                        quotaExhausted = userProfile.groqQuotaExhausted,
                         onBack = ::popRoute,
                         onSaveCapturedBitmap = { bmp, isCutout, name, desc, safe ->
                             saveCapturedBitmapToLocker(route.projectId, bmp, isCutout, name, desc, safe)
                         },
-                        onOpenPuterAuth = { openPuterAuthDialog(switchMode = false) },
-                        onSwitchPuterAccount = { openPuterAuthDialog(switchMode = true) },
-                        onRefreshPuterCredits = { refreshPuterCredits(silent = false) },
-                        onMarkCreditsExhausted = { markCreditsExhausted() }
+                        onOpenGroqKey = { openGroqDialog(switchMode = false) },
+                        onSwitchGroqKey = { openGroqDialog(switchMode = true) },
+                        onRefreshGroqQuota = { refreshGroqQuota(silent = true) },
+                        onMarkQuotaExhausted = { markQuotaExhausted() }
                     )
                 }
 
@@ -708,10 +652,10 @@ private fun MainAuthenticatedHost(
                         KeyframeSheetScreen(
                             project = proj,
                             cacheManager = container.cacheManager,
-                            authToken = userProfile.puterAuthToken,
-                            modelPref = userProfile.puterModelPref,
-                            creditsExhausted = userProfile.puterCreditsExhausted,
-                            creditsBadgeText = userProfile.creditsSummaryText(),
+                            apiKey = userProfile.groqApiKey,
+                            modelPref = userProfile.groqModelPref,
+                            quotaExhausted = userProfile.groqQuotaExhausted,
+                            quotaBadgeText = userProfile.quotaSummaryText(),
                             onBack = ::popRoute,
                             onEditCode = {
                                 if (backStack.getOrNull(backStack.lastIndex - 1) is AppRoute.CodePaste) {
@@ -736,10 +680,10 @@ private fun MainAuthenticatedHost(
                                     )
                                 }
                             },
-                            onOpenPuterAuth = { openPuterAuthDialog(switchMode = false) },
-                            onSwitchPuterAccount = { openPuterAuthDialog(switchMode = true) },
-                            onRefreshPuterCredits = { refreshPuterCredits(silent = false) },
-                            onMarkCreditsExhausted = { markCreditsExhausted() },
+                            onOpenGroqKey = { openGroqDialog(switchMode = false) },
+                            onSwitchGroqKey = { openGroqDialog(switchMode = true) },
+                            onRefreshGroqQuota = { refreshGroqQuota(silent = true) },
+                            onMarkQuotaExhausted = { markQuotaExhausted() },
                             onRenderNow = {
                                 isForward = true
                                 backStack = backStack.dropLast(1) + AppRoute.Rendering(proj.id)
@@ -821,39 +765,37 @@ private fun MainAuthenticatedHost(
         )
     }
 
-    if (showPuterAuthDialog) {
-        PuterAuthDialog(
-            currentToken = userProfile.puterAuthToken,
-            currentUsername = userProfile.puterUsername,
-            currentModelPref = userProfile.puterModelPref,
-            initialUsage = userProfile.toUsageReportOrNull(),
-            startInSwitchMode = puterDialogSwitchMode,
-            onAuthConnected = { token, username, modelPref, usage ->
+    if (showGroqKeyDialog) {
+        GroqKeyDialog(
+            currentApiKey = userProfile.groqApiKey,
+            currentModelPref = userProfile.groqModelPref,
+            initialQuota = userProfile.toGroqQuotaReportOrNull(),
+            startInSwitchMode = groqDialogSwitchMode,
+            onSaveKeySession = { apiKey, modelPref, quota ->
                 scope.launch {
-                    container.userPreferences.savePuterSession(
-                        authToken = token,
-                        username = username,
+                    container.userPreferences.saveGroqSession(
+                        apiKey = apiKey,
                         modelPref = modelPref,
-                        usage = usage
+                        quota = quota
                     )
-                    showPuterAuthDialog = false
-                    val leftStr = usage?.let { " \u2022 ${it.formattedRemaining()} left" }.orEmpty()
-                    hostToastMsg = "Signed in as @$username$leftStr"
+                    showGroqKeyDialog = false
+                    val banner = quota?.takeIf { it.hasTelemetry }?.let { " \u2022 ${it.bannerLabel()}" }.orEmpty()
+                    hostToastMsg = "Groq key saved (${GroqCodec.maskApiKey(apiKey)})$banner"
                 }
             },
             onSaveModelPref = { modelPref ->
                 scope.launch {
-                    container.userPreferences.savePuterModelPref(modelPref)
+                    container.userPreferences.saveGroqModelPref(modelPref)
                 }
             },
-            onSignOut = {
+            onClearKey = {
                 scope.launch {
-                    container.userPreferences.clearPuterSession()
-                    showPuterAuthDialog = false
-                    hostToastMsg = "Signed out of Puter"
+                    container.userPreferences.clearGroqSession()
+                    showGroqKeyDialog = false
+                    hostToastMsg = "Groq API key cleared"
                 }
             },
-            onDismiss = { showPuterAuthDialog = false }
+            onDismiss = { showGroqKeyDialog = false }
         )
     }
 }

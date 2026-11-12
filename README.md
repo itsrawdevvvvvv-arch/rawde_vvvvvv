@@ -4,16 +4,16 @@ On-device Android Studio app that turns a voiceover (and optional SRT subtitles)
 
 ## Features
 
-- **Offline On-Device Render Stage (Android 9.0+ / API 28+)**: The WebView render engine (`LocalAssetServer`) strictly blocks all external network loads (`blockNetworkLoads = true`), runs with bundled OFL fonts and local files, and requires zero server or ads. AI features use **Puter.js (`api.puter.com`)** via one-tap **Chrome / Google OAuth** sign-in with automatic smart failover across `gpt-4o-mini`, `gpt-5-nano`, `claude-haiku-5-5`, `gpt-5-mini`, `claude-sonnet-4-6`, and `gpt-4.1-mini`.
-- **Puter.js Credits Meter & Account Switching**: Live remaining balance & quota meter pulled from `https://api.puter.com/metering/usage`, displayed in **Profile**, **Puter Auth Dialog**, **Palette**, **Asset Locker**, and **Contact Sheet**, with immediate **"Switch account"** detection and Chrome sign-out helper whenever credits run out.
+- **Offline On-Device Render Stage (Android 9.0+ / API 28+)**: The WebView render engine (`LocalAssetServer`) strictly blocks all external network loads (`blockNetworkLoads = true`), runs with bundled OFL fonts and local files, and requires zero server or ads. Optional in-app AI features use the **Groq OpenAI-compatible API (`api.groq.com`)** with automatic failover across `meta-llama/llama-4-scout-17b-16e-instruct` & `meta-llama/llama-4-maverick-17b-128e-instruct` (vision, max 5 frames/call) and `llama-3.3-70b-versatile`, `openai/gpt-oss-120b`, & `llama-3.1-8b-instant` (text & patch repair).
+- **Groq Live Quota Meter & Key Switching**: Parses live `x-ratelimit-remaining-requests`, `x-ratelimit-limit-requests`, `x-ratelimit-remaining-tokens`, and `x-ratelimit-limit-tokens` headers from Groq API responses, displays remaining quota across **Profile**, **Groq API Key Dialog**, **Palette**, **Asset Locker**, and **Contact Sheet**, and provides instant **"Switch key"** flow (`console.groq.com/keys`) whenever RPD/TPM quota or credits run out.
 - **Warm Wallet UI & Zero-Lag Motion**: Dark obsidian `#0D0D0F` canvas with Cream (`#F7ECE6`), Tan (`#CAA07D`), `Bricolage Grotesque`, and `JetBrains Mono` typography, borderless `28.dp` wallet cards, `FeatheredScrollEdges`, slide-to-start Big Type Home screen, 5-tab navigation dock (`Home`, `Palette`, `Create`, `Reels`, `Profile`), and interactive Canvas pixel mascots (`TV_BOT`, `PEEKING_CAT`, `MIC_BOT`, `ZIP_BOT`, `CODE_BOT`, `LENS_BOT`, `PHANTOM_BUDDY`).
 - **Offline Asset Locker (`assets/` Interception + HTTP 206 Range Streaming)**: Import photos, transparent PNG cutouts (checkerboard preview), and MP4 video clips (with 3-frame storyboard strips). Intercepted cleanly offline under `assets/<filename>` via `LocalAssetServer`, including `206 Partial Content` byte-range streaming for `<video>` seeking.
 - **In-App Web Capture Browser & Icon Finder**: Built directly into the Asset Locker (`WebBrowserAssetScreen`) with Mobile/Desktop `1280px` viewport toggling so tutorial creators can log in, snap crisp UI screenshots (with automatic interactive DOM button/field coordinates mapped for cursor & highlight animations), extract page `<svg>`/`<img>` elements, and search open-source SVG icon sets via Iconify.
-- **Automatic PNG Cutout Studio with Puter Vision AI Verification**: Rasterizes sanitized `<svg>` assets (with expanded safe viewBox margins and optional monochrome color tinting) or removes uniform raster mattes via feathered boundary keying (`CutoutProcessor`). When signed in to Puter, `PuterClient.auditCutout` compares the original and cutout side-by-side to detect unnecessary edge clipping or accidentally erased interior highlights and automatically refines padding/tolerance.
-- **Puter AI Auto-Description & Safe Text Zones**: Analyzes imported images, tutorial UI screenshots, or video clip storyboards via Puter Vision AI to record a concise visual description and safe typography placement zone, injected directly into the Cloud AI prompt.
-- **Studio Palette Generator & Card Exporter (`#0D0D0D` 3-Swatch Card)**: Generates fresh 3-color editorial palettes via Puter AI, renders the `01 / 02 / 03` numbered dark editorial palette card with contrast-aware ink, saves/shares high-res `1080x1440` PNG cards ready for Cloud AI, and injects active palette tokens automatically into `PromptGenerator`.
+- **Automatic PNG Cutout Studio with Groq Vision AI Verification**: Rasterizes sanitized `<svg>` assets (with expanded safe viewBox margins and optional monochrome color tinting) or removes uniform raster mattes via feathered boundary keying (`CutoutProcessor`). When a Groq key is configured, `GroqClient.auditCutout` compares the original and cutout side-by-side to detect unnecessary edge clipping or accidentally erased interior highlights and automatically refines padding/tolerance.
+- **Groq Vision Auto-Description & Safe Text Zones**: Analyzes imported images, tutorial UI screenshots, or video clip storyboards via Groq Vision to record a concise visual description and safe typography placement zone, injected directly into the Cloud AI prompt.
+- **Studio Palette Generator & Card Exporter (`#0D0D0D` 3-Swatch Card)**: Generates fresh 3-color editorial palettes via Groq AI, renders the `01 / 02 / 03` numbered dark editorial palette card with contrast-aware ink, saves/shares high-res `1080x1440` PNG cards ready for Cloud AI, and injects active palette tokens automatically into `PromptGenerator`.
 - **`RAW.syncVideo` Video Sync Helper & Bundled Style Pack ZIP (`kinetic-explainer-style.zip`)**: Ships `kinetic-explainer-style/SKILL.md`, `engine/raw-helpers.js` (`RAW.syncVideo(videoEl, t, start, end, speed)`), `docs/ASSETS_GUIDE.md`, and tokens inside `app/src/main/assets/`. Auto-injected at runtime by `LocalAssetServer` and inspectable inside Step 3.
-- **Pre-Render Keyframe Contact Sheet & Puter Frame Inspector**: Samples every keyframe (`Every 0.5s`, `Dense 0.25s`, `Scene beats`) with deterministic live DOM auto-fit (`__rawAutoFitStage`), exports timestamped PDF / ZIP contact sheets and targeted Cloud AI fix prompts (0 API cost), or runs optional 1-tap Puter AI visual review & HTML auto-fix.
+- **Pre-Render Keyframe Contact Sheet & Two-Stage Groq Frame Auto-Fix**: Samples every keyframe (`Every 0.5s`, `Dense 0.25s`, `Scene beats`) with deterministic live DOM auto-fit (`__rawAutoFitStage` + `tag#id.class@[x,y,wxH]` diagnostics), exports timestamped PDF / ZIP contact sheets, builds targeted **Prompt B** (`<<<SEARCH ... ===REPLACE ... >>>` patches + in-app patch applier), and runs optional **Two-Stage Groq Frame Auto-Fix** (`<= 5` flagged frames in Stage 1 Vision JSON Inspector + up to 2 Stage 2 text-only repair rounds with snapshot rollback on validation/determinism failure).
 - **On-Device Hardware MP4 Rendering**: Foreground service renders 1920x1080 @ 30 fps H.264 + 128 kbps AAC MP4, saves to `Movies/raw_edit` via MediaStore, and shares via `FileProvider`.
 
 ## Architecture
@@ -21,26 +21,25 @@ On-device Android Studio app that turns a voiceover (and optional SRT subtitles)
 ```
 com.rawedit.app/
   RawEditApplication.kt          # Enables WebView slow whole-document draw & notification channel
-  MainActivity.kt                # Compose host, morphing transitions, rawedit://puter-auth deep link, 5-tab dock & Puter auth dialog
+  MainActivity.kt                # Compose host, morphing transitions, 5-tab dock & Groq API Key dialog
   data/
     CacheManager.kt              # Audio/image/video locker import, HTTP media storage, unlimited script/SRT/HTML storage
     local/
       Entities.kt                # Room ProjectEntity, VideoEntity & LocalAssetEntity (DB v2)
       RawEditDatabase.kt         # Room DAOs, DB singleton & MIGRATION_1_2
-      UserPreferences.kt         # DataStore user name, avatar, palette state, Puter auth session & live credits balance
+      UserPreferences.kt         # DataStore user name, avatar, palette state, Groq API key, model route & live quota headers
     repository/RawEditRepository.kt
   domain/
     SrtParser.kt                 # Defensive SRT parser (up to 4 MB / 20,000 cues, control-char stripping)
-    PromptGenerator.kt           # Style-pack, Asset Locker, Studio Palette & RAW.syncVideo prompt builder
+    PromptGenerator.kt           # Style-pack, Asset Locker, Studio Palette & RAW.syncVideo Prompt A builder
     PaletteEngine.kt             # PaletteState, WCAG contrast ink math, JSON codec & 1080x1440 PNG exporter
     CutoutMath.kt                # Pure-Kotlin SVG sanitizer/viewBox padding, flood-key math & UI coord formatter
     CutoutProcessor.kt           # Offline WebView SVG batch rasterizer, PNG cutout flood-keyer & comparison cards
     WebAssetFetcher.kt           # Iconify open-source SVG search & safe HTTP/data-URI media downloader
-    PuterCodec.kt                # Puter.js drivers/call JSON codec, usage/credits parser, model router & failure classifier
-    PuterAuthBridge.kt           # Localhost 127.0.0.1 OAuth loopback receiver + Chrome Google/Puter launch + deep link return
-    PuterClient.kt               # Resilient Puter.js AI client (whoami, credits metering, fallback & 402 credit exhaustion handling)
+    GroqCodec.kt                 # Groq OpenAI-compatible JSON codec, x-ratelimit-* parser, model router & SEARCH/REPLACE patch engine
+    GroqClient.kt                # Resilient Groq AI client (models verify, two-stage vision+patch auto-fix, quota tracking & fallback)
     CodeValidator.kt             # Static checks + 20s network-blocked WebView dry-run + JS error capture
-    KeyframeSheetGenerator.kt    # Pre-render timestamped keyframe capture, PDF/ZIP export, review sheets & fix prompt
+    KeyframeSheetGenerator.kt    # Pre-render timestamped keyframe capture, PDF/ZIP export, <=5 flagged frame selector & Prompt B fix prompt
   render/
     LocalAssetServer.kt          # Offline https://raw.local & https://assets.local interceptor, HTTP 206 Range, __rawSyncVideo & DOM auto-fit
     InputSurface.kt              # EGL14 + OpenGL ES 2.0 Bitmap -> MediaCodec Surface helper

@@ -72,7 +72,7 @@ import com.rawedit.app.BuildConfig
 import com.rawedit.app.data.CacheManager
 import com.rawedit.app.data.local.UserProfile
 import com.rawedit.app.data.local.VideoEntity
-import com.rawedit.app.domain.PuterCodec
+import com.rawedit.app.domain.GroqCodec
 import com.rawedit.app.ui.components.BigPrimaryButton
 import com.rawedit.app.ui.components.CircleActionButton
 import com.rawedit.app.ui.components.CircleAvatarCropperDialog
@@ -104,9 +104,9 @@ fun ProfileScreen(
     cacheManager: CacheManager,
     onUpdateName: (String) -> Unit,
     onUpdatePhoto: (String?) -> Unit,
-    onOpenPuterAuth: () -> Unit,
-    onSwitchPuterAccount: () -> Unit,
-    onRefreshPuterCredits: () -> Unit
+    onOpenGroqKey: () -> Unit,
+    onSwitchGroqKey: () -> Unit,
+    onRefreshGroqQuota: () -> Unit
 ) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
@@ -526,19 +526,19 @@ fun ProfileScreen(
                 }
             }
 
-            // Puter.js AI Account & Credits Left card
+            // Groq AI & Quota card
             item {
                 Spacer(modifier = Modifier.height(4.dp))
-                val signedIn = userProfile.isPuterSignedIn
-                val usage = userProfile.toUsageReportOrNull()
-                val isExhausted = userProfile.puterCreditsExhausted || usage?.isExhausted == true
-                val isLow = usage?.isLow == true
-                val routeLabel = PuterCodec.routeDisplayLabel(userProfile.puterModelPref)
-                val creditsLabel = userProfile.creditsSummaryText()
-                val subtitle = if (signedIn) {
-                    "@${userProfile.puterUsername.ifBlank { "puter_user" }}  \u2022  $routeLabel"
+                val hasKey = userProfile.hasGroqKey
+                val quota = userProfile.toGroqQuotaReportOrNull()
+                val isExhausted = userProfile.groqQuotaExhausted || quota?.isExhausted == true
+                val isLow = quota?.isLow == true
+                val routeLabel = GroqCodec.routeDisplayLabel(userProfile.groqModelPref)
+                val quotaLabel = userProfile.quotaSummaryText()
+                val subtitle = if (hasKey) {
+                    "${GroqCodec.maskApiKey(userProfile.groqApiKey)}  \u2022  $routeLabel"
                 } else {
-                    "Not signed in  \u2022  Google / Puter OAuth"
+                    "Not configured  \u2022  api.groq.com"
                 }
                 val cardShape = RoundedCornerShape(28.dp)
                 Column(
@@ -552,7 +552,7 @@ fun ProfileScreen(
                                 Modifier.border(1.dp, RawColors.ErrorBorder, cardShape)
                             } else Modifier
                         )
-                        .clickable(onClick = onOpenPuterAuth)
+                        .clickable(onClick = onOpenGroqKey)
                         .padding(18.dp),
                     verticalArrangement = Arrangement.spacedBy(12.dp)
                 ) {
@@ -573,25 +573,25 @@ fun ProfileScreen(
                                     .background(
                                         when {
                                             isExhausted -> RawColors.ErrorSoft
-                                            signedIn -> RawColors.AccentSoft
+                                            hasKey -> RawColors.AccentSoft
                                             else -> RawColors.RaisedCard
                                         }
                                     ),
                                 contentAlignment = Alignment.Center
                             ) {
                                 RawIcon(
-                                    type = RawIconType.GLOBE,
+                                    type = RawIconType.KEY,
                                     size = 19.dp,
                                     tint = when {
                                         isExhausted -> RawColors.ErrorCoral
-                                        signedIn -> RawColors.Tan
+                                        hasKey -> RawColors.Tan
                                         else -> RawColors.TextMuted
                                     }
                                 )
                             }
                             Column {
                                 Text(
-                                    text = "Puter.js AI & Credits",
+                                    text = "Groq AI & Quota",
                                     fontFamily = BricolageFamily,
                                     fontWeight = FontWeight.Bold,
                                     fontSize = 18.sp,
@@ -603,14 +603,14 @@ fun ProfileScreen(
                                     fontFamily = JetBrainsMonoFamily,
                                     fontWeight = FontWeight.Medium,
                                     fontSize = 12.sp,
-                                    color = if (signedIn) RawColors.Tan else RawColors.TextMuted,
+                                    color = if (hasKey) RawColors.Tan else RawColors.TextMuted,
                                     maxLines = 1,
                                     overflow = TextOverflow.Ellipsis
                                 )
                             }
                         }
 
-                        if (signedIn) {
+                        if (hasKey) {
                             Row(
                                 verticalAlignment = Alignment.CenterVertically,
                                 horizontalArrangement = Arrangement.spacedBy(8.dp)
@@ -618,27 +618,27 @@ fun ProfileScreen(
                                 CircleActionButton(
                                     icon = RawIconType.REFRESH,
                                     size = 38.dp,
-                                    onClick = onRefreshPuterCredits
+                                    onClick = onRefreshGroqQuota
                                 )
                                 RawSecondaryButton(
                                     text = "Manage",
                                     height = 42.dp,
                                     fillWidth = false,
-                                    onClick = onOpenPuterAuth
+                                    onClick = onOpenGroqKey
                                 )
                             }
                         } else {
                             RawSecondaryButton(
-                                text = "Sign in",
+                                text = "Add key",
                                 height = 46.dp,
-                                leadingIcon = RawIconType.GLOBE,
+                                leadingIcon = RawIconType.KEY,
                                 fillWidth = false,
-                                onClick = onOpenPuterAuth
+                                onClick = onOpenGroqKey
                             )
                         }
                     }
 
-                    if (signedIn) {
+                    if (hasKey) {
                         Column(
                             modifier = Modifier
                                 .fillMaxWidth()
@@ -654,14 +654,14 @@ fun ProfileScreen(
                             ) {
                                 Column(modifier = Modifier.weight(1f)) {
                                     Text(
-                                        text = "PUTER CREDITS LEFT",
+                                        text = "GROQ QUOTA REMAINING",
                                         fontFamily = JetBrainsMonoFamily,
                                         fontWeight = FontWeight.Bold,
                                         fontSize = 10.5.sp,
                                         color = RawColors.TextMuted
                                     )
                                     Text(
-                                        text = creditsLabel,
+                                        text = quotaLabel,
                                         fontFamily = BricolageFamily,
                                         fontWeight = FontWeight.Bold,
                                         fontSize = 18.sp,
@@ -675,11 +675,11 @@ fun ProfileScreen(
                                     modifier = Modifier
                                         .clip(CircleShape)
                                         .background(if (isExhausted) RawColors.Cream else RawColors.CardSurface)
-                                        .clickable(onClick = onSwitchPuterAccount)
+                                        .clickable(onClick = onSwitchGroqKey)
                                         .padding(horizontal = 12.dp, vertical = 7.dp)
                                 ) {
                                     Text(
-                                        text = "Switch account",
+                                        text = "Switch key",
                                         fontFamily = BricolageFamily,
                                         fontWeight = FontWeight.Bold,
                                         fontSize = 12.5.sp,
@@ -688,7 +688,7 @@ fun ProfileScreen(
                                 }
                             }
 
-                            if (usage != null && usage.totalCapacityRaw > 0.0) {
+                            if (quota != null && quota.hasTelemetry) {
                                 Box(
                                     modifier = Modifier
                                         .fillMaxWidth()
@@ -698,17 +698,25 @@ fun ProfileScreen(
                                 ) {
                                     Box(
                                         modifier = Modifier
-                                            .fillMaxWidth(usage.remainingFraction)
+                                            .fillMaxWidth(quota.primaryFraction)
                                             .height(6.dp)
                                             .clip(CircleShape)
                                             .background(if (isExhausted || isLow) RawColors.ErrorCoral else RawColors.Tan)
                                     )
                                 }
+                                Text(
+                                    text = "${quota.formattedRequestsSummary()}  \u2022  ${quota.formattedTokensSummary()}",
+                                    fontFamily = JetBrainsMonoFamily,
+                                    fontSize = 11.sp,
+                                    color = RawColors.TextMuted,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
+                                )
                             }
 
                             if (isExhausted) {
                                 Text(
-                                    text = "Credits ran out on this account. Tap Switch account to sign in with another Google or Puter account.",
+                                    text = "Quota ran out on this key. Tap Switch key to paste a fresh Groq API key.",
                                     fontFamily = BricolageFamily,
                                     fontSize = 12.5.sp,
                                     lineHeight = 17.5.sp,

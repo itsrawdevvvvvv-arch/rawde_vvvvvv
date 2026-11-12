@@ -6,16 +6,17 @@ import com.rawedit.app.domain.CodeValidator
 import com.rawedit.app.domain.CutoutAuditMath
 import com.rawedit.app.domain.CutoutAuditResult
 import com.rawedit.app.domain.CutoutPadRatios
+import com.rawedit.app.domain.GroqApiException
+import com.rawedit.app.domain.GroqCodec
+import com.rawedit.app.domain.GroqFailureCategory
+import com.rawedit.app.domain.GroqImageInput
+import com.rawedit.app.domain.GroqPatchEdit
 import com.rawedit.app.domain.KeyframeSample
 import com.rawedit.app.domain.KeyframeSheetGenerator
 import com.rawedit.app.domain.PaletteColorMath
 import com.rawedit.app.domain.PaletteState
 import com.rawedit.app.domain.PaletteSwatch
 import com.rawedit.app.domain.PromptGenerator
-import com.rawedit.app.domain.PuterApiException
-import com.rawedit.app.domain.PuterCodec
-import com.rawedit.app.domain.PuterFailureCategory
-import com.rawedit.app.domain.PuterImageInput
 import com.rawedit.app.domain.SceneSpan
 import com.rawedit.app.domain.SheetSamplingMode
 import com.rawedit.app.domain.SrtParser
@@ -59,16 +60,17 @@ class DomainTests {
     @Test
     fun promptGeneratorHandlesWithAndWithoutSrtAndStylePack() {
         val withoutSrt = PromptGenerator.buildPrompt("voice.mp3", 32.5, "Product launch", "")
-        assertTrue(withoutSrt.contains("Voiceover length: 32.50 seconds"))
+        assertTrue(withoutSrt.contains("DURATION: 32.50 seconds"))
         assertTrue(withoutSrt.contains("kinetic-explainer-style.zip"))
-        assertTrue(withoutSrt.contains("window.PROJECT"))
         assertTrue(withoutSrt.contains("window.RAW"))
         assertTrue(withoutSrt.contains("max-width"))
-        assertTrue(withoutSrt.contains("Paste your voiceover script"))
+        assertTrue(withoutSrt.contains("RAW.syncVideo"))
+        assertTrue(withoutSrt.contains("build[o.t] || build.fallback"))
+        assertTrue(withoutSrt.contains("TOPIC / SCRIPT: Product launch"))
 
         val withSrt = PromptGenerator.buildPrompt("voice.mp3", 32.5, "Product launch", "1\n00:00:00,000 --> 00:00:02,000\nHello")
-        assertTrue(withSrt.contains("DO NOT ask for SRT"))
-        assertTrue(withSrt.contains("ATTACHED SRT SUBTITLES:"))
+        assertTrue(withSrt.contains("00:00:00,000 --> 00:00:02,000"))
+        assertTrue(withSrt.contains("Hello"))
     }
 
     @Test
@@ -130,12 +132,21 @@ Enjoy!
             KeyframeSample(4, 2.5, "S2 LIGHT", "/tmp/b.jpg", 1, listOf("Resized \"ANDROID\" 200->128px"), emptyList()),
             KeyframeSample(7, 4.25, "S2 LIGHT", "/tmp/c.jpg", 1, emptyList(), listOf("Edge clip on \"VERYLONGTEXT\""))
         )
-        val prompt = KeyframeSheetGenerator.buildFixPrompt(samples, "My Test Reel", 6.0)
+        val prompt = KeyframeSheetGenerator.buildFixPrompt(
+            samples = samples,
+            title = "My Test Reel",
+            durationSec = 6.0,
+            htmlCode = "<!DOCTYPE html><html><div id=\"stage\"></div></html>"
+        )
         assertTrue(prompt.contains("t=4.25s"))
         assertTrue(prompt.contains("t=2.50s"))
         assertTrue(prompt.contains("Edge clip"))
         assertTrue(prompt.contains("Resized"))
         assertFalse(prompt.contains("t=0.00s"))
+        assertTrue(prompt.contains("STEP 1: SILENT AUDIT"))
+        assertTrue(prompt.contains("<<<SEARCH"))
+        assertTrue(prompt.contains("===REPLACE"))
+        assertTrue(prompt.contains("CURRENT HTML"))
     }
 
     @Test
@@ -359,153 +370,182 @@ Enjoy!
             )
         )
         assertTrue(prompt.contains("Interactive UI targets (px)"))
-        assertTrue(prompt.contains("cursor clicks"))
+        assertTrue(prompt.contains("click ripple"))
     }
 
     @Test
-    fun puterCodecBuildsDriversCallPayloadsVisionAndExtractsContent() {
-        assertEquals("tok_abc123", PuterCodec.normalizeAuthToken("  \"Bearer tok_abc\n123\" "))
+    fun groqCodecBuildsVisionAndJsonPayloadsParsesQuotaHeadersAndClassifiesErrors() {
+        assertEquals("gsk_abc123", GroqCodec.normalizeApiKey("  \"Bearer gsk_abc\n123\" "))
+        assertEquals("gsk_...c123", GroqCodec.maskApiKey("gsk_abcc123"))
 
-        val authUrl = PuterCodec.buildAuthMeUrl("http://127.0.0.1:45678/callback")
-        assertTrue(authUrl.startsWith("https://puter.com/action/authme?redirectURL="))
-        assertTrue(authUrl.contains("127.0.0.1"))
-
-        assertEquals(
-            "ptk_xyz_123",
-            PuterCodec.extractTokenFromCallbackUri("http://127.0.0.1:45678/callback?token=ptk_xyz_123")
-        )
-        assertEquals(
-            "ptk_deep_999",
-            PuterCodec.extractTokenFromCallbackUri("rawedit://puter-auth?token=ptk_deep_999")
-        )
-
-        val payload = PuterCodec.buildDriversCallJson(
-            authToken = "ptk_1",
-            prompt = "Inspect image",
-            images = listOf(PuterImageInput(base64Data = "AQID", mimeType = "image/jpeg")),
+        val sevenImages = (1..7).map { GroqImageInput(base64Data = "AQID$it", mimeType = "image/jpeg") }
+        val payload = GroqCodec.buildChatCompletionJson(
+            prompt = "Inspect frames",
+            images = sevenImages,
             systemInstruction = "Return valid JSON",
-            model = PuterCodec.MODEL_GPT_4O_MINI
+            model = GroqCodec.MODEL_LLAMA4_SCOUT,
+            jsonObjectMode = true,
+            maxCompletionTokens = 1024,
+            temperature = 0.15
         )
-        assertTrue(payload.contains("\"interface\":\"puter-chat-completion\""))
-        assertTrue(payload.contains("\"driver\":\"ai-chat\""))
-        assertTrue(payload.contains("\"method\":\"complete\""))
-        assertTrue(payload.contains("\"auth_token\":\"ptk_1\""))
-        assertTrue(payload.contains("\"model\":\"gpt-4o-mini\""))
-        assertTrue(payload.contains("\"vision\":true"))
-        assertTrue(payload.contains("\"url\":\"data:image/jpeg;base64,AQID\""))
+        assertTrue(payload.contains("\"model\":\"meta-llama/llama-4-scout-17b-16e-instruct\""))
+        assertTrue(payload.contains("\"type\":\"json_object\""))
+        assertTrue(payload.contains("data:image/jpeg;base64,AQID5"))
+        assertFalse(payload.contains("AQID6"))
 
-        val strResponse = """{"success":true,"result":{"message":{"role":"assistant","content":"READY"}}}"""
-        assertEquals("READY", PuterCodec.extractResponseText(strResponse))
+        val qwenPayload = GroqCodec.buildChatCompletionJson(
+            prompt = "Patch HTML",
+            model = GroqCodec.MODEL_QWEN3_32B
+        )
+        assertTrue(qwenPayload.contains("\"reasoning_format\":\"hidden\""))
 
-        val arrayResponse = """
-            {
-              "success": true,
-              "result": {
-                "message": {
-                  "role": "assistant",
-                  "content": [
-                    {"type": "text", "text": "{\"ok\":"},
-                    {"type": "output_text", "text": "true}"}
-                  ]
-                }
-              }
-            }
-        """.trimIndent()
-        assertEquals("{\"ok\":true}", PuterCodec.extractResponseText(arrayResponse))
+        val thinkingResp = """{"choices":[{"message":{"role":"assistant","content":"<think>check margin</think>{\"status\":\"OK\"}"}}]}"""
+        assertEquals("{\"status\":\"OK\"}", GroqCodec.extractResponseText(thinkingResp))
 
-        val fundingError = """{"success":false,"error":{"code":"insufficient_funds","message":"Not enough funding","metadata":{"usage_limited":true}}}"""
+        val authErrJson = """{"error":{"message":"Invalid API Key","type":"invalid_request_error","code":"invalid_api_key"}}"""
         try {
-            PuterCodec.extractResponseText(fundingError)
-            fail("Expected PuterApiException")
-        } catch (ex: PuterApiException) {
-            assertEquals("insufficient_funds", ex.errorCode)
-            assertTrue(ex.usageLimited)
+            GroqCodec.extractResponseText(authErrJson)
+            fail("Expected GroqApiException")
+        } catch (ex: GroqApiException) {
+            assertEquals("invalid_api_key", ex.errorCode)
         }
+
+        val headers = mapOf<String?, List<String>>(
+            "x-ratelimit-remaining-requests" to listOf("0"),
+            "x-ratelimit-limit-requests" to listOf("1000"),
+            "x-ratelimit-reset-requests" to listOf("4m12s"),
+            "x-ratelimit-remaining-tokens" to listOf("12000"),
+            "x-ratelimit-limit-tokens" to listOf("300000"),
+            "x-ratelimit-reset-tokens" to listOf("5s"),
+            "retry-after" to listOf("15")
+        )
+        val report = GroqCodec.parseQuotaHeaders(headers, httpCode = 429)!!
+        assertTrue(report.isExhausted)
+        assertEquals("Quota 0 left", report.bannerLabel())
+        assertEquals(0, report.remainingPercent)
+
+        val visionModels = GroqCodec.buildCandidateModels(GroqCodec.PREF_AUTO, requiresVision = true, heavyTask = false)
+        assertEquals(listOf(GroqCodec.MODEL_LLAMA4_SCOUT, GroqCodec.MODEL_LLAMA4_MAVERICK), visionModels)
+
+        val heavyTextModels = GroqCodec.buildCandidateModels(GroqCodec.PREF_AUTO, requiresVision = false, heavyTask = true)
+        assertEquals(GroqCodec.MODEL_LLAMA33_70B, heavyTextModels.first())
+
+        assertEquals(
+            GroqFailureCategory.FATAL_AUTH,
+            GroqCodec.classifyFailure(401, "Invalid API key", errorCode = "invalid_api_key")
+        )
+        assertEquals(
+            GroqFailureCategory.QUOTA_OR_CREDITS_EXHAUSTED,
+            GroqCodec.classifyFailure(429, "Rate limit reached", quota = report)
+        )
+        assertEquals(
+            GroqFailureCategory.RATE_OR_OVERLOAD,
+            GroqCodec.classifyFailure(429, "Too many requests per minute")
+        )
+        assertEquals(
+            GroqFailureCategory.PAYLOAD_TOO_LARGE,
+            GroqCodec.classifyFailure(413, "Request entity too large")
+        )
+        assertEquals(
+            GroqFailureCategory.NETWORK_TIMEOUT,
+            GroqCodec.classifyFailure(null, "Read timed out", isTimeout = true)
+        )
+
+        val quotaMsg = GroqCodec.buildFriendlyErrorMessage(
+            lastCategory = GroqFailureCategory.QUOTA_OR_CREDITS_EXHAUSTED,
+            lastRawMessage = "limit reached",
+            attemptedModels = listOf(GroqCodec.MODEL_LLAMA33_70B),
+            sawAnyHttpResponse = true,
+            quota = report
+        )
+        assertTrue(quotaMsg.contains("Switch to another Groq API key"))
     }
 
     @Test
-    fun puterCodecParsesUsageCreditsRoutesModelsAndClassifiesExhaustion() {
-        assertEquals("alice", PuterCodec.parseWhoamiUsername("""{"username":"alice","uuid":"u123456"}"""))
-
-        val usdUsageJson = """
+    fun groqPatchEngineAppliesExactOnceEditsExtractsExcerptsAndParsesStages() {
+        val stage1Json = """
+            ```json
             {
-              "usage": {"total": 325000000, "allowanceUsed": 325000000},
-              "allowanceInfo": {"monthUsageAllowance": 500000000, "remaining": 175000000}
+              "rootCauses": [
+                {
+                  "id": "R1",
+                  "type": "overflow",
+                  "t": [2.5, 3.0],
+                  "el": "#hero-title",
+                  "evidence": "Edge clip right=1860",
+                  "fix": "Set max-width: 820px and reduce font-size"
+                }
+              ],
+              "edits": [
+                {
+                  "rc": "R1",
+                  "find": ".hero-title { font-size: 96px; }",
+                  "replace": ".hero-title { font-size: 72px; max-width: 820px; }"
+                }
+              ],
+              "needsFull": false,
+              "reason": ""
             }
+            ```
         """.trimIndent()
-        val usdReport = PuterCodec.parseUsageReport(usdUsageJson)
-        assertFalse(usdReport.isCreditsUnit)
-        assertFalse(usdReport.isExhausted)
-        assertEquals(35, usdReport.remainingPercent)
-        assertEquals("$1.75", usdReport.formattedRemaining())
-        assertEquals(
-            "$1.75 left",
-            PuterCodec.formatUsageBannerLabel(
-                remainingRaw = usdReport.totalRemainingRaw,
-                allowanceRaw = usdReport.monthlyAllowanceRaw,
-                isCreditsUnit = usdReport.isCreditsUnit,
-                exhausted = usdReport.isExhausted
+        val plan = GroqCodec.parseStage1Plan(stage1Json)
+        assertEquals(1, plan.rootCauses.size)
+        assertEquals("R1", plan.rootCauses.first().id)
+        assertEquals(2.5, plan.rootCauses.first().timesSec.first(), 0.001)
+        assertEquals(1, plan.edits.size)
+        assertFalse(plan.needsFull)
+
+        val stage2Json = """{"edits":[{"rc":"R1","find":"old","replace":"new"}]}"""
+        val (s2Edits, s2Html) = GroqCodec.parseStage2Repair(stage2Json)
+        assertEquals(1, s2Edits.size)
+        assertTrue(s2Html == null)
+
+        val claudePatch = """
+            Root cause: title overflows right column.
+            <<<SEARCH
+            .hero-title { font-size: 96px; }
+            ===REPLACE
+            .hero-title { font-size: 72px; max-width: 820px; }
+            >>>
+        """.trimIndent()
+        val parsedBlocks = GroqCodec.parseClaudeSearchReplacePatches(claudePatch)
+        assertEquals(1, parsedBlocks.size)
+
+        val sampleHtml = """
+            <!DOCTYPE html><html><head><style>
+            .hero-title { font-size: 96px; }
+            .dup { color: red; }
+            .dup { color: red; }
+            </style></head><body><div id="stage"></div>
+            <script>
+            const scenes = [
+              { start: 0.0, end: 2.0, title: "Intro" },
+              { start: 2.0, end: 5.0, title: "Main Hero" }
+            ];
+            window.RAW = { duration: 5.0, seek(t) {} };
+            </script></body></html>
+        """.trimIndent()
+
+        val applied = GroqCodec.applyExactOnceEdits(sampleHtml, parsedBlocks)
+        assertEquals(1, applied.appliedCount)
+        assertTrue(applied.failedEdits.isEmpty())
+        assertTrue(applied.updatedHtml.contains("max-width: 820px"))
+
+        val badAmbiguous = GroqCodec.applyExactOnceEdits(
+            sampleHtml,
+            listOf(
+                GroqPatchEdit("R2", ".dup { color: red; }", ".dup { color: blue; }"),
+                GroqPatchEdit("R3", "NOT_IN_FILE", "X")
             )
         )
+        assertEquals(0, badAmbiguous.appliedCount)
+        assertEquals(2, badAmbiguous.failedEdits.size)
 
-        val creditsExhaustedJson = """
-            {
-              "usage": {"total": 1000, "allowanceUsed": 1000},
-              "allowanceInfo": {"monthUsageAllowance": 1000, "remaining": 0, "unit": "credits"}
-            }
-        """.trimIndent()
-        val crReport = PuterCodec.parseUsageReport(creditsExhaustedJson)
-        assertTrue(crReport.isCreditsUnit)
-        assertTrue(crReport.isExhausted)
-        assertEquals(0, crReport.remainingPercent)
-        assertEquals("0 cr", crReport.formattedRemaining())
-        assertEquals("0 cr left", PuterCodec.formatUsageBannerLabel(0.0, 1000.0, isCreditsUnit = true, exhausted = true))
+        val excerpt = GroqCodec.buildHtmlExcerpt(sampleHtml, listOf(2.5), listOf("hero-title"))
+        assertTrue(excerpt.contains("hero-title"))
+        assertTrue(excerpt.contains("Main Hero"))
 
-        val lightAuto = PuterCodec.buildCandidateModels(modelPref = PuterCodec.PREF_AUTO, heavyTask = false)
-        assertEquals("gpt-4o-mini", lightAuto.first())
-        assertTrue(lightAuto.none { it.contains("gemini", ignoreCase = true) })
-
-        val heavyAuto = PuterCodec.buildCandidateModels(modelPref = PuterCodec.PREF_AUTO, heavyTask = true)
-        assertEquals("claude-sonnet-4-6", heavyAuto.first())
-
-        val cooledAuto = PuterCodec.buildCandidateModels(
-            modelPref = PuterCodec.PREF_AUTO,
-            heavyTask = false,
-            cooledDownModels = setOf("gpt-4o-mini")
-        )
-        assertEquals("gpt-5-nano", cooledAuto.first())
-        assertEquals("gpt-4o-mini", cooledAuto.last())
-
-        val pinned = PuterCodec.buildCandidateModels(
-            modelPref = PuterCodec.MODEL_CLAUDE_SONNET,
-            heavyTask = false,
-            cooledDownModels = setOf(PuterCodec.MODEL_CLAUDE_SONNET, PuterCodec.MODEL_GPT_5_MINI)
-        )
-        assertEquals("claude-sonnet-4-6", pinned.first())
-
-        assertEquals(
-            PuterFailureCategory.INSUFFICIENT_CREDITS,
-            PuterCodec.classifyFailure(402, "Error", errorCode = "insufficient_funds", usageLimited = true)
-        )
-        assertEquals(
-            PuterFailureCategory.FATAL_AUTH,
-            PuterCodec.classifyFailure(401, "Unauthorized")
-        )
-        assertEquals(
-            PuterFailureCategory.RATE_OR_OVERLOAD,
-            PuterCodec.classifyFailure(429, "Rate limit exceeded")
-        )
-        assertEquals(
-            PuterFailureCategory.NETWORK_TIMEOUT,
-            PuterCodec.classifyFailure(null, "Read timed out", isTimeout = true)
-        )
-
-        val outMsg = PuterCodec.buildFriendlyErrorMessage(
-            lastCategory = PuterFailureCategory.INSUFFICIENT_CREDITS,
-            lastRawMessage = "insufficient_funds",
-            attemptedModels = listOf("gpt-4o-mini"),
-            sawAnyHttpResponse = true
-        )
-        assertTrue(outMsg.contains("Switch to another Puter or Google account"))
+        val windows = GroqCodec.buildRepairWindows(sampleHtml, badAmbiguous.failedEdits, "JS error at line 10")
+        assertTrue(windows.contains("window.RAW"))
     }
 }

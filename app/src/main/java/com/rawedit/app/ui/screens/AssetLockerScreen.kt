@@ -61,8 +61,8 @@ import com.rawedit.app.data.CacheManager
 import com.rawedit.app.data.local.LocalAssetEntity
 import com.rawedit.app.data.local.ProjectEntity
 import com.rawedit.app.data.repository.RawEditRepository
-import com.rawedit.app.domain.PuterClient
-import com.rawedit.app.domain.PuterOutOfCreditsException
+import com.rawedit.app.domain.GroqClient
+import com.rawedit.app.domain.GroqQuotaExhaustedException
 import com.rawedit.app.ui.components.BigPrimaryButton
 import com.rawedit.app.ui.components.CircleActionButton
 import com.rawedit.app.ui.components.FormatHelpers
@@ -88,11 +88,10 @@ import java.io.File
 fun AssetLockerScreen(
     project: ProjectEntity,
     allAssets: List<LocalAssetEntity>,
-    authToken: String,
-    puterUsername: String,
+    apiKey: String,
     modelPref: String,
-    creditsExhausted: Boolean,
-    creditsBadgeText: String,
+    quotaExhausted: Boolean,
+    quotaBadgeText: String,
     cacheManager: CacheManager,
     onBack: () -> Unit,
     onImportAsset: (uri: Uri, isVideo: Boolean) -> Unit,
@@ -107,10 +106,10 @@ fun AssetLockerScreen(
     onUpdateAssetNotes: (assetId: Long, description: String, safeZone: String) -> Unit,
     onToggleAttach: (assetId: Long) -> Unit,
     onDeleteAsset: (LocalAssetEntity) -> Unit,
-    onOpenPuterAuth: () -> Unit,
-    onSwitchPuterAccount: () -> Unit,
-    onRefreshPuterCredits: () -> Unit,
-    onMarkCreditsExhausted: () -> Unit
+    onOpenGroqKey: () -> Unit,
+    onSwitchGroqKey: () -> Unit,
+    onRefreshGroqQuota: () -> Unit,
+    onMarkQuotaExhausted: () -> Unit
 ) {
     val scope = rememberCoroutineScope()
     val listState = rememberLazyListState()
@@ -172,50 +171,50 @@ fun AssetLockerScreen(
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(10.dp)
                 ) {
-                    val isSignedIn = authToken.isNotBlank()
+                    val hasKey = apiKey.isNotBlank()
                     Row(
                         modifier = Modifier
                             .clip(CircleShape)
                             .background(
                                 when {
-                                    creditsExhausted -> RawColors.ErrorSoft
-                                    isSignedIn -> RawColors.AccentSoft
+                                    quotaExhausted -> RawColors.ErrorSoft
+                                    hasKey -> RawColors.AccentSoft
                                     else -> RawColors.RaisedCard
                                 }
                             )
                             .border(
                                 width = 1.dp,
-                                color = if (creditsExhausted) RawColors.ErrorBorder else Color.Transparent,
+                                color = if (quotaExhausted) RawColors.ErrorBorder else Color.Transparent,
                                 shape = CircleShape
                             )
                             .clickable {
-                                if (creditsExhausted) onSwitchPuterAccount() else onOpenPuterAuth()
+                                if (quotaExhausted) onSwitchGroqKey() else onOpenGroqKey()
                             }
                             .padding(horizontal = 12.dp, vertical = 7.dp),
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.spacedBy(6.dp)
                     ) {
                         RawIcon(
-                            type = RawIconType.GLOBE,
+                            type = RawIconType.KEY,
                             size = 14.dp,
                             tint = when {
-                                creditsExhausted -> RawColors.ErrorCoral
-                                isSignedIn -> RawColors.Tan
+                                quotaExhausted -> RawColors.ErrorCoral
+                                hasKey -> RawColors.Tan
                                 else -> RawColors.TextMuted
                             }
                         )
                         Text(
                             text = when {
-                                !isSignedIn -> "Sign in"
-                                creditsExhausted -> "0 left \u2022 Switch"
-                                else -> creditsBadgeText
+                                !hasKey -> "Add Groq key"
+                                quotaExhausted -> "Quota 0 \u2022 Switch"
+                                else -> quotaBadgeText
                             },
                             fontFamily = JetBrainsMonoFamily,
                             fontWeight = FontWeight.Bold,
                             fontSize = 11.5.sp,
                             color = when {
-                                creditsExhausted -> RawColors.ErrorCoral
-                                isSignedIn -> RawColors.Tan
+                                quotaExhausted -> RawColors.ErrorCoral
+                                hasKey -> RawColors.Tan
                                 else -> RawColors.TextMuted
                             },
                             maxLines = 1,
@@ -279,21 +278,21 @@ fun AssetLockerScreen(
                         }
                     }
 
-                    if (authToken.isBlank()) {
+                    if (apiKey.isBlank()) {
                         item {
                             Row(
                                 modifier = Modifier
                                     .fillMaxWidth()
                                     .clip(RoundedCornerShape(24.dp))
                                     .background(RawColors.CardSurface)
-                                    .clickable { onOpenPuterAuth() }
+                                    .clickable { onOpenGroqKey() }
                                     .padding(horizontal = 16.dp, vertical = 14.dp),
                                 verticalAlignment = Alignment.CenterVertically,
                                 horizontalArrangement = Arrangement.spacedBy(12.dp)
                             ) {
-                                RawIcon(RawIconType.GLOBE, size = 18.dp, tint = RawColors.Tan)
+                                RawIcon(RawIconType.KEY, size = 18.dp, tint = RawColors.Tan)
                                 Text(
-                                    text = "Sign in with Google / Puter to auto-describe images and safe typography zones.",
+                                    text = "Add a Groq API key to auto-describe images and safe typography zones.",
                                     style = RawTypography.bodyMedium.copy(fontSize = 13.5.sp, lineHeight = 19.sp),
                                     color = RawColors.TextMuted,
                                     modifier = Modifier.weight(1f)
@@ -305,7 +304,7 @@ fun AssetLockerScreen(
                                         .padding(horizontal = 11.dp, vertical = 5.dp)
                                 ) {
                                     Text(
-                                        text = "Sign in",
+                                        text = "Add key",
                                         fontFamily = BricolageFamily,
                                         fontWeight = FontWeight.Bold,
                                         fontSize = 12.sp,
@@ -314,7 +313,7 @@ fun AssetLockerScreen(
                                 }
                             }
                         }
-                    } else if (creditsExhausted) {
+                    } else if (quotaExhausted) {
                         item {
                             Row(
                                 modifier = Modifier
@@ -322,14 +321,14 @@ fun AssetLockerScreen(
                                     .clip(RoundedCornerShape(24.dp))
                                     .background(RawColors.ErrorSoft)
                                     .border(1.dp, RawColors.ErrorBorder, RoundedCornerShape(24.dp))
-                                    .clickable { onSwitchPuterAccount() }
+                                    .clickable { onSwitchGroqKey() }
                                     .padding(horizontal = 16.dp, vertical = 14.dp),
                                 verticalAlignment = Alignment.CenterVertically,
                                 horizontalArrangement = Arrangement.spacedBy(12.dp)
                             ) {
                                 RawIcon(RawIconType.WARN, size = 18.dp, tint = RawColors.ErrorCoral)
                                 Text(
-                                    text = "Puter credits ran out${if (puterUsername.isNotBlank()) " on @$puterUsername" else ""}. Switch account to run AI auto-describe or cutout audit.",
+                                    text = "Groq quota ran out on this key. Switch API key to run AI auto-describe or cutout audit.",
                                     style = RawTypography.bodyMedium.copy(fontSize = 13.5.sp, lineHeight = 19.sp),
                                     color = RawColors.ErrorCoral,
                                     modifier = Modifier.weight(1f)
@@ -394,12 +393,12 @@ fun AssetLockerScreen(
                                     onToggleAttach = { onToggleAttach(asset.id) },
                                     onDelete = { deleteConfirmTarget = asset },
                                     onAutoDescribe = {
-                                        if (authToken.isBlank()) {
-                                            onOpenPuterAuth()
+                                        if (apiKey.isBlank()) {
+                                            onOpenGroqKey()
                                             return@AssetLockerCard
                                         }
-                                        if (creditsExhausted) {
-                                            onSwitchPuterAccount()
+                                        if (quotaExhausted) {
+                                            onSwitchGroqKey()
                                             return@AssetLockerCard
                                         }
                                         val imgFile = if (asset.kind == LocalAssetEntity.KIND_CLIP) {
@@ -413,8 +412,8 @@ fun AssetLockerScreen(
                                         }
                                         describingAssetId = asset.id
                                         scope.launch {
-                                            val res = PuterClient.describeAsset(
-                                                authToken = authToken,
+                                            val res = GroqClient.describeAsset(
+                                                apiKey = apiKey,
                                                 asset = asset,
                                                 imageFile = imgFile,
                                                 modelPref = modelPref
@@ -422,11 +421,11 @@ fun AssetLockerScreen(
                                             describingAssetId = null
                                             res.onSuccess { (desc, safe) ->
                                                 onUpdateAssetNotes(asset.id, desc, safe)
-                                                onRefreshPuterCredits()
-                                                toastMsg = "Puter AI note updated"
+                                                onRefreshGroqQuota()
+                                                toastMsg = "Groq AI note updated"
                                             }.onFailure { err ->
-                                                if (err is PuterOutOfCreditsException) {
-                                                    onMarkCreditsExhausted()
+                                                if (err is GroqQuotaExhaustedException) {
+                                                    onMarkQuotaExhausted()
                                                 }
                                                 toastMsg = err.message ?: "Auto-describe failed"
                                             }
@@ -610,13 +609,13 @@ fun AssetLockerScreen(
     cutoutStudioTarget?.let { target ->
         CutoutStudioDialog(
             input = target,
-            authToken = authToken,
+            apiKey = apiKey,
             modelPref = modelPref,
-            creditsExhausted = creditsExhausted,
-            onOpenPuterAuth = onOpenPuterAuth,
-            onSwitchPuterAccount = onSwitchPuterAccount,
-            onRefreshPuterCredits = onRefreshPuterCredits,
-            onMarkCreditsExhausted = onMarkCreditsExhausted,
+            quotaExhausted = quotaExhausted,
+            onOpenGroqKey = onOpenGroqKey,
+            onSwitchGroqKey = onSwitchGroqKey,
+            onRefreshGroqQuota = onRefreshGroqQuota,
+            onMarkQuotaExhausted = onMarkQuotaExhausted,
             onDismiss = { cutoutStudioTarget = null },
             onConfirmSave = { finalBmp, isCutout, suggestedName, desc, safe ->
                 cutoutStudioTarget = null
@@ -807,7 +806,7 @@ private fun AssetLockerCard(
                 color = RawColors.TextMuted
             )
             Text(
-                text = asset.description.ifBlank { "No description yet. Run Auto-describe with Puter AI or edit note." },
+                text = asset.description.ifBlank { "No description yet. Run Auto-describe with Groq AI or edit note." },
                 fontFamily = BricolageFamily,
                 fontWeight = FontWeight.Medium,
                 fontSize = 13.5.sp,

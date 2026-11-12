@@ -30,6 +30,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -45,6 +46,8 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
@@ -83,11 +86,12 @@ import coil.request.ImageRequest
 import com.rawedit.app.data.CacheManager
 import com.rawedit.app.data.local.ProjectEntity
 import com.rawedit.app.domain.CodeValidator
+import com.rawedit.app.domain.GroqClient
+import com.rawedit.app.domain.GroqCodec
+import com.rawedit.app.domain.GroqQuotaExhaustedException
 import com.rawedit.app.domain.KeyframeSample
 import com.rawedit.app.domain.KeyframeSheetGenerator
 import com.rawedit.app.domain.KeyframeSheetResult
-import com.rawedit.app.domain.PuterClient
-import com.rawedit.app.domain.PuterOutOfCreditsException
 import com.rawedit.app.domain.SheetReviewResult
 import com.rawedit.app.domain.SheetSamplingMode
 import com.rawedit.app.ui.components.BigPrimaryButton
@@ -121,17 +125,17 @@ import java.util.Locale
 fun KeyframeSheetScreen(
     project: ProjectEntity,
     cacheManager: CacheManager,
-    authToken: String,
+    apiKey: String,
     modelPref: String,
-    creditsExhausted: Boolean,
-    creditsBadgeText: String,
+    quotaExhausted: Boolean,
+    quotaBadgeText: String,
     onBack: () -> Unit,
     onEditCode: () -> Unit,
     onApplyFixedHtml: (String, Double) -> Unit,
-    onOpenPuterAuth: () -> Unit,
-    onSwitchPuterAccount: () -> Unit,
-    onRefreshPuterCredits: () -> Unit,
-    onMarkCreditsExhausted: () -> Unit,
+    onOpenGroqKey: () -> Unit,
+    onSwitchGroqKey: () -> Unit,
+    onRefreshGroqQuota: () -> Unit,
+    onMarkQuotaExhausted: () -> Unit,
     onRenderNow: () -> Unit
 ) {
     val context = LocalContext.current
@@ -193,6 +197,10 @@ fun KeyframeSheetScreen(
     var exportBusy by remember { mutableStateOf(false) }
     var toastMsg by remember { mutableStateOf<String?>(null) }
     var promptCopied by remember { mutableStateOf(false) }
+    var showPatchDialog by remember { mutableStateOf(false) }
+    var patchDraft by remember { mutableStateOf("") }
+    var patchBusy by remember { mutableStateOf(false) }
+    var patchError by remember { mutableStateOf<String?>(null) }
     var pendingPdfFile by remember { mutableStateOf<File?>(null) }
     var pendingZipFile by remember { mutableStateOf<File?>(null) }
 
@@ -703,7 +711,7 @@ fun KeyframeSheetScreen(
                                 }
                             }
 
-                            // Puter AI Frame Inspector Card (optional)
+                            // Groq Two-Stage AI Frame Inspector Card (optional)
                             item(span = { GridItemSpan(2) }) {
                                 Column(
                                     modifier = Modifier
@@ -726,30 +734,30 @@ fun KeyframeSheetScreen(
                                             RawIcon(RawIconType.SPARK, size = 18.dp, tint = RawColors.Tan)
                                             Column {
                                                 Text(
-                                                    text = "Puter AI Frame Inspector",
+                                                    text = "Groq Two-Stage Frame Auto-Fix",
                                                     fontFamily = BricolageFamily,
                                                     fontWeight = FontWeight.Bold,
-                                                    fontSize = 18.5.sp,
+                                                    fontSize = 18.sp,
                                                     color = RawColors.TextPrimary
                                                 )
                                                 Text(
                                                     text = when {
-                                                        authToken.isBlank() -> "Optional \u2022 Sign in with Google / Puter"
-                                                        creditsExhausted -> "Out of Puter credits \u2022 Switch account"
-                                                        else -> "Visual inspection + auto-fix \u2022 $creditsBadgeText"
+                                                        apiKey.isBlank() -> "Optional \u2022 Add Groq key"
+                                                        quotaExhausted -> "Groq quota exhausted \u2022 Switch key"
+                                                        else -> "Vision + patch repair \u2022 $quotaBadgeText"
                                                     },
                                                     style = RawTypography.labelMedium,
-                                                    color = if (creditsExhausted) RawColors.ErrorCoral else RawColors.TextMuted
+                                                    color = if (quotaExhausted) RawColors.ErrorCoral else RawColors.TextMuted
                                                 )
                                             }
                                         }
-                                        if (creditsExhausted) {
+                                        if (quotaExhausted) {
                                             Box(
                                                 modifier = Modifier
                                                     .clip(CircleShape)
                                                     .background(RawColors.ErrorSoft)
                                                     .border(1.dp, RawColors.ErrorBorder, CircleShape)
-                                                    .clickable(onClick = onSwitchPuterAccount)
+                                                    .clickable(onClick = onSwitchGroqKey)
                                                     .padding(horizontal = 12.dp, vertical = 7.dp)
                                             ) {
                                                 Text(
@@ -762,11 +770,11 @@ fun KeyframeSheetScreen(
                                             }
                                         } else {
                                             CircleActionButton(
-                                                icon = RawIconType.GLOBE,
+                                                icon = RawIconType.KEY,
                                                 size = 38.dp,
-                                                backgroundColor = if (authToken.isNotBlank()) RawColors.AccentSoft else RawColors.RaisedCard,
-                                                iconTint = if (authToken.isNotBlank()) RawColors.Tan else RawColors.TextMuted,
-                                                onClick = onOpenPuterAuth
+                                                backgroundColor = if (apiKey.isNotBlank()) RawColors.AccentSoft else RawColors.RaisedCard,
+                                                iconTint = if (apiKey.isNotBlank()) RawColors.Tan else RawColors.TextMuted,
+                                                onClick = onOpenGroqKey
                                             )
                                         }
                                     }
@@ -781,42 +789,42 @@ fun KeyframeSheetScreen(
                                             enabled = !aiBusy,
                                             leadingIcon = RawIconType.LENS,
                                             onClick = {
-                                                if (authToken.isBlank()) {
-                                                    onOpenPuterAuth()
+                                                if (apiKey.isBlank()) {
+                                                    onOpenGroqKey()
                                                     return@RawSecondaryButton
                                                 }
-                                                if (creditsExhausted) {
-                                                    onSwitchPuterAccount()
+                                                if (quotaExhausted) {
+                                                    onSwitchGroqKey()
                                                     return@RawSecondaryButton
                                                 }
                                                 aiBusy = true
                                                 aiAction = "review"
                                                 aiError = null
                                                 scope.launch {
-                                                    val imgs = KeyframeSheetGenerator.buildReviewSheetImages(
+                                                    val flaggedFrames = KeyframeSheetGenerator.selectFlaggedReviewFrames(
                                                         samples = res.samples,
-                                                        title = project.title.ifBlank { "Untitled Reel" },
                                                         outDir = cacheManager.sheetTempDir(project.id),
-                                                        maxPages = 2
+                                                        maxFrames = GroqCodec.MAX_IMAGES_PER_REQUEST
                                                     )
-                                                    val review = PuterClient.reviewContactSheet(
-                                                        authToken = authToken,
-                                                        sheetImages = imgs,
+                                                    val review = GroqClient.reviewContactSheet(
+                                                        apiKey = apiKey,
+                                                        samples = res.samples,
+                                                        flaggedFrameFiles = flaggedFrames,
                                                         htmlCode = resolvedHtml,
-                                                        frameCount = res.samples.size,
+                                                        durationSec = res.durationSec,
                                                         modelPref = modelPref
                                                     )
                                                     aiBusy = false
                                                     aiAction = ""
                                                     review.onSuccess { r ->
-                                                        onRefreshPuterCredits()
+                                                        onRefreshGroqQuota()
                                                         reviewResult = r
-                                                        toastMsg = if (r.issues.isEmpty()) "No visual glitches spotted" else "Found ${r.issues.size} frame notes"
+                                                        toastMsg = if (r.issues.isEmpty()) "No visual glitches spotted" else "Found ${r.issues.size} root cause(s)"
                                                     }.onFailure { err ->
-                                                        if (err is PuterOutOfCreditsException) {
-                                                            onMarkCreditsExhausted()
+                                                        if (err is GroqQuotaExhaustedException) {
+                                                            onMarkQuotaExhausted()
                                                         }
-                                                        aiError = err.message ?: "Puter AI inspection failed."
+                                                        aiError = err.message ?: "Groq AI inspection failed."
                                                     }
                                                 }
                                             },
@@ -824,79 +832,56 @@ fun KeyframeSheetScreen(
                                         )
 
                                         BigPrimaryButton(
-                                            text = if (aiBusy && aiAction == "fix") "Fixing..." else "Auto-fix",
+                                            text = if (aiBusy && aiAction == "fix") "Patching..." else "Auto-fix",
                                             height = 48.dp,
                                             enabled = !aiBusy,
                                             leadingIcon = RawIconType.SPARK,
                                             containerColor = RawColors.Tan,
                                             contentColor = RawColors.Ink,
                                             onClick = {
-                                                if (authToken.isBlank()) {
-                                                    onOpenPuterAuth()
+                                                if (apiKey.isBlank()) {
+                                                    onOpenGroqKey()
                                                     return@BigPrimaryButton
                                                 }
-                                                if (creditsExhausted) {
-                                                    onSwitchPuterAccount()
+                                                if (quotaExhausted) {
+                                                    onSwitchGroqKey()
                                                     return@BigPrimaryButton
                                                 }
                                                 aiBusy = true
                                                 aiAction = "fix"
                                                 aiError = null
                                                 scope.launch {
-                                                    val imgs = KeyframeSheetGenerator.buildReviewSheetImages(
+                                                    val flaggedFrames = KeyframeSheetGenerator.selectFlaggedReviewFrames(
                                                         samples = res.samples,
-                                                        title = project.title.ifBlank { "Untitled Reel" },
                                                         outDir = cacheManager.sheetTempDir(project.id),
-                                                        maxPages = 2
+                                                        maxFrames = GroqCodec.MAX_IMAGES_PER_REQUEST
                                                     )
-                                                    val issuesText = buildString {
-                                                        reviewResult?.let { rev ->
-                                                            if (rev.summary.isNotBlank()) appendLine(rev.summary)
-                                                            rev.issues.forEach { iss ->
-                                                                appendLine("${iss.frame} (${iss.time}): ${iss.problem} -> ${iss.fix}")
-                                                            }
-                                                        }
-                                                        flaggedSamples.forEach { s ->
-                                                            appendLine(
-                                                                String.format(
-                                                                    Locale.US,
-                                                                    "Local DOM #${s.index + 1} (t=%.2fs): ${s.warnings.joinToString("; ")} ${s.autoFitNotes.joinToString("; ")}",
-                                                                    s.timeSec
-                                                                )
-                                                            )
-                                                        }
-                                                    }.ifBlank { "Inspect all frames for text overflow, overlap, margin clipping, or contrast issues." }
-
-                                                    val fixRes = PuterClient.autoFixHtmlWithSheet(
-                                                        authToken = authToken,
-                                                        sheetImages = imgs,
+                                                    val outcomeRes = GroqClient.autoFixHtmlTwoStage(
+                                                        apiKey = apiKey,
+                                                        samples = res.samples,
+                                                        flaggedFrameFiles = flaggedFrames,
                                                         htmlCode = resolvedHtml,
-                                                        issuesSummary = issuesText,
                                                         durationSec = res.durationSec,
                                                         modelPref = modelPref
-                                                    )
-                                                    fixRes.onSuccess { fixedHtml ->
-                                                        onRefreshPuterCredits()
-                                                        val validation = CodeValidator.validateFull(context, cacheManager, fixedHtml)
-                                                        aiBusy = false
-                                                        aiAction = ""
-                                                        if (validation.isValid) {
-                                                            resolvedHtml = validation.cleanedHtml
-                                                            onApplyFixedHtml(validation.cleanedHtml, validation.durationSec)
-                                                            reviewResult = null
-                                                            aiError = null
-                                                            toastMsg = "Puter AI fix applied — re-capturing sheet"
-                                                            captureGen++
-                                                        } else {
-                                                            aiError = "Auto-fix failed offline check: ${validation.summaryMessage}"
-                                                        }
+                                                    ) { candidateHtml ->
+                                                        CodeValidator.validateFull(context, cacheManager, candidateHtml)
+                                                    }
+                                                    aiBusy = false
+                                                    aiAction = ""
+                                                    outcomeRes.onSuccess { outcome ->
+                                                        onRefreshGroqQuota()
+                                                        resolvedHtml = outcome.validation.cleanedHtml
+                                                        onApplyFixedHtml(outcome.validation.cleanedHtml, outcome.validation.durationSec)
+                                                        reviewResult = null
+                                                        aiError = null
+                                                        val repairNote = if (outcome.repairRoundsUsed > 0) " (${outcome.repairRoundsUsed} repair)" else ""
+                                                        toastMsg = "Applied ${outcome.editsApplied} Groq patch(es)$repairNote \u2014 re-capturing"
+                                                        captureGen++
                                                     }.onFailure { err ->
-                                                        aiBusy = false
-                                                        aiAction = ""
-                                                        if (err is PuterOutOfCreditsException) {
-                                                            onMarkCreditsExhausted()
+                                                        if (err is GroqQuotaExhaustedException) {
+                                                            onMarkQuotaExhausted()
                                                         }
-                                                        aiError = err.message ?: "Puter AI auto-fix failed."
+                                                        aiError = err.message ?: "Groq AI auto-fix failed (HTML kept safe)."
                                                     }
                                                 }
                                             },
@@ -920,12 +905,12 @@ fun KeyframeSheetScreen(
                                                 fontSize = 13.5.sp,
                                                 color = RawColors.ErrorCoral
                                             )
-                                            if (creditsExhausted || msg.contains("credit", ignoreCase = true)) {
+                                            if (quotaExhausted || msg.contains("quota", ignoreCase = true) || msg.contains("key", ignoreCase = true)) {
                                                 RawSecondaryButton(
-                                                    text = "Switch Puter Account",
+                                                    text = "Switch Groq API Key",
                                                     height = 42.dp,
-                                                    leadingIcon = RawIconType.GLOBE,
-                                                    onClick = onSwitchPuterAccount
+                                                    leadingIcon = RawIconType.KEY,
+                                                    onClick = onSwitchGroqKey
                                                 )
                                             }
                                         }
@@ -1061,17 +1046,28 @@ fun KeyframeSheetScreen(
                                             val fixPrompt = KeyframeSheetGenerator.buildFixPrompt(
                                                 samples = res.samples,
                                                 title = project.title.ifBlank { "Untitled Reel" },
-                                                durationSec = res.durationSec
+                                                durationSec = res.durationSec,
+                                                htmlCode = resolvedHtml
                                             )
                                             val cb = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
                                             cb.setPrimaryClip(ClipData.newPlainText("raw_edit fix prompt", fixPrompt))
                                             haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
                                             promptCopied = true
-                                            toastMsg = "Fix prompt copied"
+                                            toastMsg = "Prompt B + HTML copied"
                                             scope.launch {
                                                 delay(2000)
                                                 promptCopied = false
                                             }
+                                        }
+                                    )
+
+                                    RawSecondaryButton(
+                                        text = "Paste AI patch (<<<SEARCH)",
+                                        height = 46.dp,
+                                        leadingIcon = RawIconType.CODE,
+                                        onClick = {
+                                            patchError = null
+                                            showPatchDialog = true
                                         }
                                     )
                                 }
@@ -1361,6 +1357,156 @@ fun KeyframeSheetScreen(
                                 RawIcon(RawIconType.CHEVRON_RIGHT, size = 18.dp, tint = RawColors.TextPrimary)
                             }
                         }
+                    }
+                }
+            }
+        }
+    }
+
+    if (showPatchDialog) {
+        Dialog(
+            onDismissRequest = { if (!patchBusy) showPatchDialog = false },
+            properties = DialogProperties(usePlatformDefaultWidth = false)
+        ) {
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 16.dp)
+                    .imePadding()
+            ) {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(30.dp))
+                        .background(RawColors.CardSurface)
+                        .border(1.dp, RawColors.Divider, RoundedCornerShape(30.dp))
+                        .padding(20.dp)
+                        .verticalScroll(rememberScrollState()),
+                    verticalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                text = "Apply Search / Replace Patch",
+                                fontFamily = BricolageFamily,
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 20.sp,
+                                color = RawColors.TextPrimary
+                            )
+                            Text(
+                                text = "Paste Claude Option A blocks (<<<SEARCH ... ===REPLACE ... >>>).",
+                                style = RawTypography.labelMedium,
+                                color = RawColors.TextMuted
+                            )
+                        }
+                        CircleActionButton(
+                            icon = RawIconType.CLOSE,
+                            size = 36.dp,
+                            onClick = { if (!patchBusy) showPatchDialog = false }
+                        )
+                    }
+
+                    OutlinedTextField(
+                        value = patchDraft,
+                        onValueChange = {
+                            patchDraft = it
+                            patchError = null
+                        },
+                        placeholder = {
+                            Text(
+                                text = "<<<SEARCH\nexact text from HTML\n===REPLACE\nupdated text\n>>>",
+                                fontFamily = JetBrainsMonoFamily,
+                                fontSize = 12.sp,
+                                color = RawColors.TextMuted
+                            )
+                        },
+                        textStyle = TextStyle(
+                            fontFamily = JetBrainsMonoFamily,
+                            fontSize = 12.5.sp,
+                            color = RawColors.TextPrimary
+                        ),
+                        shape = RoundedCornerShape(20.dp),
+                        colors = OutlinedTextFieldDefaults.colors(
+                            focusedBorderColor = RawColors.Tan,
+                            unfocusedBorderColor = RawColors.Divider,
+                            focusedContainerColor = RawColors.BgPrimary,
+                            unfocusedContainerColor = RawColors.BgPrimary,
+                            cursorColor = RawColors.Tan
+                        ),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .heightIn(min = 160.dp, max = 260.dp)
+                    )
+
+                    patchError?.let { errTxt ->
+                        Text(
+                            text = errTxt,
+                            fontFamily = BricolageFamily,
+                            fontWeight = FontWeight.SemiBold,
+                            fontSize = 13.sp,
+                            color = RawColors.ErrorCoral
+                        )
+                    }
+
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(10.dp)
+                    ) {
+                        RawSecondaryButton(
+                            text = "Cancel",
+                            height = 48.dp,
+                            enabled = !patchBusy,
+                            onClick = { showPatchDialog = false },
+                            modifier = Modifier.weight(1f)
+                        )
+                        BigPrimaryButton(
+                            text = if (patchBusy) "Applying..." else "Apply patch",
+                            height = 48.dp,
+                            enabled = !patchBusy,
+                            leadingIcon = RawIconType.CHECK,
+                            containerColor = RawColors.Tan,
+                            contentColor = RawColors.Ink,
+                            onClick = {
+                                val patches = GroqCodec.parseClaudeSearchReplacePatches(patchDraft)
+                                if (patches.isEmpty()) {
+                                    patchError = "No valid <<<SEARCH ... ===REPLACE ... >>> blocks found."
+                                    return@BigPrimaryButton
+                                }
+                                val applyOutcome = GroqCodec.applyExactOnceEdits(resolvedHtml, patches)
+                                if (applyOutcome.failedEdits.isNotEmpty()) {
+                                    val firstFail = applyOutcome.failedEdits.first()
+                                    patchError = "Patch failed (${firstFail.reason}): ${firstFail.edit.find.take(90)}"
+                                    return@BigPrimaryButton
+                                }
+                                if (applyOutcome.appliedCount == 0) {
+                                    patchError = "No changes matched in current HTML."
+                                    return@BigPrimaryButton
+                                }
+                                patchBusy = true
+                                patchError = null
+                                scope.launch {
+                                    val validation = CodeValidator.validateFull(context, cacheManager, applyOutcome.updatedHtml)
+                                    patchBusy = false
+                                    if (validation.isValid) {
+                                        resolvedHtml = validation.cleanedHtml
+                                        onApplyFixedHtml(validation.cleanedHtml, validation.durationSec)
+                                        reviewResult = null
+                                        aiError = null
+                                        showPatchDialog = false
+                                        patchDraft = ""
+                                        toastMsg = "Applied ${applyOutcome.appliedCount} patch(es) \u2014 re-capturing"
+                                        captureGen++
+                                    } else {
+                                        patchError = "Patched HTML failed check (rolled back): ${validation.summaryMessage}"
+                                    }
+                                }
+                            },
+                            modifier = Modifier.weight(1f)
+                        )
                     }
                 }
             }

@@ -191,41 +191,166 @@ object KeyframeSheetGenerator {
     fun buildFixPrompt(
         samples: List<KeyframeSample>,
         title: String,
-        durationSec: Double
+        durationSec: Double,
+        validationError: String = "",
+        htmlCode: String = ""
     ): String {
+        val cleanTitle = title.trim().ifBlank { "Untitled Reel" }
         val durStr = String.format(Locale.US, "%.2f", durationSec)
         val warned = samples.filter { it.warnings.isNotEmpty() }
         val autoFitted = samples.filter { it.autoFitCount > 0 && it.warnings.isEmpty() }
+        val cleanCount = (samples.size - warned.size - autoFitted.size).coerceAtLeast(0)
+        val totalPages = ((samples.size + FRAMES_PER_PAGE - 1) / FRAMES_PER_PAGE).coerceAtLeast(1)
 
-        val flaggedLines = buildString {
+        val errLine = validationError.trim().ifBlank { "None reported" }
+        val domWarnings = buildString {
             if (warned.isNotEmpty()) {
-                appendLine("PRIORITY LAYOUT WARNINGS FOUND BY DOM CHECK:")
                 warned.take(24).forEach { s ->
                     val ts = String.format(Locale.US, "%.2fs", s.timeSec)
-                    appendLine("- Frame #${s.index + 1} (t=$ts ${s.sceneLabel}): ${s.warnings.joinToString("; ")}")
+                    appendLine("- WARN Frame #${s.index + 1} (t=$ts ${s.sceneLabel}): ${s.warnings.joinToString("; ")}")
                 }
             }
             if (autoFitted.isNotEmpty()) {
-                appendLine("FRAMES WHERE APP AUTO-SHRANK/WRAPPED TEXT (double-check spacing):")
                 autoFitted.take(20).forEach { s ->
                     val ts = String.format(Locale.US, "%.2fs", s.timeSec)
-                    appendLine("- Frame #${s.index + 1} (t=$ts ${s.sceneLabel}): ${s.autoFitNotes.joinToString("; ")}")
+                    appendLine("- FIT Frame #${s.index + 1} (t=$ts ${s.sceneLabel}): ${s.autoFitNotes.joinToString("; ")}")
                 }
             }
             if (warned.isEmpty() && autoFitted.isEmpty()) {
-                appendLine("Inspect all attached frames for text clipping, overlaps, contrast, or timing pacing glitches.")
+                appendLine("None flagged by DOM check (inspect contact sheet visually for overlap, contrast, or pacing glitches).")
             }
         }.trim()
 
+        val framesSummary = "${samples.size} frames across $totalPages page(s) ($cleanCount clean, ${warned.size} WARN, ${autoFitted.size} FIT)"
+
+        val htmlSection = when {
+            htmlCode.isBlank() -> "[Attach your current reel .html file with this prompt]"
+            htmlCode.length <= 120_000 -> htmlCode
+            else -> "[Current HTML is ${htmlCode.length} chars — attach your reel .html file alongside this prompt so nothing is truncated]"
+        }
+
         return """
-Review the attached timestamped contact sheet (`kinetic_review_sheet.pdf` / sheet images) for my ${durStr}s project "$title".
+Fix the attached raw_edit reel. Spend tokens on fixing, not talking: no greeting, no progress notes, no recap. Do not rewrite code that works.
 
-Every tile has its exact frame number and timestamp (e.g. `t = 4.50s`) printed above it.
-$flaggedLines
+TITLE: $cleanTitle   DURATION: $durStr s (1920x1080, 30 fps)
+VALIDATION / RUNTIME ERROR: $errLine
+DOM WARNINGS (WARN = edge clip or card overlap; FIT = auto-shrunk, wrapped or lifted text):
+$domWarnings
+FRAMES SUMMARY: $framesSummary
+Attached: ALL contact sheet pages (3x6 grids, 18 frames per page). Inspect every page, not just the first two.
 
-Fix ONLY the problematic frames / scenes in our existing single-file HTML (keep working scenes, `window.RAW`, duration `$durStr`, deterministic `seek(t)`, and inline CSS/JS intact).
-Return ONLY the updated self-contained `<!DOCTYPE html>...</html>` file with zero commentary or external URLs.
+## STEP 1: SILENT AUDIT
+Find the root cause for each of these before editing anything:
+1. Every WARN/FIT frame. Measure against the 1920x1080 grid with real numbers (element x, y, w, h and font-size from the HTML). Do not guess coordinates.
+2. Every JS/validation error. Typical causes: unsupported element type in `build` (engine.js only supports ghost, kicker, sub, pill, headline, chips, card, row, phone, buttons, comment, round), bad string escaping, forbidden API or URL.
+3. Blank or black frames, including the final frame at t = duration (scenes must be contiguous and the last scene inclusive).
+4. Collisions: brackets extend 34 px outside cards, nothing may sit below y 930 (progress bar at 972..1080), and low-contrast text or icons.
+5. Determinism: seek(t) must not mutate stage.innerHTML across repeated calls (no append, no counters, no Math.random, no Date.now).
+6. Forbidden items still present: CSS transition/@keyframes/animation, rAF, setTimeout/setInterval, video.play(), external URLs, @font-face copied from tokens.css, non-bundled fonts.
+7. Audio/SRT desync and missing assets/... paths.
+Fix root causes (for example one bad class used by many scenes), not symptoms.
+
+## STEP 2: OUTPUT (choose one)
+A) PATCH MODE (default, whenever most scenes work). Output a one-to-eight-line list of root causes, then patches in exactly this form:
+<<<SEARCH
+exact text copied from the HTML, unique in the file
+===REPLACE
+new text
+>>>
+Each SEARCH must match exactly once. Keep patches minimal. Never patch by re-pasting large blocks.
+B) FULL MODE, only if the fix needs structural changes (for example a missing renderer for a scene type). Output the complete <!DOCTYPE html> document with every scene from 0 to duration intact, nothing truncated.
+
+Before sending, verify silently: every patch target exists, the last scene reaches duration, no forbidden API or URL was introduced, and no working scene was changed.
+
+CURRENT HTML:
+$htmlSection
         """.trimIndent()
+    }
+
+    suspend fun selectFlaggedReviewFrames(
+        samples: List<KeyframeSample>,
+        outDir: File,
+        maxFrames: Int = GroqCodec.MAX_IMAGES_PER_REQUEST
+    ): List<Pair<KeyframeSample, File>> = withContext(Dispatchers.IO) {
+        if (samples.isEmpty()) return@withContext emptyList()
+        val cap = maxFrames.coerceIn(1, GroqCodec.MAX_IMAGES_PER_REQUEST)
+        val warned = samples.filter { it.warnings.isNotEmpty() }
+        val fitted = samples.filter { it.autoFitCount > 0 && it.warnings.isEmpty() }
+        val flagged = (warned + fitted).take(cap)
+
+        val chosen = if (flagged.isNotEmpty()) {
+            flagged
+        } else {
+            val pick = mutableListOf<KeyframeSample>()
+            if (samples.size <= cap) {
+                pick.addAll(samples)
+            } else {
+                for (i in 0 until cap) {
+                    val idx = ((i.toDouble() / (cap - 1).coerceAtLeast(1)) * samples.lastIndex).roundToInt()
+                    val candidate = samples[idx.coerceIn(0, samples.lastIndex)]
+                    if (pick.none { it.index == candidate.index }) {
+                        pick.add(candidate)
+                    }
+                }
+            }
+            pick
+        }
+
+        outDir.mkdirs()
+        val frameW = 640
+        val headerH = 32
+        val stageH = 360
+        val totalH = headerH + stageH
+        val bgPaint = Paint().apply { color = Color.parseColor("#0D0D0F") }
+        val hdrBgPaint = Paint().apply { color = Color.parseColor("#17171A") }
+        val hdrTextPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            color = Color.parseColor("#F7ECE6")
+            textSize = 18f
+            typeface = Typeface.create(Typeface.MONOSPACE, Typeface.BOLD)
+        }
+        val warnPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            color = Color.parseColor("#FF8F80")
+            textSize = 17f
+            typeface = Typeface.create(Typeface.MONOSPACE, Typeface.BOLD)
+        }
+        val fitPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            color = Color.parseColor("#CAA07D")
+            textSize = 17f
+            typeface = Typeface.create(Typeface.MONOSPACE, Typeface.BOLD)
+        }
+        val imgPaint = Paint(Paint.FILTER_BITMAP_FLAG)
+
+        val out = mutableListOf<Pair<KeyframeSample, File>>()
+        chosen.forEachIndexed { idx, sample ->
+            val src = runCatching { BitmapFactory.decodeFile(sample.thumbPath) }.getOrNull() ?: return@forEachIndexed
+            val outBmp = Bitmap.createBitmap(frameW, totalH, Bitmap.Config.ARGB_8888)
+            val canvas = Canvas(outBmp)
+            canvas.drawRect(0f, 0f, frameW.toFloat(), totalH.toFloat(), bgPaint)
+            canvas.drawRect(0f, 0f, frameW.toFloat(), headerH.toFloat(), hdrBgPaint)
+
+            val tsStr = String.format(Locale.US, "t=%.2fs", sample.timeSec)
+            val sceneStr = sample.sceneLabel.ifBlank { "SCENE" }
+            canvas.drawText("#${sample.index + 1} $tsStr $sceneStr", 12f, 22f, hdrTextPaint)
+
+            val (tag, tagPaint) = when {
+                sample.warnings.isNotEmpty() -> "WARN" to warnPaint
+                sample.autoFitCount > 0 -> "FIT" to fitPaint
+                else -> "SAMPLE" to hdrTextPaint
+            }
+            val tw = tagPaint.measureText(tag)
+            canvas.drawText(tag, frameW - tw - 12f, 22f, tagPaint)
+
+            canvas.drawBitmap(src, null, RectF(0f, headerH.toFloat(), frameW.toFloat(), totalH.toFloat()), imgPaint)
+            src.recycle()
+
+            val file = File(outDir, String.format(Locale.US, "groq_frame_%02d.jpg", idx + 1))
+            FileOutputStream(file).use { fos ->
+                outBmp.compress(Bitmap.CompressFormat.JPEG, 86, fos)
+            }
+            outBmp.recycle()
+            out.add(sample to file)
+        }
+        out
     }
 
     suspend fun captureKeyframes(

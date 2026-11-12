@@ -4,14 +4,13 @@ import android.content.Context
 import androidx.datastore.core.DataStore
 import androidx.datastore.preferences.core.Preferences
 import androidx.datastore.preferences.core.booleanPreferencesKey
-import androidx.datastore.preferences.core.doublePreferencesKey
 import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.intPreferencesKey
 import androidx.datastore.preferences.core.longPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
-import com.rawedit.app.domain.PuterCodec
-import com.rawedit.app.domain.PuterUsageReport
+import com.rawedit.app.domain.GroqCodec
+import com.rawedit.app.domain.GroqQuotaReport
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map
 
@@ -22,45 +21,50 @@ data class UserProfile(
     val profilePhotoPath: String? = null,
     val onboardingDone: Boolean = false,
     val joinDateMillis: Long = System.currentTimeMillis(),
-    val puterAuthToken: String = "",
-    val puterUsername: String = "",
-    val puterModelPref: String = PuterCodec.PREF_AUTO,
-    val puterRemainingRaw: Double = 0.0,
-    val puterAllowanceRaw: Double = 0.0,
-    val puterPurchasedRemainingRaw: Double = 0.0,
-    val puterIsCreditsUnit: Boolean = false,
-    val puterCreditsExhausted: Boolean = false,
-    val puterUsageUpdatedAtMs: Long = 0L,
+    val groqApiKey: String = "",
+    val groqModelPref: String = GroqCodec.PREF_AUTO,
+    val groqRemainingRequests: Int = -1,
+    val groqLimitRequests: Int = -1,
+    val groqResetRequests: String = "",
+    val groqRemainingTokens: Int = -1,
+    val groqLimitTokens: Int = -1,
+    val groqResetTokens: String = "",
+    val groqQuotaExhausted: Boolean = false,
+    val groqQuotaUpdatedAtMs: Long = 0L,
     val paletteCounter: Int = 1,
     val paletteJson: String = ""
 ) {
-    val isPuterSignedIn: Boolean
-        get() = puterAuthToken.isNotBlank()
+    val hasGroqKey: Boolean
+        get() = groqApiKey.isNotBlank()
 
-    fun toUsageReportOrNull(): PuterUsageReport? {
-        if (puterUsageUpdatedAtMs <= 0L && !puterCreditsExhausted) return null
-        val monthlyRem = (puterRemainingRaw - puterPurchasedRemainingRaw).coerceAtLeast(0.0)
-        val monthlyUsed = (puterAllowanceRaw - monthlyRem).coerceAtLeast(0.0)
-        return PuterUsageReport(
-            monthlyUsedRaw = monthlyUsed,
-            monthlyAllowanceRaw = puterAllowanceRaw,
-            monthlyRemainingRaw = monthlyRem,
-            purchasedCreditsRaw = puterPurchasedRemainingRaw,
-            consumedPurchasedRaw = 0.0,
-            purchasedRemainingRaw = puterPurchasedRemainingRaw,
-            isCreditsUnit = puterIsCreditsUnit
+    fun toGroqQuotaReportOrNull(): GroqQuotaReport? {
+        val hasValues = groqRemainingRequests >= 0 ||
+            groqLimitRequests > 0 ||
+            groqRemainingTokens >= 0 ||
+            groqLimitTokens > 0 ||
+            groqQuotaExhausted
+        if (groqQuotaUpdatedAtMs <= 0L && !hasValues) return null
+        return GroqQuotaReport(
+            remainingRequests = groqRemainingRequests,
+            limitRequests = groqLimitRequests,
+            resetRequests = groqResetRequests,
+            remainingTokens = groqRemainingTokens,
+            limitTokens = groqLimitTokens,
+            resetTokens = groqResetTokens,
+            creditsDepleted402 = groqQuotaExhausted && groqRemainingRequests != 0 && groqRemainingTokens != 0,
+            updatedAtMs = groqQuotaUpdatedAtMs
         )
     }
 
-    fun creditsSummaryText(): String {
-        if (!isPuterSignedIn) return "Sign in with Google / Puter"
-        if (puterCreditsExhausted) return "0 left (Out of credits)"
-        if (puterUsageUpdatedAtMs <= 0L) return "Tap refresh for credits"
-        return PuterCodec.formatUsageBannerLabel(
-            remainingRaw = puterRemainingRaw,
-            allowanceRaw = puterAllowanceRaw,
-            isCreditsUnit = puterIsCreditsUnit,
-            exhausted = puterCreditsExhausted
+    fun quotaSummaryText(): String {
+        if (!hasGroqKey) return "Add Groq key"
+        if (groqQuotaExhausted) return "Quota 0 \u2022 Switch"
+        return GroqCodec.formatQuotaBannerLabel(
+            remainingRequests = groqRemainingRequests,
+            limitRequests = groqLimitRequests,
+            remainingTokens = groqRemainingTokens,
+            limitTokens = groqLimitTokens,
+            exhausted = groqQuotaExhausted
         )
     }
 }
@@ -72,15 +76,16 @@ class UserPreferences(private val context: Context) {
         val PHOTO_PATH = stringPreferencesKey("profile_photo_path")
         val ONBOARDING_DONE = booleanPreferencesKey("onboarding_done")
         val JOIN_DATE = longPreferencesKey("join_date_millis")
-        val PUTER_AUTH_TOKEN = stringPreferencesKey("puter_auth_token")
-        val PUTER_USERNAME = stringPreferencesKey("puter_username")
-        val PUTER_MODEL_PREF = stringPreferencesKey("puter_model_pref")
-        val PUTER_REMAINING_RAW = doublePreferencesKey("puter_remaining_raw")
-        val PUTER_ALLOWANCE_RAW = doublePreferencesKey("puter_allowance_raw")
-        val PUTER_PURCHASED_REM_RAW = doublePreferencesKey("puter_purchased_rem_raw")
-        val PUTER_IS_CREDITS_UNIT = booleanPreferencesKey("puter_is_credits_unit")
-        val PUTER_CREDITS_EXHAUSTED = booleanPreferencesKey("puter_credits_exhausted")
-        val PUTER_USAGE_UPDATED_AT = longPreferencesKey("puter_usage_updated_at")
+        val GROQ_API_KEY = stringPreferencesKey("groq_api_key")
+        val GROQ_MODEL_PREF = stringPreferencesKey("groq_model_pref")
+        val GROQ_REM_REQ = intPreferencesKey("groq_rem_req")
+        val GROQ_LIM_REQ = intPreferencesKey("groq_lim_req")
+        val GROQ_RST_REQ = stringPreferencesKey("groq_rst_req")
+        val GROQ_REM_TOK = intPreferencesKey("groq_rem_tok")
+        val GROQ_LIM_TOK = intPreferencesKey("groq_lim_tok")
+        val GROQ_RST_TOK = stringPreferencesKey("groq_rst_tok")
+        val GROQ_QUOTA_EXHAUSTED = booleanPreferencesKey("groq_quota_exhausted")
+        val GROQ_QUOTA_UPDATED_AT = longPreferencesKey("groq_quota_updated_at")
         val PALETTE_COUNTER = intPreferencesKey("palette_counter")
         val PALETTE_JSON = stringPreferencesKey("palette_json")
     }
@@ -91,15 +96,16 @@ class UserPreferences(private val context: Context) {
             profilePhotoPath = prefs[Keys.PHOTO_PATH]?.takeIf { it.isNotBlank() },
             onboardingDone = prefs[Keys.ONBOARDING_DONE] ?: false,
             joinDateMillis = prefs[Keys.JOIN_DATE] ?: 0L,
-            puterAuthToken = prefs[Keys.PUTER_AUTH_TOKEN] ?: "",
-            puterUsername = prefs[Keys.PUTER_USERNAME] ?: "",
-            puterModelPref = PuterCodec.normalizeModelPref(prefs[Keys.PUTER_MODEL_PREF] ?: ""),
-            puterRemainingRaw = prefs[Keys.PUTER_REMAINING_RAW] ?: 0.0,
-            puterAllowanceRaw = prefs[Keys.PUTER_ALLOWANCE_RAW] ?: 0.0,
-            puterPurchasedRemainingRaw = prefs[Keys.PUTER_PURCHASED_REM_RAW] ?: 0.0,
-            puterIsCreditsUnit = prefs[Keys.PUTER_IS_CREDITS_UNIT] ?: false,
-            puterCreditsExhausted = prefs[Keys.PUTER_CREDITS_EXHAUSTED] ?: false,
-            puterUsageUpdatedAtMs = prefs[Keys.PUTER_USAGE_UPDATED_AT] ?: 0L,
+            groqApiKey = prefs[Keys.GROQ_API_KEY] ?: "",
+            groqModelPref = GroqCodec.normalizeModelPref(prefs[Keys.GROQ_MODEL_PREF] ?: ""),
+            groqRemainingRequests = prefs[Keys.GROQ_REM_REQ] ?: -1,
+            groqLimitRequests = prefs[Keys.GROQ_LIM_REQ] ?: -1,
+            groqResetRequests = prefs[Keys.GROQ_RST_REQ] ?: "",
+            groqRemainingTokens = prefs[Keys.GROQ_REM_TOK] ?: -1,
+            groqLimitTokens = prefs[Keys.GROQ_LIM_TOK] ?: -1,
+            groqResetTokens = prefs[Keys.GROQ_RST_TOK] ?: "",
+            groqQuotaExhausted = prefs[Keys.GROQ_QUOTA_EXHAUSTED] ?: false,
+            groqQuotaUpdatedAtMs = prefs[Keys.GROQ_QUOTA_UPDATED_AT] ?: 0L,
             paletteCounter = (prefs[Keys.PALETTE_COUNTER] ?: 1).coerceAtLeast(1),
             paletteJson = prefs[Keys.PALETTE_JSON] ?: ""
         )
@@ -141,82 +147,80 @@ class UserPreferences(private val context: Context) {
         }
     }
 
-    suspend fun savePuterSession(
-        authToken: String,
-        username: String,
+    suspend fun saveGroqSession(
+        apiKey: String,
         modelPref: String,
-        usage: PuterUsageReport?
+        quota: GroqQuotaReport?
     ) {
-        val cleanedToken = PuterCodec.normalizeAuthToken(authToken)
-        val cleanedUser = username.trim()
-        val normalizedPref = PuterCodec.normalizeModelPref(modelPref)
+        val cleanedKey = GroqCodec.normalizeApiKey(apiKey)
+        val normalizedPref = GroqCodec.normalizeModelPref(modelPref)
         context.dataStore.edit { prefs ->
-            if (cleanedToken.isEmpty()) {
-                prefs.remove(Keys.PUTER_AUTH_TOKEN)
-                prefs.remove(Keys.PUTER_USERNAME)
-                prefs.remove(Keys.PUTER_REMAINING_RAW)
-                prefs.remove(Keys.PUTER_ALLOWANCE_RAW)
-                prefs.remove(Keys.PUTER_PURCHASED_REM_RAW)
-                prefs.remove(Keys.PUTER_IS_CREDITS_UNIT)
-                prefs.remove(Keys.PUTER_CREDITS_EXHAUSTED)
-                prefs.remove(Keys.PUTER_USAGE_UPDATED_AT)
+            if (cleanedKey.isEmpty()) {
+                clearGroqKeysFromPrefs(prefs)
             } else {
-                prefs[Keys.PUTER_AUTH_TOKEN] = cleanedToken
-                prefs[Keys.PUTER_USERNAME] = cleanedUser
-                if (usage != null) {
-                    prefs[Keys.PUTER_REMAINING_RAW] = usage.totalRemainingRaw
-                    prefs[Keys.PUTER_ALLOWANCE_RAW] = usage.monthlyAllowanceRaw
-                    prefs[Keys.PUTER_PURCHASED_REM_RAW] = usage.purchasedRemainingRaw
-                    prefs[Keys.PUTER_IS_CREDITS_UNIT] = usage.isCreditsUnit
-                    prefs[Keys.PUTER_CREDITS_EXHAUSTED] = usage.isExhausted
-                    prefs[Keys.PUTER_USAGE_UPDATED_AT] = System.currentTimeMillis()
+                prefs[Keys.GROQ_API_KEY] = cleanedKey
+                if (quota != null) {
+                    writeQuotaToPrefs(prefs, quota)
                 } else {
-                    prefs[Keys.PUTER_CREDITS_EXHAUSTED] = false
+                    prefs[Keys.GROQ_QUOTA_EXHAUSTED] = false
                 }
             }
-            prefs[Keys.PUTER_MODEL_PREF] = normalizedPref
+            prefs[Keys.GROQ_MODEL_PREF] = normalizedPref
         }
     }
 
-    suspend fun savePuterModelPref(modelPref: String) {
+    suspend fun saveGroqModelPref(modelPref: String) {
         context.dataStore.edit { prefs ->
-            prefs[Keys.PUTER_MODEL_PREF] = PuterCodec.normalizeModelPref(modelPref)
+            prefs[Keys.GROQ_MODEL_PREF] = GroqCodec.normalizeModelPref(modelPref)
         }
     }
 
-    suspend fun savePuterUsage(username: String?, usage: PuterUsageReport) {
+    suspend fun saveGroqQuota(quota: GroqQuotaReport) {
         context.dataStore.edit { prefs ->
-            if (!username.isNullOrBlank()) {
-                prefs[Keys.PUTER_USERNAME] = username.trim()
+            writeQuotaToPrefs(prefs, quota)
+        }
+    }
+
+    suspend fun markGroqQuotaExhausted(quota: GroqQuotaReport? = null) {
+        context.dataStore.edit { prefs ->
+            if (quota != null) {
+                writeQuotaToPrefs(prefs, quota)
             }
-            prefs[Keys.PUTER_REMAINING_RAW] = usage.totalRemainingRaw
-            prefs[Keys.PUTER_ALLOWANCE_RAW] = usage.monthlyAllowanceRaw
-            prefs[Keys.PUTER_PURCHASED_REM_RAW] = usage.purchasedRemainingRaw
-            prefs[Keys.PUTER_IS_CREDITS_UNIT] = usage.isCreditsUnit
-            prefs[Keys.PUTER_CREDITS_EXHAUSTED] = usage.isExhausted
-            prefs[Keys.PUTER_USAGE_UPDATED_AT] = System.currentTimeMillis()
+            prefs[Keys.GROQ_QUOTA_EXHAUSTED] = true
+            prefs[Keys.GROQ_QUOTA_UPDATED_AT] = System.currentTimeMillis()
         }
     }
 
-    suspend fun markPuterCreditsExhausted() {
+    suspend fun clearGroqSession() {
         context.dataStore.edit { prefs ->
-            prefs[Keys.PUTER_REMAINING_RAW] = 0.0
-            prefs[Keys.PUTER_CREDITS_EXHAUSTED] = true
-            prefs[Keys.PUTER_USAGE_UPDATED_AT] = System.currentTimeMillis()
+            clearGroqKeysFromPrefs(prefs)
         }
     }
 
-    suspend fun clearPuterSession() {
-        context.dataStore.edit { prefs ->
-            prefs.remove(Keys.PUTER_AUTH_TOKEN)
-            prefs.remove(Keys.PUTER_USERNAME)
-            prefs.remove(Keys.PUTER_REMAINING_RAW)
-            prefs.remove(Keys.PUTER_ALLOWANCE_RAW)
-            prefs.remove(Keys.PUTER_PURCHASED_REM_RAW)
-            prefs.remove(Keys.PUTER_IS_CREDITS_UNIT)
-            prefs.remove(Keys.PUTER_CREDITS_EXHAUSTED)
-            prefs.remove(Keys.PUTER_USAGE_UPDATED_AT)
-        }
+    private fun writeQuotaToPrefs(
+        prefs: androidx.datastore.preferences.core.MutablePreferences,
+        quota: GroqQuotaReport
+    ) {
+        if (quota.remainingRequests >= 0) prefs[Keys.GROQ_REM_REQ] = quota.remainingRequests
+        if (quota.limitRequests > 0) prefs[Keys.GROQ_LIM_REQ] = quota.limitRequests
+        if (quota.resetRequests.isNotBlank()) prefs[Keys.GROQ_RST_REQ] = quota.resetRequests
+        if (quota.remainingTokens >= 0) prefs[Keys.GROQ_REM_TOK] = quota.remainingTokens
+        if (quota.limitTokens > 0) prefs[Keys.GROQ_LIM_TOK] = quota.limitTokens
+        if (quota.resetTokens.isNotBlank()) prefs[Keys.GROQ_RST_TOK] = quota.resetTokens
+        prefs[Keys.GROQ_QUOTA_EXHAUSTED] = quota.isExhausted
+        prefs[Keys.GROQ_QUOTA_UPDATED_AT] = if (quota.updatedAtMs > 0L) quota.updatedAtMs else System.currentTimeMillis()
+    }
+
+    private fun clearGroqKeysFromPrefs(prefs: androidx.datastore.preferences.core.MutablePreferences) {
+        prefs.remove(Keys.GROQ_API_KEY)
+        prefs.remove(Keys.GROQ_REM_REQ)
+        prefs.remove(Keys.GROQ_LIM_REQ)
+        prefs.remove(Keys.GROQ_RST_REQ)
+        prefs.remove(Keys.GROQ_REM_TOK)
+        prefs.remove(Keys.GROQ_LIM_TOK)
+        prefs.remove(Keys.GROQ_RST_TOK)
+        prefs.remove(Keys.GROQ_QUOTA_EXHAUSTED)
+        prefs.remove(Keys.GROQ_QUOTA_UPDATED_AT)
     }
 
     suspend fun savePaletteState(counter: Int, json: String) {

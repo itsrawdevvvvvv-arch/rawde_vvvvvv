@@ -158,9 +158,9 @@ private const val DESKTOP_USER_AGENT =
 @SuppressLint("SetJavaScriptEnabled")
 @Composable
 fun WebBrowserAssetScreen(
-    authToken: String,
+    apiKey: String,
     modelPref: String,
-    creditsExhausted: Boolean,
+    quotaExhausted: Boolean,
     onBack: () -> Unit,
     onSaveCapturedBitmap: (
         bitmap: Bitmap,
@@ -169,10 +169,10 @@ fun WebBrowserAssetScreen(
         defaultDescription: String?,
         defaultSafeZone: String?
     ) -> Unit,
-    onOpenPuterAuth: () -> Unit,
-    onSwitchPuterAccount: () -> Unit,
-    onRefreshPuterCredits: () -> Unit,
-    onMarkCreditsExhausted: () -> Unit
+    onOpenGroqKey: () -> Unit,
+    onSwitchGroqKey: () -> Unit,
+    onRefreshGroqQuota: () -> Unit,
+    onMarkQuotaExhausted: () -> Unit
 ) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
@@ -1191,17 +1191,17 @@ fun WebBrowserAssetScreen(
         }
     }
 
-    // PNG Cutout Studio with Puter AI Edge Audit
+    // PNG Cutout Studio with Groq Vision Edge Audit
     cutoutTarget?.let { target ->
         CutoutStudioDialog(
             input = target,
-            authToken = authToken,
+            apiKey = apiKey,
             modelPref = modelPref,
-            creditsExhausted = creditsExhausted,
-            onOpenPuterAuth = onOpenPuterAuth,
-            onSwitchPuterAccount = onSwitchPuterAccount,
-            onRefreshPuterCredits = onRefreshPuterCredits,
-            onMarkCreditsExhausted = onMarkCreditsExhausted,
+            quotaExhausted = quotaExhausted,
+            onOpenGroqKey = onOpenGroqKey,
+            onSwitchGroqKey = onSwitchGroqKey,
+            onRefreshGroqQuota = onRefreshGroqQuota,
+            onMarkQuotaExhausted = onMarkQuotaExhausted,
             onDismiss = { cutoutTarget = null },
             onConfirmSave = { finalBmp, isCutout, name, desc, safe ->
                 cutoutTarget = null

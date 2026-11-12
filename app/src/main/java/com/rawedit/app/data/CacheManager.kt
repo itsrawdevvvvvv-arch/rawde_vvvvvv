@@ -359,7 +359,7 @@ class CacheManager(private val context: Context) {
                     durationSec = durationSec,
                     sizeBytes = actualSize,
                     thumbPath = thumbFile.absolutePath,
-                    defaultDescription = "Local video clip ($vidW x $vidH, ${String.format(Locale.US, "%.1f", durationSec)}s). Tap Auto-describe with Puter AI or edit note.",
+                    defaultDescription = "Local video clip ($vidW x $vidH, ${String.format(Locale.US, "%.1f", durationSec)}s). Tap Auto-describe with Groq AI or edit note.",
                     defaultSafeZone = "Place kinetic overlay text along opposite margin or clean dark band via RAW.syncVideo."
                 )
             } else {
@@ -493,9 +493,9 @@ class CacheManager(private val context: Context) {
                     sizeBytes = outFile.length(),
                     thumbPath = thumbFile.absolutePath,
                     defaultDescription = if (kind == LocalAssetEntity.KIND_CUTOUT) {
-                        "Transparent PNG cutout ($finalW x $finalH). Tap Auto-describe with Puter AI or edit note."
+                        "Transparent PNG cutout ($finalW x $finalH). Tap Auto-describe with Groq AI or edit note."
                     } else {
-                        "Local image ($finalW x $finalH). Tap Auto-describe with Puter AI or edit note."
+                        "Local image ($finalW x $finalH). Tap Auto-describe with Groq AI or edit note."
                     },
                     defaultSafeZone = "Keep headlines outside the subject center; pair with dark scrim if needed."
                 )
@@ -554,9 +554,9 @@ class CacheManager(private val context: Context) {
 
             val kind = if (isCutout) LocalAssetEntity.KIND_CUTOUT else LocalAssetEntity.KIND_IMAGE
             val desc = customDescription?.takeIf { it.isNotBlank() } ?: if (isCutout) {
-                "Transparent PNG cutout ($finalW x $finalH). Tap Auto-describe with Puter AI or edit note."
+                "Transparent PNG cutout ($finalW x $finalH). Tap Auto-describe with Groq AI or edit note."
             } else {
-                "Captured PNG image ($finalW x $finalH). Tap Auto-describe with Puter AI or edit note."
+                "Captured PNG image ($finalW x $finalH). Tap Auto-describe with Groq AI or edit note."
             }
             val safe = customSafeZone?.takeIf { it.isNotBlank() }
                 ?: "Keep headlines outside the subject center; pair with dark scrim if needed."

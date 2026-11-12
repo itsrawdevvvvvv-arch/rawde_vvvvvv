@@ -53,12 +53,12 @@ import androidx.compose.ui.unit.sp
 import androidx.core.content.FileProvider
 import com.rawedit.app.data.CacheManager
 import com.rawedit.app.data.local.UserProfile
+import com.rawedit.app.domain.GroqClient
+import com.rawedit.app.domain.GroqQuotaExhaustedException
 import com.rawedit.app.domain.PaletteColorMath
 import com.rawedit.app.domain.PaletteExporter
 import com.rawedit.app.domain.PaletteJsonCodec
 import com.rawedit.app.domain.PaletteState
-import com.rawedit.app.domain.PuterClient
-import com.rawedit.app.domain.PuterOutOfCreditsException
 import com.rawedit.app.ui.components.BigPrimaryButton
 import com.rawedit.app.ui.components.RawSecondaryButton
 import com.rawedit.app.ui.components.RawToastBanner
@@ -82,10 +82,10 @@ fun PaletteScreen(
     userProfile: UserProfile,
     cacheManager: CacheManager,
     onSavePaletteState: (counter: Int, json: String) -> Unit,
-    onOpenPuterAuth: () -> Unit,
-    onSwitchPuterAccount: () -> Unit,
-    onRefreshPuterCredits: () -> Unit,
-    onMarkCreditsExhausted: () -> Unit
+    onOpenGroqKey: () -> Unit,
+    onSwitchGroqKey: () -> Unit,
+    onRefreshGroqQuota: () -> Unit,
+    onMarkQuotaExhausted: () -> Unit
 ) {
     val context = LocalContext.current
     val haptic = LocalHapticFeedback.current
@@ -131,16 +131,16 @@ fun PaletteScreen(
         }
     }
 
-    val isSignedIn = userProfile.isPuterSignedIn
-    val isExhausted = userProfile.puterCreditsExhausted
+    val hasGroqKey = userProfile.hasGroqKey
+    val isExhausted = userProfile.groqQuotaExhausted
 
     fun regeneratePalette() {
-        if (!isSignedIn) {
-            onOpenPuterAuth()
+        if (!hasGroqKey) {
+            onOpenGroqKey()
             return
         }
         if (isExhausted) {
-            onSwitchPuterAccount()
+            onSwitchGroqKey()
             return
         }
         if (generating) return
@@ -152,29 +152,29 @@ fun PaletteScreen(
             maxOf(userProfile.paletteCounter, currentPalette.number + 1)
         }
         scope.launch {
-            val res = PuterClient.generatePalette(
-                authToken = userProfile.puterAuthToken,
+            val res = GroqClient.generatePalette(
+                apiKey = userProfile.groqApiKey,
                 nextNumber = targetNumber,
                 previousMood = currentPalette.mood,
-                modelPref = userProfile.puterModelPref
+                modelPref = userProfile.groqModelPref
             )
             generating = false
             res.onSuccess { palette ->
                 onSavePaletteState(targetNumber + 1, PaletteJsonCodec.encode(palette))
-                onRefreshPuterCredits()
+                onRefreshGroqQuota()
                 haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
                 toastMsg = "Palette #${palette.numFormatted} ready"
             }.onFailure { err ->
-                if (err is PuterOutOfCreditsException) {
-                    onMarkCreditsExhausted()
+                if (err is GroqQuotaExhaustedException) {
+                    onMarkQuotaExhausted()
                 }
-                errorMsg = err.message ?: "Puter AI palette request failed"
+                errorMsg = err.message ?: "Groq AI palette request failed"
             }
         }
     }
 
-    LaunchedEffect(userProfile.puterAuthToken, userProfile.puterCreditsExhausted, userProfile.paletteJson) {
-        if (userProfile.isPuterSignedIn && !userProfile.puterCreditsExhausted && userProfile.paletteJson.isBlank() && !autoFetchedOnce) {
+    LaunchedEffect(userProfile.groqApiKey, userProfile.groqQuotaExhausted, userProfile.paletteJson) {
+        if (userProfile.hasGroqKey && !userProfile.groqQuotaExhausted && userProfile.paletteJson.isBlank() && !autoFetchedOnce) {
             autoFetchedOnce = true
             regeneratePalette()
         }
@@ -268,7 +268,7 @@ fun PaletteScreen(
                             .background(
                                 when {
                                     isExhausted -> RawColors.ErrorSoft
-                                    isSignedIn -> RawColors.AccentSoft
+                                    hasGroqKey -> RawColors.AccentSoft
                                     else -> RawColors.RaisedCard
                                 }
                             )
@@ -278,33 +278,33 @@ fun PaletteScreen(
                                 shape = CircleShape
                             )
                             .clickable {
-                                if (isExhausted) onSwitchPuterAccount() else onOpenPuterAuth()
+                                if (isExhausted) onSwitchGroqKey() else onOpenGroqKey()
                             }
                             .padding(horizontal = 12.dp, vertical = 7.dp),
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.spacedBy(6.dp)
                     ) {
                         RawIcon(
-                            type = RawIconType.GLOBE,
+                            type = RawIconType.KEY,
                             size = 14.dp,
                             tint = when {
                                 isExhausted -> RawColors.ErrorCoral
-                                isSignedIn -> RawColors.Tan
+                                hasGroqKey -> RawColors.Tan
                                 else -> RawColors.TextMuted
                             }
                         )
                         Text(
                             text = when {
-                                !isSignedIn -> "Sign in"
-                                isExhausted -> "0 left \u2022 Switch"
-                                else -> userProfile.creditsSummaryText()
+                                !hasGroqKey -> "Add Groq key"
+                                isExhausted -> "Quota 0 \u2022 Switch"
+                                else -> userProfile.quotaSummaryText()
                             },
                             fontFamily = JetBrainsMonoFamily,
                             fontWeight = FontWeight.Bold,
                             fontSize = 11.5.sp,
                             color = when {
                                 isExhausted -> RawColors.ErrorCoral
-                                isSignedIn -> RawColors.Tan
+                                hasGroqKey -> RawColors.Tan
                                 else -> RawColors.TextMuted
                             },
                             maxLines = 1,
@@ -314,18 +314,18 @@ fun PaletteScreen(
                 }
             }
 
-            if (!isSignedIn) {
+            if (!hasGroqKey) {
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
                         .clip(RoundedCornerShape(24.dp))
                         .background(RawColors.CardSurface)
-                        .clickable { onOpenPuterAuth() }
+                        .clickable { onOpenGroqKey() }
                         .padding(horizontal = 16.dp, vertical = 14.dp),
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(12.dp)
                 ) {
-                    RawIcon(type = RawIconType.GLOBE, size = 18.dp, tint = RawColors.Tan)
+                    RawIcon(type = RawIconType.KEY, size = 18.dp, tint = RawColors.Tan)
                     Column(modifier = Modifier.weight(1f)) {
                         Text(
                             text = "Offline starter palette #${currentPalette.numFormatted}",
@@ -335,7 +335,7 @@ fun PaletteScreen(
                             color = RawColors.TextPrimary
                         )
                         Text(
-                            text = "Sign in with Google / Puter to generate live AI palettes.",
+                            text = "Add a Groq API key to generate fresh editorial AI palettes.",
                             style = RawTypography.bodyMedium.copy(fontSize = 13.sp, lineHeight = 18.sp),
                             color = RawColors.TextMuted
                         )
@@ -347,7 +347,7 @@ fun PaletteScreen(
                             .padding(horizontal = 12.dp, vertical = 6.dp)
                     ) {
                         Text(
-                            text = "Sign in",
+                            text = "Add key",
                             fontFamily = BricolageFamily,
                             fontWeight = FontWeight.Bold,
                             fontSize = 12.5.sp,
@@ -362,7 +362,7 @@ fun PaletteScreen(
                         .clip(RoundedCornerShape(24.dp))
                         .background(RawColors.ErrorSoft)
                         .border(1.dp, RawColors.ErrorBorder, RoundedCornerShape(24.dp))
-                        .clickable { onSwitchPuterAccount() }
+                        .clickable { onSwitchGroqKey() }
                         .padding(horizontal = 16.dp, vertical = 14.dp),
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(12.dp)
@@ -370,14 +370,14 @@ fun PaletteScreen(
                     RawIcon(type = RawIconType.WARN, size = 18.dp, tint = RawColors.ErrorCoral)
                     Column(modifier = Modifier.weight(1f)) {
                         Text(
-                            text = "Out of Puter credits",
+                            text = "Groq quota exhausted",
                             fontFamily = BricolageFamily,
                             fontWeight = FontWeight.Bold,
                             fontSize = 15.sp,
                             color = RawColors.ErrorCoral
                         )
                         Text(
-                            text = "Switch to another Google or Puter account to generate more palettes.",
+                            text = "Switch to another Groq API key to generate more palettes right away.",
                             style = RawTypography.bodyMedium.copy(fontSize = 13.sp, lineHeight = 18.sp),
                             color = RawColors.TextMuted
                         )
@@ -415,12 +415,12 @@ fun PaletteScreen(
                         fontSize = 14.sp,
                         color = RawColors.ErrorCoral
                     )
-                    if (isExhausted || err.contains("credit", ignoreCase = true)) {
+                    if (isExhausted || err.contains("quota", ignoreCase = true) || err.contains("credit", ignoreCase = true)) {
                         RawSecondaryButton(
-                            text = "Switch Puter Account",
+                            text = "Switch Groq API Key",
                             height = 42.dp,
-                            leadingIcon = RawIconType.GLOBE,
-                            onClick = onSwitchPuterAccount
+                            leadingIcon = RawIconType.KEY,
+                            onClick = onSwitchGroqKey
                         )
                     }
                 }

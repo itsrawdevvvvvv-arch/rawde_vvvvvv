@@ -449,6 +449,15 @@ class LocalAssetServer(
             el.dataset.rawOrigTop = el.style.top || '';
           }
 
+          function describeEl(el) {
+            var tag = (el.tagName || 'div').toLowerCase();
+            var idPart = el.id ? ('#' + el.id) : '';
+            var rawCls = (el.className && typeof el.className === 'string') ? el.className.trim() : '';
+            var clsPart = rawCls ? ('.' + rawCls.split(/\s+/).slice(0, 2).join('.')) : '';
+            var rect = Math.round(el.offsetLeft || 0) + ',' + Math.round(el.offsetTop || 0) + ',' + Math.round(el.offsetWidth || 0) + 'x' + Math.round(el.offsetHeight || 0);
+            return (tag + idPart + clsPart).slice(0, 28) + '@[' + rect + ']';
+          }
+
           var rightBlockers = [];
           var children = activeContainer.children;
           for (var ci = 0; ci < children.length; ci++) {
@@ -486,7 +495,7 @@ class LocalAssetServer(
                 if (shiftUp > 4) {
                   el.style.top = Math.round(el.offsetTop - shiftUp) + 'px';
                   autoFitCount++;
-                  notes.push('Raised element above progress bar by ' + Math.round(shiftUp) + 'px');
+                  notes.push('Raised element ' + describeEl(el) + ' above progress bar by ' + Math.round(shiftUp) + 'px');
                 }
               }
               continue;
@@ -525,7 +534,7 @@ class LocalAssetServer(
                 el.style.maxWidth = Math.round(allowedWidth) + 'px';
                 el.style.overflowWrap = 'break-word';
                 autoFitCount++;
-                notes.push('Wrapped "' + (el.textContent || '').trim().slice(0, 22) + '" (' + Math.round(allowedWidth) + 'px)');
+                notes.push('Wrapped "' + (el.textContent || '').trim().slice(0, 22) + '" (' + describeEl(el) + ', ' + Math.round(allowedWidth) + 'px)');
               } else {
                 el.style.maxWidth = Math.round(allowedWidth) + 'px';
               }
@@ -538,7 +547,7 @@ class LocalAssetServer(
                 if (nextFs < origFs) {
                   el.style.fontSize = nextFs + 'px';
                   autoFitCount++;
-                  notes.push('Resized "' + (el.textContent || '').trim().slice(0, 22) + '" ' + Math.round(origFs) + '->' + nextFs + 'px');
+                  notes.push('Resized "' + (el.textContent || '').trim().slice(0, 22) + '" (' + describeEl(el) + ') ' + Math.round(origFs) + '->' + nextFs + 'px');
                 }
               }
             }
@@ -550,7 +559,7 @@ class LocalAssetServer(
               if (nudge > 4) {
                 el.style.top = Math.round(el.offsetTop - nudge) + 'px';
                 autoFitCount++;
-                notes.push('Lifted "' + (el.textContent || '').trim().slice(0, 20) + '" above progress bar');
+                notes.push('Lifted "' + (el.textContent || '').trim().slice(0, 20) + '" (' + describeEl(el) + ') above progress bar');
               }
             }
 
@@ -558,9 +567,9 @@ class LocalAssetServer(
             var actualLeft = isCentered ? (left - finalW / 2) : left;
             var actualRight = isCentered ? (left + finalW / 2) : (left + finalW);
             if (actualLeft < 40 || actualRight > 1880) {
-              warnings.push('Edge clip on "' + (el.textContent || '').trim().slice(0, 24) + '"');
+              warnings.push('Edge clip on "' + (el.textContent || '').trim().slice(0, 24) + '" (' + describeEl(el) + ')');
             } else if (!isCentered && left < 920 && actualRight > allowedRight + 8) {
-              warnings.push('Card overlap near "' + (el.textContent || '').trim().slice(0, 24) + '"');
+              warnings.push('Card overlap near "' + (el.textContent || '').trim().slice(0, 24) + '" (' + describeEl(el) + ')');
             }
           }
 
