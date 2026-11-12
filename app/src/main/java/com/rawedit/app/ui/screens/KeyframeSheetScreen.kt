@@ -53,10 +53,12 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.State
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
@@ -86,9 +88,16 @@ import coil.request.ImageRequest
 import com.rawedit.app.data.CacheManager
 import com.rawedit.app.data.local.ProjectEntity
 import com.rawedit.app.domain.CodeValidator
+import com.rawedit.app.domain.GroqAutoFixStatus
 import com.rawedit.app.domain.GroqClient
 import com.rawedit.app.domain.GroqCodec
-import com.rawedit.app.domain.GroqQuotaExhaustedException
+import com.rawedit.app.domain.GroqCooldownException
+import com.rawedit.app.domain.GroqHardLimitException
+import com.rawedit.app.domain.GroqLimitKind
+import com.rawedit.app.domain.GroqLimiter
+import com.rawedit.app.domain.GroqPromptTooLargeException
+import com.rawedit.app.domain.GroqReviewResult
+import com.rawedit.app.domain.GroqUi
 import com.rawedit.app.domain.KeyframeSample
 import com.rawedit.app.domain.KeyframeSheetGenerator
 import com.rawedit.app.domain.KeyframeSheetResult
@@ -135,7 +144,6 @@ fun KeyframeSheetScreen(
     onOpenGroqKey: () -> Unit,
     onSwitchGroqKey: () -> Unit,
     onRefreshGroqQuota: () -> Unit,
-    onMarkQuotaExhausted: () -> Unit,
     onRenderNow: () -> Unit
 ) {
     val context = LocalContext.current
@@ -192,7 +200,45 @@ fun KeyframeSheetScreen(
     var aiBusy by remember { mutableStateOf(false) }
     var aiAction by remember { mutableStateOf("") }
     var reviewResult by remember { mutableStateOf<SheetReviewResult?>(null) }
+    var lastReview by remember(project.id, resolvedHtml.hashCode()) { mutableStateOf<GroqReviewResult?>(null) }
+    var needsStructuralPrompt by remember { mutableStateOf(false) }
     var aiError by remember { mutableStateOf<String?>(null) }
+
+    val groqUi by GroqLimiter.ui.collectAsState()
+    val limiterNow by produceState(System.currentTimeMillis(), groqUi) {
+        while (groqUi !is GroqUi.Ready) {
+            value = System.currentTimeMillis()
+            delay(1000)
+        }
+    }
+    val (limiterLabel, canTapAi) = when (val s = groqUi) {
+        GroqUi.Ready -> {
+            if (quotaExhausted) "Daily limit \u2022 Switch key" to false else "AI ready" to true
+        }
+        is GroqUi.Cooling -> {
+            val sec = ((s.untilMs - limiterNow) / 1000L).coerceAtLeast(0L)
+            if (sec == 0L) {
+                GroqLimiter.markReadyIfNotHardBlocked()
+                "AI ready" to true
+            } else {
+                "Cooling ${sec}s" to false
+            }
+        }
+        is GroqUi.HardBlocked -> {
+            if (s.untilMs <= limiterNow) {
+                GroqLimiter.currentHardBlock(limiterNow)
+                "AI ready" to true
+            } else {
+                val msg = if (s.kind == GroqLimitKind.CREDITS) {
+                    "Credits out \u2022 Switch key"
+                } else {
+                    "Daily limit \u2022 resets ${GroqCodec.formatDurationShort(s.untilMs - limiterNow)}"
+                }
+                msg to false
+            }
+        }
+    }
+    val isHardBlockedUi = groqUi is GroqUi.HardBlocked || (quotaExhausted && groqUi is GroqUi.Ready)
 
     var exportBusy by remember { mutableStateOf(false) }
     var toastMsg by remember { mutableStateOf<String?>(null) }
@@ -267,6 +313,7 @@ fun KeyframeSheetScreen(
         captureError = null
         sheetResult = null
         reviewResult = null
+        needsStructuralPrompt = false
         aiError = null
         progressDone = 0
         progressTotal = 0
@@ -726,7 +773,7 @@ fun KeyframeSheetScreen(
                                         horizontalArrangement = Arrangement.SpaceBetween,
                                         verticalAlignment = Alignment.CenterVertically
                                     ) {
-                                        Row(
+                                            Row(
                                             verticalAlignment = Alignment.CenterVertically,
                                             horizontalArrangement = Arrangement.spacedBy(8.dp),
                                             modifier = Modifier.weight(1f)
@@ -734,7 +781,7 @@ fun KeyframeSheetScreen(
                                             RawIcon(RawIconType.SPARK, size = 18.dp, tint = RawColors.Tan)
                                             Column {
                                                 Text(
-                                                    text = "Groq Two-Stage Frame Auto-Fix",
+                                                    text = "Groq Frame Review & Auto-Fix",
                                                     fontFamily = BricolageFamily,
                                                     fontWeight = FontWeight.Bold,
                                                     fontSize = 18.sp,
@@ -743,15 +790,20 @@ fun KeyframeSheetScreen(
                                                 Text(
                                                     text = when {
                                                         apiKey.isBlank() -> "Optional \u2022 Add Groq key"
-                                                        quotaExhausted -> "Groq quota exhausted \u2022 Switch key"
-                                                        else -> "Vision + patch repair \u2022 $quotaBadgeText"
+                                                        groqUi is GroqUi.Cooling -> "$limiterLabel \u2022 $quotaBadgeText"
+                                                        isHardBlockedUi -> limiterLabel
+                                                        else -> "$limiterLabel \u2022 $quotaBadgeText"
                                                     },
                                                     style = RawTypography.labelMedium,
-                                                    color = if (quotaExhausted) RawColors.ErrorCoral else RawColors.TextMuted
+                                                    color = when {
+                                                        isHardBlockedUi -> RawColors.ErrorCoral
+                                                        groqUi is GroqUi.Cooling -> RawColors.Tan
+                                                        else -> RawColors.TextMuted
+                                                    }
                                                 )
                                             }
                                         }
-                                        if (quotaExhausted) {
+                                        if (isHardBlockedUi) {
                                             Box(
                                                 modifier = Modifier
                                                     .clip(CircleShape)
@@ -786,45 +838,59 @@ fun KeyframeSheetScreen(
                                         RawSecondaryButton(
                                             text = if (aiBusy && aiAction == "review") "Reviewing..." else "AI review",
                                             height = 48.dp,
-                                            enabled = !aiBusy,
+                                            enabled = !aiBusy && (apiKey.isBlank() || canTapAi || isHardBlockedUi),
                                             leadingIcon = RawIconType.LENS,
                                             onClick = {
                                                 if (apiKey.isBlank()) {
                                                     onOpenGroqKey()
                                                     return@RawSecondaryButton
                                                 }
-                                                if (quotaExhausted) {
+                                                if (isHardBlockedUi) {
                                                     onSwitchGroqKey()
+                                                    return@RawSecondaryButton
+                                                }
+                                                if (!canTapAi) {
+                                                    toastMsg = limiterLabel
                                                     return@RawSecondaryButton
                                                 }
                                                 aiBusy = true
                                                 aiAction = "review"
                                                 aiError = null
+                                                needsStructuralPrompt = false
                                                 scope.launch {
-                                                    val flaggedFrames = KeyframeSheetGenerator.selectFlaggedReviewFrames(
-                                                        samples = res.samples,
-                                                        outDir = cacheManager.sheetTempDir(project.id),
-                                                        maxFrames = GroqCodec.MAX_IMAGES_PER_REQUEST
-                                                    )
                                                     val review = GroqClient.reviewContactSheet(
                                                         apiKey = apiKey,
                                                         samples = res.samples,
-                                                        flaggedFrameFiles = flaggedFrames,
-                                                        htmlCode = resolvedHtml,
                                                         durationSec = res.durationSec,
+                                                        htmlHash = resolvedHtml.hashCode(),
                                                         modelPref = modelPref
                                                     )
                                                     aiBusy = false
                                                     aiAction = ""
                                                     review.onSuccess { r ->
                                                         onRefreshGroqQuota()
+                                                        lastReview = r.cachedReview
                                                         reviewResult = r
-                                                        toastMsg = if (r.issues.isEmpty()) "No visual glitches spotted" else "Found ${r.issues.size} root cause(s)"
+                                                        toastMsg = if (r.issues.isEmpty()) r.summary else "Found ${r.issues.size} visual issue(s)"
                                                     }.onFailure { err ->
-                                                        if (err is GroqQuotaExhaustedException) {
-                                                            onMarkQuotaExhausted()
+                                                        when (err) {
+                                                            is GroqCooldownException -> {
+                                                                val msg = "Rate window full \u2014 retry in ${err.waitSec}s"
+                                                                aiError = msg
+                                                                toastMsg = msg
+                                                            }
+                                                            is GroqHardLimitException -> {
+                                                                aiError = err.message
+                                                                toastMsg = "Groq limit reached"
+                                                            }
+                                                            is GroqPromptTooLargeException -> {
+                                                                aiError = "Too many flags to send; fix the top ones first."
+                                                                toastMsg = "Too many flags to send; fix the top ones first"
+                                                            }
+                                                            else -> {
+                                                                aiError = err.message ?: "Groq AI inspection failed."
+                                                            }
                                                         }
-                                                        aiError = err.message ?: "Groq AI inspection failed."
                                                     }
                                                 }
                                             },
@@ -834,7 +900,7 @@ fun KeyframeSheetScreen(
                                         BigPrimaryButton(
                                             text = if (aiBusy && aiAction == "fix") "Patching..." else "Auto-fix",
                                             height = 48.dp,
-                                            enabled = !aiBusy,
+                                            enabled = !aiBusy && (apiKey.isBlank() || canTapAi || isHardBlockedUi),
                                             leadingIcon = RawIconType.SPARK,
                                             containerColor = RawColors.Tan,
                                             contentColor = RawColors.Ink,
@@ -843,26 +909,26 @@ fun KeyframeSheetScreen(
                                                     onOpenGroqKey()
                                                     return@BigPrimaryButton
                                                 }
-                                                if (quotaExhausted) {
+                                                if (isHardBlockedUi) {
                                                     onSwitchGroqKey()
+                                                    return@BigPrimaryButton
+                                                }
+                                                if (!canTapAi) {
+                                                    toastMsg = limiterLabel
                                                     return@BigPrimaryButton
                                                 }
                                                 aiBusy = true
                                                 aiAction = "fix"
                                                 aiError = null
+                                                needsStructuralPrompt = false
                                                 scope.launch {
-                                                    val flaggedFrames = KeyframeSheetGenerator.selectFlaggedReviewFrames(
-                                                        samples = res.samples,
-                                                        outDir = cacheManager.sheetTempDir(project.id),
-                                                        maxFrames = GroqCodec.MAX_IMAGES_PER_REQUEST
-                                                    )
                                                     val outcomeRes = GroqClient.autoFixHtmlTwoStage(
                                                         apiKey = apiKey,
                                                         samples = res.samples,
-                                                        flaggedFrameFiles = flaggedFrames,
                                                         htmlCode = resolvedHtml,
                                                         durationSec = res.durationSec,
-                                                        modelPref = modelPref
+                                                        modelPref = modelPref,
+                                                        lastReview = lastReview
                                                     ) { candidateHtml ->
                                                         CodeValidator.validateFull(context, cacheManager, candidateHtml)
                                                     }
@@ -870,18 +936,55 @@ fun KeyframeSheetScreen(
                                                     aiAction = ""
                                                     outcomeRes.onSuccess { outcome ->
                                                         onRefreshGroqQuota()
-                                                        resolvedHtml = outcome.validation.cleanedHtml
-                                                        onApplyFixedHtml(outcome.validation.cleanedHtml, outcome.validation.durationSec)
-                                                        reviewResult = null
-                                                        aiError = null
-                                                        val repairNote = if (outcome.repairRoundsUsed > 0) " (${outcome.repairRoundsUsed} repair)" else ""
-                                                        toastMsg = "Applied ${outcome.editsApplied} Groq patch(es)$repairNote \u2014 re-capturing"
-                                                        captureGen++
-                                                    }.onFailure { err ->
-                                                        if (err is GroqQuotaExhaustedException) {
-                                                            onMarkQuotaExhausted()
+                                                        when (outcome.status) {
+                                                            GroqAutoFixStatus.APPLIED -> {
+                                                                val validated = outcome.validation
+                                                                if (validated != null) {
+                                                                    resolvedHtml = validated.cleanedHtml
+                                                                    onApplyFixedHtml(validated.cleanedHtml, validated.durationSec)
+                                                                }
+                                                                reviewResult = null
+                                                                lastReview = null
+                                                                aiError = null
+                                                                needsStructuralPrompt = false
+                                                                toastMsg = "Applied ${outcome.editsApplied} edits, ${outcome.failedCount} failed, ${outcome.skippedCount} skipped \u2014 re-capturing"
+                                                                captureGen++
+                                                            }
+                                                            GroqAutoFixStatus.NOTHING_TO_FIX -> {
+                                                                aiError = null
+                                                                needsStructuralPrompt = false
+                                                                toastMsg = outcome.failureSummary.ifBlank { "No issues found." }
+                                                            }
+                                                            GroqAutoFixStatus.STRUCTURAL -> {
+                                                                needsStructuralPrompt = true
+                                                                aiError = outcome.failureSummary.ifBlank {
+                                                                    "Needs structural changes. Copy the targeted Cloud AI fix prompt below."
+                                                                }
+                                                            }
+                                                            GroqAutoFixStatus.NOTHING_MATCHED -> {
+                                                                needsStructuralPrompt = false
+                                                                aiError = "No patches applied: ${outcome.failureSummary}".trim()
+                                                            }
                                                         }
-                                                        aiError = err.message ?: "Groq AI auto-fix failed (HTML kept safe)."
+                                                    }.onFailure { err ->
+                                                        when (err) {
+                                                            is GroqCooldownException -> {
+                                                                val msg = "Rate window full \u2014 retry in ${err.waitSec}s"
+                                                                aiError = msg
+                                                                toastMsg = msg
+                                                            }
+                                                            is GroqHardLimitException -> {
+                                                                aiError = err.message
+                                                                toastMsg = "Groq limit reached"
+                                                            }
+                                                            is GroqPromptTooLargeException -> {
+                                                                aiError = "Too many flags to send; fix the top ones first."
+                                                                toastMsg = "Too many flags to send; fix the top ones first"
+                                                            }
+                                                            else -> {
+                                                                aiError = err.message ?: "Groq AI auto-fix failed (HTML kept safe)."
+                                                            }
+                                                        }
                                                     }
                                                 }
                                             },
@@ -905,7 +1008,31 @@ fun KeyframeSheetScreen(
                                                 fontSize = 13.5.sp,
                                                 color = RawColors.ErrorCoral
                                             )
-                                            if (quotaExhausted || msg.contains("quota", ignoreCase = true) || msg.contains("key", ignoreCase = true)) {
+                                            if (needsStructuralPrompt) {
+                                                RawSecondaryButton(
+                                                    text = if (promptCopied) "Copied fix prompt!" else "Copy Cloud AI fix prompt",
+                                                    height = 42.dp,
+                                                    leadingIcon = if (promptCopied) RawIconType.CHECK else RawIconType.COPY,
+                                                    onClick = {
+                                                        val fixPrompt = KeyframeSheetGenerator.buildFixPrompt(
+                                                            samples = res.samples,
+                                                            title = project.title.ifBlank { "Untitled Reel" },
+                                                            durationSec = res.durationSec,
+                                                            htmlCode = resolvedHtml
+                                                        )
+                                                        val cb = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+                                                        cb.setPrimaryClip(ClipData.newPlainText("raw_edit fix prompt", fixPrompt))
+                                                        haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                                                        promptCopied = true
+                                                        toastMsg = "Prompt B + HTML copied"
+                                                        scope.launch {
+                                                            delay(2000)
+                                                            promptCopied = false
+                                                        }
+                                                    }
+                                                )
+                                            }
+                                            if (isHardBlockedUi) {
                                                 RawSecondaryButton(
                                                     text = "Switch Groq API Key",
                                                     height = 42.dp,
@@ -931,8 +1058,11 @@ fun KeyframeSheetScreen(
                                                     .clip(RoundedCornerShape(18.dp))
                                                     .background(RawColors.RaisedCard)
                                                     .clickable {
+                                                        val idxFromSample = issue.sampleIndex.takeIf { it in res.samples.indices }
                                                         val frameNum = Regex("\\d+").find(issue.frame)?.value?.toIntOrNull()
-                                                        if (frameNum != null && res.samples.isNotEmpty()) {
+                                                        if (idxFromSample != null) {
+                                                            inspectingIndex = idxFromSample
+                                                        } else if (frameNum != null && res.samples.isNotEmpty()) {
                                                             inspectingIndex = (frameNum - 1).coerceIn(0, res.samples.lastIndex)
                                                         }
                                                     }

@@ -171,8 +171,7 @@ fun WebBrowserAssetScreen(
     ) -> Unit,
     onOpenGroqKey: () -> Unit,
     onSwitchGroqKey: () -> Unit,
-    onRefreshGroqQuota: () -> Unit,
-    onMarkQuotaExhausted: () -> Unit
+    onRefreshGroqQuota: () -> Unit
 ) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
@@ -1201,7 +1200,6 @@ fun WebBrowserAssetScreen(
             onOpenGroqKey = onOpenGroqKey,
             onSwitchGroqKey = onSwitchGroqKey,
             onRefreshGroqQuota = onRefreshGroqQuota,
-            onMarkQuotaExhausted = onMarkQuotaExhausted,
             onDismiss = { cutoutTarget = null },
             onConfirmSave = { finalBmp, isCutout, name, desc, safe ->
                 cutoutTarget = null

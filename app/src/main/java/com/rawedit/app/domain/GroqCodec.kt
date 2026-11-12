@@ -41,6 +41,34 @@ enum class GroqFailureCategory {
     TRANSIENT_SERVER
 }
 
+enum class GroqLimitKind {
+    NONE,
+    COOLDOWN,
+    DAILY,
+    CREDITS
+}
+
+data class GroqLimit(
+    val kind: GroqLimitKind,
+    val waitSec: Double? = null,
+    val code: String? = null
+)
+
+data class GroqModelBucket(
+    val remainingTokens: Long?,
+    val resetTokensAtMs: Long,
+    val remainingRequests: Long?,
+    val limitTokens: Long? = null,
+    val limitRequests: Long? = null,
+    val resetRequestsAtMs: Long = 0L
+)
+
+sealed class GroqUi {
+    object Ready : GroqUi()
+    data class Cooling(val untilMs: Long) : GroqUi()
+    data class HardBlocked(val kind: GroqLimitKind, val untilMs: Long) : GroqUi()
+}
+
 data class GroqQuotaReport(
     val remainingRequests: Int = -1,
     val limitRequests: Int = -1,
@@ -61,8 +89,10 @@ data class GroqQuotaReport(
 
     val isExhausted: Boolean
         get() = creditsDepleted402 ||
-            (limitRequests > 0 && remainingRequests == 0) ||
-            (limitTokens > 0 && remainingTokens == 0)
+            (limitRequests > 0 && remainingRequests == 0)
+
+    val isCooling: Boolean
+        get() = !isExhausted && limitTokens > 0 && remainingTokens == 0
 
     val requestsFraction: Float
         get() = if (limitRequests > 0 && remainingRequests >= 0) {
@@ -94,7 +124,7 @@ data class GroqQuotaReport(
     val remainingPercent: Int
         get() {
             if (isExhausted) return 0
-            return (primaryFraction * 100f).roundToInt().coerceIn(1, 100)
+            return (primaryFraction * 100f).roundToInt().coerceIn(if (isCooling) 0 else 1, 100)
         }
 
     val isLow: Boolean
@@ -133,7 +163,8 @@ data class GroqQuotaReport(
         limitRequests = limitRequests,
         remainingTokens = remainingTokens,
         limitTokens = limitTokens,
-        exhausted = isExhausted
+        exhausted = isExhausted,
+        coolingReset = if (isCooling) resetTokens else ""
     )
 }
 
@@ -148,13 +179,36 @@ class GroqApiException(
     override val message: String,
     val errorCode: String? = null,
     val errorType: String? = null,
-    val quota: GroqQuotaReport? = null
+    val quota: GroqQuotaReport? = null,
+    val headers: Map<String, String> = emptyMap()
 ) : IllegalStateException(message)
 
 class GroqQuotaExhaustedException(
     override val message: String,
     val httpCode: Int? = 429,
     val quota: GroqQuotaReport? = null
+) : IllegalStateException(message)
+
+class GroqCooldownException(
+    val waitSec: Int,
+    override val message: String = "Rate window cooling (${waitSec}s)"
+) : IllegalStateException(message)
+
+class GroqHardLimitException(
+    val kind: GroqLimitKind,
+    val resetAtMs: Long,
+    val quota: GroqQuotaReport? = null,
+    override val message: String = if (kind == GroqLimitKind.CREDITS) {
+        "Groq credits exhausted. Switch to another Groq API key."
+    } else {
+        "Groq daily limit reached. Resets in ${GroqCodec.formatDurationShort(resetAtMs - System.currentTimeMillis())}."
+    }
+) : IllegalStateException(message)
+
+class GroqPromptTooLargeException(
+    val estimatedTokens: Int,
+    val capTokens: Int,
+    override val message: String = "Too many flags to send (~$estimatedTokens tok > $capTokens cap); fix top scenes first."
 ) : IllegalStateException(message)
 
 data class GroqRootCause(
@@ -177,6 +231,28 @@ data class GroqStage1Plan(
     val edits: List<GroqPatchEdit>,
     val needsFull: Boolean,
     val reason: String
+)
+
+data class GroqReviewIssue(
+    val f: Int,
+    val type: String,
+    val where: String,
+    val sev: String,
+    val fix: String
+)
+
+data class GroqReviewResult(
+    val ok: Boolean,
+    val issues: List<GroqReviewIssue>,
+    val htmlHash: Int,
+    val atMs: Long,
+    val parseFailed: Boolean = false
+)
+
+data class GroqPlanResult(
+    val edits: List<GroqPatchEdit>,
+    val skippedCount: Int,
+    val structural: Boolean
 )
 
 data class GroqFailedEdit(
@@ -272,14 +348,142 @@ object GroqCodec {
         MODEL_LLAMA31_8B
     )
 
+    const val IMAGE_TOKENS = 2048
+
     private val THINK_BLOCK_REGEX = Regex("<think>[\\s\\S]*?</think>", RegexOption.IGNORE_CASE)
     private val SEARCH_REPLACE_BLOCK_REGEX = Regex(
         "<<<SEARCH\\s*\\r?\\n([\\s\\S]*?)\\r?\\n===REPLACE\\s*\\r?\\n([\\s\\S]*?)\\r?\\n>>>"
+    )
+    private val DURATION_REGEX = Regex("(\\d+(?:\\.\\d+)?)(ms|h|m|s)")
+    private val LIMIT_CODE_REGEX = Regex("\\((TPM|RPM|RPD|TPD)\\)")
+    private val TRY_AGAIN_REGEX = Regex("try again in\\s+([0-9hms.]+)", RegexOption.IGNORE_CASE)
+    private val LINE_NO_PREFIX_REGEX = Regex("^\\s*\\d{1,5}\\s*[:|]\\s?")
+    private val FORBIDDEN_EDIT_REGEX = Regex(
+        "transition\\s*:|@keyframes|animation\\s*:|requestAnimationFrame|setTimeout|setInterval|Date\\.now|performance\\.now|Math\\.random|\\.play\\(\\)|<script[^>]*\\ssrc=|<link\\b|@import|fetch\\(|XMLHttpRequest|WebSocket|import\\(|window\\.open|https?://(?!www\\.w3\\.org/2000/svg)",
+        RegexOption.IGNORE_CASE
     )
 
     private val jsonParser = Json {
         ignoreUnknownKeys = true
         isLenient = true
+    }
+
+    fun estTokens(text: String): Int = (text.length / 3.2).toInt() + 8
+
+    fun parseDurationSec(raw: String?): Double? {
+        if (raw.isNullOrBlank()) return null
+        var total = 0.0
+        var any = false
+        DURATION_REGEX.findAll(raw.trim()).forEach { m ->
+            any = true
+            val v = m.groupValues[1].toDoubleOrNull() ?: 0.0
+            total += when (m.groupValues[2]) {
+                "ms" -> v / 1000.0
+                "s" -> v
+                "m" -> v * 60.0
+                else -> v * 3600.0
+            }
+        }
+        return if (any) total else null
+    }
+
+    fun formatDurationShort(msRemaining: Long): String {
+        val secTotal = (msRemaining / 1000L).coerceAtLeast(1L)
+        return when {
+            secTotal < 60L -> "${secTotal}s"
+            secTotal < 3600L -> "${secTotal / 60L}m"
+            else -> {
+                val h = secTotal / 3600L
+                val m = (secTotal % 3600L) / 60L
+                if (m > 0L) "${h}h${m}m" else "${h}h"
+            }
+        }
+    }
+
+    fun guardTokens(
+        images: Int,
+        vararg texts: String,
+        maxCompletion: Int,
+        cap: Int = 6500
+    ): Int {
+        val est = images * IMAGE_TOKENS + texts.sumOf { estTokens(it) } + maxCompletion
+        if (est > cap) throw GroqPromptTooLargeException(est, cap)
+        return est
+    }
+
+    fun headerFieldsToLowerMap(headerFields: Map<String?, List<String>>?): Map<String, String> {
+        if (headerFields.isNullOrEmpty()) return emptyMap()
+        val out = LinkedHashMap<String, String>(headerFields.size)
+        for ((k, vals) in headerFields) {
+            val key = k?.trim()?.lowercase(Locale.US) ?: continue
+            val value = vals.firstOrNull()?.trim()?.takeIf { it.isNotEmpty() } ?: continue
+            out[key] = value
+        }
+        return out
+    }
+
+    fun readBucket(
+        headerFields: Map<String?, List<String>>?,
+        nowMs: Long = System.currentTimeMillis()
+    ): GroqModelBucket? {
+        val h = headerFieldsToLowerMap(headerFields)
+        if (h.isEmpty()) return null
+        val remTok = h["x-ratelimit-remaining-tokens"]?.toLongOrNull()
+        val limTok = h["x-ratelimit-limit-tokens"]?.toLongOrNull()
+        val rstTokSec = parseDurationSec(h["x-ratelimit-reset-tokens"]) ?: 0.0
+        val remReq = h["x-ratelimit-remaining-requests"]?.toLongOrNull()
+        val limReq = h["x-ratelimit-limit-requests"]?.toLongOrNull()
+        val rstReqSec = parseDurationSec(h["x-ratelimit-reset-requests"]) ?: 0.0
+        if (remTok == null && remReq == null && limTok == null && limReq == null) return null
+        return GroqModelBucket(
+            remainingTokens = remTok,
+            resetTokensAtMs = nowMs + (rstTokSec * 1000.0).toLong(),
+            remainingRequests = remReq,
+            limitTokens = limTok,
+            limitRequests = limReq,
+            resetRequestsAtMs = nowMs + (rstReqSec * 1000.0).toLong()
+        )
+    }
+
+    fun classifyLimit(status: Int?, body: String, headers: Map<String, String>): GroqLimit {
+        val b = body.lowercase(Locale.US)
+        if (status == 402 ||
+            "insufficient_quota" in b ||
+            "billing_hard_limit_reached" in b ||
+            "spend limit" in b ||
+            "spending limit" in b ||
+            ("billing" in b && "limit" in b)
+        ) {
+            return GroqLimit(GroqLimitKind.CREDITS)
+        }
+        if (status != 429 && "rate_limit_exceeded" !in b && "rate limit" !in b) {
+            return GroqLimit(GroqLimitKind.NONE)
+        }
+
+        val code = LIMIT_CODE_REGEX.find(body)?.groupValues?.get(1)
+        val wait = headers["retry-after"]?.toDoubleOrNull()
+            ?: TRY_AGAIN_REGEX.find(body)?.groupValues?.get(1)?.let(::parseDurationSec)
+            ?: parseDurationSec(headers["x-ratelimit-reset-tokens"])
+            ?: parseDurationSec(headers["x-ratelimit-reset-requests"])
+        val dailyWords = "per day" in b ||
+            "daily limit" in b ||
+            "requests per day" in b ||
+            "tokens per day" in b
+
+        return when {
+            code == "RPD" || code == "TPD" || dailyWords ->
+                GroqLimit(
+                    kind = GroqLimitKind.DAILY,
+                    waitSec = parseDurationSec(headers["x-ratelimit-reset-requests"]) ?: wait ?: 3600.0,
+                    code = code
+                )
+            code == "TPM" || code == "RPM" ->
+                GroqLimit(GroqLimitKind.COOLDOWN, wait ?: 20.0, code)
+            wait != null && wait < 120.0 ->
+                GroqLimit(GroqLimitKind.COOLDOWN, wait, null)
+            else ->
+                GroqLimit(GroqLimitKind.DAILY, wait ?: 3600.0, null)
+        }
     }
 
     fun isVisionModel(modelId: String): Boolean {
@@ -530,7 +734,8 @@ object GroqCodec {
         jsonObjectMode: Boolean = false,
         maxCompletionTokens: Int? = null,
         temperature: Double = 0.2,
-        heavyTask: Boolean = false
+        heavyTask: Boolean = false,
+        reasoningEffortOverride: String? = null
     ): String {
         val imageCap = maxImagesForModel(model)
         val boundedImages = images.take(imageCap)
@@ -616,16 +821,22 @@ object GroqCodec {
                 )
             }
             if (isOss) {
-                put("reasoning_effort", if (heavyTask) "medium" else "low")
+                val eff = reasoningEffortOverride?.takeIf { it in setOf("low", "medium", "high") }
+                    ?: if (heavyTask) "medium" else "low"
+                put("reasoning_effort", eff)
             } else if (isQwen) {
                 if (model == MODEL_QWEN3_32B) {
-                    put("reasoning_effort", if (heavyTask) "default" else "none")
+                    val eff = reasoningEffortOverride?.takeIf { it in setOf("none", "default") }
+                        ?: if (heavyTask) "default" else "none"
+                    put("reasoning_effort", eff)
                     if (!jsonObjectMode) {
                         put("reasoning_format", "hidden")
                     }
                 } else {
                     // Qwen 3.8 27B supports "none", "low", "medium", "high"
-                    put("reasoning_effort", if (heavyTask) "low" else "none")
+                    val eff = reasoningEffortOverride?.takeIf { it in setOf("none", "low", "medium", "high") }
+                        ?: if (heavyTask) "low" else "none"
+                    put("reasoning_effort", eff)
                 }
             }
         }
@@ -691,10 +902,15 @@ object GroqCodec {
         limitRequests: Int,
         remainingTokens: Int,
         limitTokens: Int,
-        exhausted: Boolean
+        exhausted: Boolean,
+        coolingReset: String = ""
     ): String {
-        if (exhausted || (limitRequests > 0 && remainingRequests == 0) || (limitTokens > 0 && remainingTokens == 0)) {
+        if (exhausted || (limitRequests > 0 && remainingRequests == 0)) {
             return "Quota 0 left"
+        }
+        if (limitTokens > 0 && remainingTokens == 0) {
+            val suffix = coolingReset.ifBlank { "shortly" }
+            return "Cooling $suffix"
         }
         if (remainingRequests >= 0) {
             return "${formatCompactCount(remainingRequests)} req left"
@@ -821,17 +1037,17 @@ object GroqCodec {
         val m = rawMessage?.lowercase(Locale.US).orEmpty()
         if (m.contains("spend limit") ||
             m.contains("spending limit") ||
-            m.contains("billing") ||
-            m.contains("credit") ||
+            ("billing" in m && "limit" in m) ||
             m.contains("requests per day") ||
             m.contains("tokens per day") ||
             m.contains("(rpd)") ||
             m.contains("(tpd)") ||
-            m.contains("daily limit")
+            m.contains("daily limit") ||
+            m.contains("per day")
         ) {
             return true
         }
-        if (httpCode == 429 && quota != null && quota.isExhausted) {
+        if (httpCode == 429 && quota != null && (quota.creditsDepleted402 || (quota.limitRequests > 0 && quota.remainingRequests == 0))) {
             return true
         }
         return false
@@ -959,6 +1175,54 @@ object GroqCodec {
         return t.trim()
     }
 
+    fun parseReviewJson(
+        rawResponse: String,
+        htmlHash: Int,
+        nowMs: Long = System.currentTimeMillis()
+    ): GroqReviewResult {
+        val cleaned = stripJsonFences(rawResponse)
+        val obj = runCatching { JSONObject(cleaned) }.getOrNull()
+            ?: return GroqReviewResult(ok = false, issues = emptyList(), htmlHash = htmlHash, atMs = nowMs, parseFailed = true)
+        val arr = obj.optJSONArray("issues") ?: JSONArray()
+        val issues = ArrayList<GroqReviewIssue>(arr.length())
+        for (i in 0 until arr.length()) {
+            val item = arr.optJSONObject(i) ?: continue
+            val fIdx = item.optInt("f", 1).coerceAtLeast(1)
+            val typeStr = item.optString("type", "layout").trim().ifBlank { "layout" }
+            val whereStr = item.optString("where", "").trim()
+            val sevStr = item.optString("sev", "med").trim().ifBlank { "med" }
+            val fixStr = item.optString("fix", "").trim()
+            if (whereStr.isNotBlank() || fixStr.isNotBlank()) {
+                issues.add(GroqReviewIssue(f = fIdx, type = typeStr, where = whereStr, sev = sevStr, fix = fixStr))
+            }
+        }
+        val okFlag = obj.optBoolean("ok", issues.isEmpty())
+        return GroqReviewResult(ok = okFlag, issues = issues.take(6), htmlHash = htmlHash, atMs = nowMs, parseFailed = false)
+    }
+
+    fun parseLeanPlanJson(rawResponse: String): GroqPlanResult {
+        val cleaned = stripJsonFences(rawResponse)
+        val obj = JSONObject(cleaned)
+        val editsArr = obj.optJSONArray("edits") ?: JSONArray()
+        val edits = ArrayList<GroqPatchEdit>(editsArr.length())
+        for (i in 0 until editsArr.length()) {
+            val eObj = editsArr.optJSONObject(i) ?: continue
+            val rcId = when {
+                eObj.has("rc") -> eObj.optString("rc", "")
+                eObj.has("i") -> eObj.opt("i")?.toString().orEmpty()
+                else -> "E${i + 1}"
+            }.trim().ifBlank { "E${i + 1}" }
+            val findStr = eObj.optString("find", "")
+            val replaceStr = eObj.optString("replace", "")
+            if (findStr.isNotEmpty() || replaceStr.isNotEmpty()) {
+                edits.add(GroqPatchEdit(rc = rcId, find = findStr, replace = replaceStr))
+            }
+        }
+        val skippedCount = obj.optJSONArray("skipped")?.length() ?: 0
+        val structural = obj.optBoolean("structural", false) || obj.optBoolean("needsFull", false)
+        return GroqPlanResult(edits = edits.take(8), skippedCount = skippedCount, structural = structural)
+    }
+
     fun parseStage1Plan(rawResponse: String): GroqStage1Plan {
         val cleaned = stripJsonFences(rawResponse)
         val obj = JSONObject(cleaned)
@@ -998,7 +1262,7 @@ object GroqCodec {
             if (findStr.isNotEmpty() || replaceStr.isNotEmpty()) {
                 edits.add(
                     GroqPatchEdit(
-                        rc = eObj.optString("rc", "").trim(),
+                        rc = eObj.optString("rc", eObj.opt("i")?.toString().orEmpty()).trim(),
                         find = findStr,
                         replace = replaceStr
                     )
@@ -1006,7 +1270,7 @@ object GroqCodec {
             }
         }
 
-        val needsFull = obj.optBoolean("needsFull", false)
+        val needsFull = obj.optBoolean("needsFull", false) || obj.optBoolean("structural", false)
         val reason = obj.optString("reason", "").trim()
         return GroqStage1Plan(
             rootCauses = rootCauses,
@@ -1029,7 +1293,7 @@ object GroqCodec {
             if (findStr.isNotEmpty() || replaceStr.isNotEmpty()) {
                 edits.add(
                     GroqPatchEdit(
-                        rc = eObj.optString("rc", "").trim(),
+                        rc = eObj.optString("rc", eObj.opt("i")?.toString().orEmpty()).trim(),
                         find = findStr,
                         replace = replaceStr
                     )
@@ -1049,6 +1313,39 @@ object GroqCodec {
             }
         }
         return edits
+    }
+
+    fun stripLineNumbers(s: String): String {
+        val nonBlank = s.lines().filter { it.isNotBlank() }
+        return if (nonBlank.isNotEmpty() && nonBlank.all { LINE_NO_PREFIX_REGEX.containsMatchIn(it) }) {
+            s.lines().joinToString("\n") { it.replace(LINE_NO_PREFIX_REGEX, "") }
+        } else {
+            s
+        }
+    }
+
+    private class NormHtml(val text: String, val map: IntArray)
+
+    private fun normalizeWhitespaceWithMap(src: String): NormHtml {
+        val sb = StringBuilder(src.length)
+        val map = IntArray(src.length + 1)
+        var prevWs = false
+        for (idx in src.indices) {
+            val ch = src[idx]
+            if (ch.isWhitespace()) {
+                if (!prevWs) {
+                    map[sb.length] = idx
+                    sb.append(' ')
+                }
+                prevWs = true
+            } else {
+                map[sb.length] = idx
+                sb.append(ch)
+                prevWs = false
+            }
+        }
+        map[sb.length] = src.length
+        return NormHtml(sb.toString(), map.copyOf(sb.length + 1))
     }
 
     fun countOccurrences(haystack: String, needle: String): Int {
@@ -1073,33 +1370,53 @@ object GroqCodec {
         val failed = mutableListOf<GroqFailedEdit>()
 
         for (edit in edits) {
-            val find = edit.find
-            if (find.isEmpty()) {
-                failed.add(GroqFailedEdit(edit, "find string was empty", 0))
+            val cleanedFind = stripLineNumbers(edit.find)
+            val cleanedEdit = if (cleanedFind != edit.find) edit.copy(find = cleanedFind) else edit
+            if (cleanedFind.isBlank() || cleanedFind.trim().length < 4) {
+                failed.add(GroqFailedEdit(cleanedEdit, "empty", 0))
                 continue
             }
-            val exactCount = countOccurrences(current, find)
+            if (FORBIDDEN_EDIT_REGEX.containsMatchIn(edit.replace) && !FORBIDDEN_EDIT_REGEX.containsMatchIn(cleanedFind)) {
+                failed.add(GroqFailedEdit(cleanedEdit, "forbidden", 0))
+                continue
+            }
+
+            val exactCount = countOccurrences(current, cleanedFind)
             when {
                 exactCount == 1 -> {
-                    val idx = current.indexOf(find)
-                    current = current.substring(0, idx) + edit.replace + current.substring(idx + find.length)
+                    val idx = current.indexOf(cleanedFind)
+                    current = current.substring(0, idx) + edit.replace + current.substring(idx + cleanedFind.length)
                     applied++
                 }
                 exactCount > 1 -> {
-                    failed.add(GroqFailedEdit(edit, "matched $exactCount times (must be unique)", exactCount))
+                    failed.add(GroqFailedEdit(cleanedEdit, "ambiguous($exactCount)", exactCount))
                 }
                 else -> {
-                    // Fallback: normalize CRLF vs LF if the model emitted LF for CRLF source
-                    val normFind = find.replace("\r\n", "\n")
-                    val crlfFind = normFind.replace("\n", "\r\n")
-                    val crlfCount = if (crlfFind != find) countOccurrences(current, crlfFind) else 0
+                    val lfFind = cleanedFind.replace("\r\n", "\n")
+                    val crlfFind = lfFind.replace("\n", "\r\n")
+                    val crlfCount = if (crlfFind != cleanedFind) countOccurrences(current, crlfFind) else 0
                     if (crlfCount == 1) {
                         val idx = current.indexOf(crlfFind)
                         val replacement = if (current.contains("\r\n")) edit.replace.replace("\r\n", "\n").replace("\n", "\r\n") else edit.replace
                         current = current.substring(0, idx) + replacement + current.substring(idx + crlfFind.length)
                         applied++
                     } else {
-                        failed.add(GroqFailedEdit(edit, "find not found verbatim in HTML", 0))
+                        // Tier 2: whitespace-normalized unique match
+                        val normSource = normalizeWhitespaceWithMap(current)
+                        val normNeedle = normalizeWhitespaceWithMap(cleanedFind).text.trim()
+                        val n2 = if (normNeedle.length >= 4) countOccurrences(normSource.text, normNeedle) else 0
+                        when {
+                            n2 == 1 -> {
+                                val s = normSource.text.indexOf(normNeedle)
+                                val en = s + normNeedle.length
+                                val os = normSource.map[s]
+                                val oe = normSource.map[en - 1] + 1
+                                current = current.substring(0, os) + edit.replace + current.substring(oe)
+                                applied++
+                            }
+                            n2 > 1 -> failed.add(GroqFailedEdit(cleanedEdit, "ambiguous($n2)", n2))
+                            else -> failed.add(GroqFailedEdit(cleanedEdit, "not_found", 0))
+                        }
                     }
                 }
             }
@@ -1112,11 +1429,81 @@ object GroqCodec {
         )
     }
 
+    suspend fun applyEditsValidated(
+        html0: String,
+        edits: List<GroqPatchEdit>,
+        isValid: suspend (String) -> Boolean
+    ): GroqPatchApplyOutcome {
+        val batch = applyExactOnceEdits(html0, edits)
+        if (batch.appliedCount == 0 || isValid(batch.updatedHtml)) {
+            return batch
+        }
+        var cur = html0
+        var applied = 0
+        val failed = mutableListOf<GroqFailedEdit>()
+        for (edit in edits) {
+            val single = applyExactOnceEdits(cur, listOf(edit))
+            if (single.appliedCount == 1) {
+                if (isValid(single.updatedHtml)) {
+                    cur = single.updatedHtml
+                    applied++
+                } else {
+                    failed.add(GroqFailedEdit(edit, "breaks_validation", 1))
+                }
+            } else {
+                failed.addAll(single.failedEdits)
+            }
+        }
+        return GroqPatchApplyOutcome(updatedHtml = cur, appliedCount = applied, failedEdits = failed)
+    }
+
+    fun buildCleanExcerpt(
+        html: String,
+        tokens: List<String>,
+        maxChars: Int = 6000,
+        radius: Int = 10
+    ): String {
+        val lines = html.lines()
+        if (lines.isEmpty()) return ""
+        val toks = tokens.map { it.trim() }.filter { it.length >= 3 }.distinct()
+        val hits = sortedSetOf<Int>()
+        if (toks.isNotEmpty()) {
+            lines.forEachIndexed { idx, line ->
+                if (toks.any { tok -> line.contains(tok, ignoreCase = true) }) {
+                    hits.add(idx)
+                }
+            }
+        }
+        if (hits.isEmpty()) {
+            val end = minOf(lines.size, 65)
+            return lines.subList(0, end).joinToString("\n").take(maxChars)
+        }
+        val ranges = mutableListOf<IntRange>()
+        for (hit in hits) {
+            val r = maxOf(0, hit - radius)..minOf(lines.lastIndex, hit + radius)
+            if (ranges.isNotEmpty() && r.first <= ranges.last().last + 1) {
+                ranges[ranges.lastIndex] = ranges.last().first..maxOf(ranges.last().last, r.last)
+            } else {
+                ranges.add(r)
+            }
+        }
+        val sb = StringBuilder()
+        for (r in ranges) {
+            val chunk = "@@ window @@\n" + lines.subList(r.first, r.last + 1).joinToString("\n") + "\n"
+            if (sb.length + chunk.length > maxChars) {
+                sb.append(chunk.take(maxOf(0, maxChars - sb.length)))
+                break
+            }
+            sb.append(chunk)
+        }
+        return sb.toString().trimEnd()
+    }
+
     fun buildHtmlExcerpt(
         fullHtml: String,
         flaggedTimesSec: List<Double>,
         extraHints: List<String> = emptyList(),
-        maxChars: Int = 14_000
+        maxChars: Int = 6000
     ): String {
         val lines = fullHtml.lines()
         if (lines.isEmpty()) return ""
@@ -1128,14 +1515,14 @@ object GroqCodec {
             for (i in s..e) keep[i] = true
         }
 
-        // 1. Always include <style> CSS rules (up to first 110 style lines)
+        // 1. Include <style> CSS rules (up to first 60 lines)
         var inStyle = false
         var styleCount = 0
         for (i in lines.indices) {
             val lower = lines[i].lowercase(Locale.US)
             if (!inStyle && lower.contains("<style")) inStyle = true
             if (inStyle) {
-                if (styleCount < 110) {
+                if (styleCount < 60) {
                     keep[i] = true
                     styleCount++
                 }
@@ -1154,7 +1541,7 @@ object GroqCodec {
                 l.contains("const build") ||
                 l.contains("var build")
             ) {
-                markRange(i - 4, i + 26)
+                markRange(i - 2, i + 14)
             }
         }
 
@@ -1179,7 +1566,7 @@ object GroqCodec {
             var matchedScene = false
             for ((lineIdx, s, e) in sceneStarts) {
                 if (ft >= s - 0.15 && ft <= e + 0.15) {
-                    markRange(lineIdx - 3, lineIdx + 32)
+                    markRange(lineIdx - 2, lineIdx + 16)
                     matchedScene = true
                 }
             }
@@ -1189,7 +1576,7 @@ object GroqCodec {
                     kotlin.math.abs(mid - ft)
                 }
                 if (nearest != null) {
-                    markRange(nearest.first - 3, nearest.first + 28)
+                    markRange(nearest.first - 2, nearest.first + 14)
                 }
             }
         }
@@ -1204,35 +1591,39 @@ object GroqCodec {
             var hits = 0
             for (i in lines.indices) {
                 if (lines[i].contains(tok, ignoreCase = true)) {
-                    markRange(i - 6, i + 10)
+                    markRange(i - 4, i + 6)
                     hits++
                     if (hits >= 3) break
                 }
             }
         }
 
-        // Always keep head/stage opening and tail of scenes if very sparse
-        if (keep.count { it } < 25) {
-            markRange(0, minOf(lines.lastIndex, 80))
-            if (lines.size > 100) {
-                markRange(maxOf(0, lines.lastIndex - 70), lines.lastIndex)
+        if (keep.count { it } < 20) {
+            markRange(0, minOf(lines.lastIndex, 55))
+            if (lines.size > 70) {
+                markRange(maxOf(0, lines.lastIndex - 40), lines.lastIndex)
             }
         }
 
         val sb = StringBuilder()
-        var lastKept = -1
+        var inWindow = false
         for (i in lines.indices) {
-            if (!keep[i]) continue
-            if (lastKept >= 0 && i > lastKept + 1) {
-                sb.append("... (omitted lines ${lastKept + 2}..$i) ...\n")
+            if (!keep[i]) {
+                inWindow = false
+                continue
             }
-            val row = String.format(Locale.US, "%4d: %s\n", i + 1, lines[i])
+            if (!inWindow) {
+                if (sb.length + 14 > maxChars) break
+                if (sb.isNotEmpty()) sb.append("\n")
+                sb.append("@@ window @@\n")
+                inWindow = true
+            }
+            val row = "${lines[i]}\n"
             if (sb.length + row.length > maxChars) {
-                sb.append("... (excerpt capped at $maxChars chars) ...")
+                sb.append(row.take(maxOf(0, maxChars - sb.length)))
                 break
             }
             sb.append(row)
-            lastKept = i
         }
         return sb.toString().trimEnd()
     }
@@ -1241,8 +1632,8 @@ object GroqCodec {
         fullHtml: String,
         failedEdits: List<GroqFailedEdit>,
         errorMessage: String,
-        radiusLines: Int = 40,
-        maxChars: Int = 13_000
+        radiusLines: Int = 8,
+        maxChars: Int = 2500
     ): String {
         val lines = fullHtml.lines()
         if (lines.isEmpty()) return ""
@@ -1254,15 +1645,13 @@ object GroqCodec {
             for (i in s..e) keep[i] = true
         }
 
-        // Check if CodeValidator gave a JS error line number
         val lineMatch = Regex("line\\s+(\\d+)", RegexOption.IGNORE_CASE).find(errorMessage)
         lineMatch?.groupValues?.getOrNull(1)?.toIntOrNull()?.let { ln ->
             markAround((ln - 1).coerceIn(0, lines.lastIndex))
         }
 
-        // Find best anchors for each failed edit
         for (fe in failedEdits) {
-            val findLines = fe.edit.find.lines().map { it.trim() }.filter { it.length >= 6 }
+            val findLines = fe.edit.find.lines().map { it.trim() }.filter { it.length >= 4 }
             var foundAnchor = false
             for (needle in findLines) {
                 for (i in lines.indices) {
@@ -1275,7 +1664,7 @@ object GroqCodec {
                 if (foundAnchor) break
             }
             if (!foundAnchor) {
-                val words = Regex("[A-Za-z0-9_#-]{5,}").findAll(fe.edit.find).map { it.value }.distinct().take(4).toList()
+                val words = Regex("[A-Za-z0-9_#-]{4,}").findAll(fe.edit.find).map { it.value }.distinct().take(4).toList()
                 for (w in words) {
                     val hitIdx = lines.indexOfFirst { it.contains(w) }
                     if (hitIdx >= 0) {
@@ -1286,28 +1675,31 @@ object GroqCodec {
             }
         }
 
-        // Fallback if nothing matched: show style + seek/tail lines
         if (keep.none { it }) {
-            markAround(minOf(lines.lastIndex, 35))
+            markAround(minOf(lines.lastIndex, 20))
             val seekIdx = lines.indexOfFirst { it.contains("seek") }
             if (seekIdx >= 0) markAround(seekIdx)
-            markAround(maxOf(0, lines.lastIndex - 35))
         }
 
         val sb = StringBuilder()
-        var lastKept = -1
+        var inWindow = false
         for (i in lines.indices) {
-            if (!keep[i]) continue
-            if (lastKept >= 0 && i > lastKept + 1) {
-                sb.append("... (lines ${lastKept + 2}..$i omitted) ...\n")
+            if (!keep[i]) {
+                inWindow = false
+                continue
             }
-            val row = String.format(Locale.US, "%4d: %s\n", i + 1, lines[i])
+            if (!inWindow) {
+                if (sb.length + 14 > maxChars) break
+                if (sb.isNotEmpty()) sb.append("\n")
+                sb.append("@@ window @@\n")
+                inWindow = true
+            }
+            val row = "${lines[i]}\n"
             if (sb.length + row.length > maxChars) {
-                sb.append("... (windows capped at $maxChars chars) ...")
+                sb.append(row.take(maxOf(0, maxChars - sb.length)))
                 break
             }
             sb.append(row)
-            lastKept = i
         }
         return sb.toString().trimEnd()
     }

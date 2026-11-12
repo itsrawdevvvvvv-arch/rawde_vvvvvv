@@ -10,7 +10,9 @@ import com.rawedit.app.domain.GroqApiException
 import com.rawedit.app.domain.GroqCodec
 import com.rawedit.app.domain.GroqFailureCategory
 import com.rawedit.app.domain.GroqImageInput
+import com.rawedit.app.domain.GroqLimitKind
 import com.rawedit.app.domain.GroqPatchEdit
+import com.rawedit.app.domain.GroqPromptTooLargeException
 import com.rawedit.app.domain.KeyframeSample
 import com.rawedit.app.domain.KeyframeSheetGenerator
 import com.rawedit.app.domain.PaletteColorMath
@@ -600,5 +602,104 @@ Enjoy!
 
         val windows = GroqCodec.buildRepairWindows(sampleHtml, badAmbiguous.failedEdits, "JS error at line 10")
         assertTrue(windows.contains("window.RAW"))
+    }
+
+    @Test
+    fun groqLimiterClassifiesTpmCooldownDailyAndCreditsAndAppliesReliableEdits() {
+        assertEquals(90.0, GroqCodec.parseDurationSec("1m30s")!!, 0.01)
+        assertEquals(42.0, GroqCodec.parseDurationSec("42s")!!, 0.01)
+        assertTrue(GroqCodec.estTokens("abcde") > 0)
+
+        try {
+            GroqCodec.guardTokens(images = 3, "a".repeat(2000), maxCompletion = 700, cap = 6500)
+            fail("Expected GroqPromptTooLargeException")
+        } catch (ex: GroqPromptTooLargeException) {
+            assertTrue(ex.estimatedTokens > 6500)
+        }
+
+        val coolingHeaders = mapOf<String?, List<String>>(
+            "x-ratelimit-remaining-requests" to listOf("995"),
+            "x-ratelimit-limit-requests" to listOf("1000"),
+            "x-ratelimit-reset-requests" to listOf("12m"),
+            "x-ratelimit-remaining-tokens" to listOf("0"),
+            "x-ratelimit-limit-tokens" to listOf("8000"),
+            "x-ratelimit-reset-tokens" to listOf("42s")
+        )
+        val coolingQuota = GroqCodec.parseQuotaHeaders(coolingHeaders, httpCode = 200)!!
+        assertFalse(coolingQuota.isExhausted)
+        assertTrue(coolingQuota.isCooling)
+        assertEquals("Cooling 42s", coolingQuota.bannerLabel())
+
+        val lowerHdr = GroqCodec.headerFieldsToLowerMap(coolingHeaders)
+        val tpmLimit = GroqCodec.classifyLimit(
+            429,
+            "Rate limit reached on tokens per minute (TPM): Limit 8000. Please try again in 42s",
+            lowerHdr
+        )
+        assertEquals(GroqLimitKind.COOLDOWN, tpmLimit.kind)
+
+        val dailyLimit = GroqCodec.classifyLimit(
+            429,
+            "Limit reached on requests per day (RPD) and tokens per day (TPD).",
+            emptyMap()
+        )
+        assertEquals(GroqLimitKind.DAILY, dailyLimit.kind)
+
+        val creditLimit = GroqCodec.classifyLimit(402, "insufficient_quota billing limit", emptyMap())
+        assertEquals(GroqLimitKind.CREDITS, creditLimit.kind)
+
+        val html = """
+            <!DOCTYPE html><html><head><style>
+            .card {
+            	width: 1400px;
+            }
+            .dup { color: red; }
+            .dup { color: red; }
+            </style></head><body><div id="stage"></div>
+            <script>
+            const s1 = { start: 1, end: 5 };
+            window.RAW = { duration: 5.0, seek(t) {} };
+            </script></body></html>
+        """.trimIndent()
+
+        // Tier-2 tab-vs-space normalization + line-number stripping + forbidden + ambiguous
+        val mixedEdits = listOf(
+            GroqPatchEdit("1", "  42: const s1 = { start: 1, end: 5 };", "const s1 = { start: 1, end: 5.0 };"),
+            GroqPatchEdit("2", ".card { width: 1400px; }", ".card { width: 900px; }"),
+            GroqPatchEdit("3", ".dup { color: red; }", ".dup { color: blue; }"),
+            GroqPatchEdit("4", "window.RAW = { duration: 5.0, seek(t) {} };", "window.RAW = { transition: all 0.2s; };")
+        )
+        val applyOut = GroqCodec.applyExactOnceEdits(html, mixedEdits)
+        assertEquals(2, applyOut.appliedCount)
+        assertTrue(applyOut.updatedHtml.contains("width: 900px;"))
+        assertTrue(applyOut.failedEdits.any { it.edit.rc == "3" && it.reason.startsWith("ambiguous") })
+        assertTrue(applyOut.failedEdits.any { it.edit.rc == "4" && it.reason == "forbidden" })
+
+        val review = GroqCodec.parseReviewJson(
+            """{"ok":false,"issues":[{"f":1,"type":"clip","where":".headline","sev":"high","fix":"Reduce font size"}]}""",
+            htmlHash = html.hashCode()
+        )
+        assertFalse(review.ok)
+        assertEquals(1, review.issues.size)
+
+        val leanPlan = GroqCodec.parseLeanPlanJson(
+            """{"edits":[{"i":1,"find":".card { width: 1400px; }","replace":".card { width: 900px; }"}],"skipped":[{"t":2.0,"why":"minor"}],"structural":false}"""
+        )
+        assertEquals(1, leanPlan.edits.size)
+        assertEquals(1, leanPlan.skippedCount)
+        assertFalse(leanPlan.structural)
+
+        val samples = listOf(
+            KeyframeSample(0, 0.0, "S1", "", 0, emptyList(), emptyList()),
+            KeyframeSample(1, 2.0, "S2", "", 1, listOf("Auto-resized div.headline@[140,300,1900x220] \"Hello World\""), emptyList()),
+            KeyframeSample(2, 2.5, "S2", "", 0, emptyList(), listOf("Edge clip span.sub@[10,960,1880x100]")),
+            KeyframeSample(3, 4.9, "S3", "", 0, emptyList(), emptyList())
+        )
+        val picked = KeyframeSheetGenerator.pickCollageFrames(samples, 5.0)
+        assertTrue(picked.size <= 4)
+        assertTrue(picked.any { it.index == 2 })
+        val domBundle = KeyframeSheetGenerator.extractDomFlagBundle(samples, picked)
+        assertTrue(domBundle.flagLines.any { it.contains("span.sub") && it.contains("edge-clip") })
+        assertTrue(domBundle.flagTokens.contains("sub"))
     }
 }

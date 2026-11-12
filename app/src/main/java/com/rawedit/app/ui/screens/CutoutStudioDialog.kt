@@ -55,7 +55,6 @@ import com.rawedit.app.domain.CutoutPadRatios
 import com.rawedit.app.domain.CutoutProcessor
 import com.rawedit.app.domain.GroqClient
 import com.rawedit.app.domain.GroqCodec
-import com.rawedit.app.domain.GroqQuotaExhaustedException
 import com.rawedit.app.ui.components.BigPrimaryButton
 import com.rawedit.app.ui.components.CircleActionButton
 import com.rawedit.app.ui.components.RawSecondaryButton
@@ -113,7 +112,6 @@ fun CutoutStudioDialog(
     onOpenGroqKey: () -> Unit,
     onSwitchGroqKey: () -> Unit,
     onRefreshGroqQuota: () -> Unit,
-    onMarkQuotaExhausted: () -> Unit,
     onDismiss: () -> Unit,
     onConfirmSave: (
         bitmap: Bitmap,
@@ -233,9 +231,6 @@ fun CutoutStudioDialog(
                 previewResultImage = refinedBmp.asImageBitmap()
             }
         }.onFailure { err ->
-            if (err is GroqQuotaExhaustedException) {
-                onMarkQuotaExhausted()
-            }
             auditError = err.message ?: "AI edge check failed"
         }
         isAiChecking = false

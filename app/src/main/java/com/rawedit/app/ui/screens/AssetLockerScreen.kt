@@ -62,7 +62,6 @@ import com.rawedit.app.data.local.LocalAssetEntity
 import com.rawedit.app.data.local.ProjectEntity
 import com.rawedit.app.data.repository.RawEditRepository
 import com.rawedit.app.domain.GroqClient
-import com.rawedit.app.domain.GroqQuotaExhaustedException
 import com.rawedit.app.ui.components.BigPrimaryButton
 import com.rawedit.app.ui.components.CircleActionButton
 import com.rawedit.app.ui.components.FormatHelpers
@@ -108,8 +107,7 @@ fun AssetLockerScreen(
     onDeleteAsset: (LocalAssetEntity) -> Unit,
     onOpenGroqKey: () -> Unit,
     onSwitchGroqKey: () -> Unit,
-    onRefreshGroqQuota: () -> Unit,
-    onMarkQuotaExhausted: () -> Unit
+    onRefreshGroqQuota: () -> Unit
 ) {
     val scope = rememberCoroutineScope()
     val listState = rememberLazyListState()
@@ -424,9 +422,6 @@ fun AssetLockerScreen(
                                                 onRefreshGroqQuota()
                                                 toastMsg = "Groq AI note updated"
                                             }.onFailure { err ->
-                                                if (err is GroqQuotaExhaustedException) {
-                                                    onMarkQuotaExhausted()
-                                                }
                                                 toastMsg = err.message ?: "Auto-describe failed"
                                             }
                                         }
@@ -615,7 +610,6 @@ fun AssetLockerScreen(
             onOpenGroqKey = onOpenGroqKey,
             onSwitchGroqKey = onSwitchGroqKey,
             onRefreshGroqQuota = onRefreshGroqQuota,
-            onMarkQuotaExhausted = onMarkQuotaExhausted,
             onDismiss = { cutoutStudioTarget = null },
             onConfirmSave = { finalBmp, isCutout, suggestedName, desc, safe ->
                 cutoutStudioTarget = null

@@ -32,6 +32,7 @@ import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -54,7 +55,10 @@ import androidx.core.content.FileProvider
 import com.rawedit.app.data.CacheManager
 import com.rawedit.app.data.local.UserProfile
 import com.rawedit.app.domain.GroqClient
-import com.rawedit.app.domain.GroqQuotaExhaustedException
+import com.rawedit.app.domain.GroqCooldownException
+import com.rawedit.app.domain.GroqHardLimitException
+import com.rawedit.app.domain.GroqLimiter
+import com.rawedit.app.domain.GroqUi
 import com.rawedit.app.domain.PaletteColorMath
 import com.rawedit.app.domain.PaletteExporter
 import com.rawedit.app.domain.PaletteJsonCodec
@@ -84,8 +88,7 @@ fun PaletteScreen(
     onSavePaletteState: (counter: Int, json: String) -> Unit,
     onOpenGroqKey: () -> Unit,
     onSwitchGroqKey: () -> Unit,
-    onRefreshGroqQuota: () -> Unit,
-    onMarkQuotaExhausted: () -> Unit
+    onRefreshGroqQuota: () -> Unit
 ) {
     val context = LocalContext.current
     val haptic = LocalHapticFeedback.current
@@ -132,7 +135,8 @@ fun PaletteScreen(
     }
 
     val hasGroqKey = userProfile.hasGroqKey
-    val isExhausted = userProfile.groqQuotaExhausted
+    val groqUi by GroqLimiter.ui.collectAsState()
+    val isExhausted = userProfile.groqQuotaExhausted || groqUi is GroqUi.HardBlocked
 
     fun regeneratePalette() {
         if (!hasGroqKey) {
@@ -141,6 +145,10 @@ fun PaletteScreen(
         }
         if (isExhausted) {
             onSwitchGroqKey()
+            return
+        }
+        if (groqUi is GroqUi.Cooling) {
+            toastMsg = "Rate window cooling \u2014 wait a few seconds"
             return
         }
         if (generating) return
@@ -165,10 +173,11 @@ fun PaletteScreen(
                 haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
                 toastMsg = "Palette #${palette.numFormatted} ready"
             }.onFailure { err ->
-                if (err is GroqQuotaExhaustedException) {
-                    onMarkQuotaExhausted()
+                errorMsg = when (err) {
+                    is GroqCooldownException -> "Rate window full \u2014 retry in ${err.waitSec}s"
+                    is GroqHardLimitException -> err.message
+                    else -> err.message ?: "Groq AI palette request failed"
                 }
-                errorMsg = err.message ?: "Groq AI palette request failed"
             }
         }
     }

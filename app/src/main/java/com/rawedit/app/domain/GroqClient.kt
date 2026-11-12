@@ -9,6 +9,9 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.ensureActive
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.withContext
 import org.json.JSONObject
 import java.io.ByteArrayOutputStream
@@ -27,13 +30,15 @@ data class SheetIssue(
     val frame: String,
     val time: String,
     val problem: String,
-    val fix: String
+    val fix: String,
+    val sampleIndex: Int = -1
 )
 
 data class SheetReviewResult(
     val summary: String,
     val issues: List<SheetIssue>,
-    val rootCauses: List<GroqRootCause> = emptyList()
+    val rootCauses: List<GroqRootCause> = emptyList(),
+    val cachedReview: GroqReviewResult? = null
 )
 
 data class GroqConnectionInfo(
@@ -44,14 +49,25 @@ data class GroqConnectionInfo(
     val quota: GroqQuotaReport?
 )
 
+enum class GroqAutoFixStatus {
+    APPLIED,
+    NOTHING_MATCHED,
+    STRUCTURAL,
+    NOTHING_TO_FIX
+}
+
 data class GroqAutoFixOutcome(
+    val status: GroqAutoFixStatus = GroqAutoFixStatus.APPLIED,
     val fixedHtml: String,
-    val validation: CodeValidationResult,
-    val rootCauses: List<GroqRootCause>,
-    val editsApplied: Int,
-    val repairRoundsUsed: Int,
-    val modelUsed: String,
-    val quota: GroqQuotaReport?
+    val validation: CodeValidationResult?,
+    val rootCauses: List<GroqRootCause> = emptyList(),
+    val editsApplied: Int = 0,
+    val failedCount: Int = 0,
+    val skippedCount: Int = 0,
+    val failureSummary: String = "",
+    val repairRoundsUsed: Int = 0,
+    val modelUsed: String = "",
+    val quota: GroqQuotaReport? = null
 )
 
 private data class GroqCompletionResult(
@@ -60,18 +76,118 @@ private data class GroqCompletionResult(
     val quota: GroqQuotaReport?
 )
 
+object GroqLimiter {
+    private val buckets = ConcurrentHashMap<String, GroqModelBucket>()
+    private val _ui = MutableStateFlow<GroqUi>(GroqUi.Ready)
+    val ui: StateFlow<GroqUi> = _ui.asStateFlow()
+
+    @Volatile
+    private var hardBlockUntilMs: Long = 0L
+
+    @Volatile
+    private var hardBlockKind: GroqLimitKind = GroqLimitKind.NONE
+
+    @Volatile
+    private var persistCallback: ((Long, String) -> Unit)? = null
+
+    fun bindPersistence(
+        initialUntilMs: Long,
+        initialKindRaw: String,
+        onPersist: (untilMs: Long, kind: String) -> Unit
+    ) {
+        persistCallback = onPersist
+        val now = System.currentTimeMillis()
+        if (initialUntilMs > now) {
+            val parsedKind = runCatching { GroqLimitKind.valueOf(initialKindRaw) }.getOrDefault(GroqLimitKind.DAILY)
+            hardBlockUntilMs = initialUntilMs
+            hardBlockKind = parsedKind
+            _ui.value = GroqUi.HardBlocked(parsedKind, initialUntilMs)
+        } else {
+            hardBlockUntilMs = 0L
+            hardBlockKind = GroqLimitKind.NONE
+            if (_ui.value is GroqUi.HardBlocked) {
+                _ui.value = GroqUi.Ready
+            }
+        }
+    }
+
+    fun bucket(model: String): GroqModelBucket? = buckets[model]
+
+    fun currentHardBlock(nowMs: Long = System.currentTimeMillis()): Pair<GroqLimitKind, Long>? {
+        val until = hardBlockUntilMs
+        if (until > nowMs) {
+            val kind = if (hardBlockKind == GroqLimitKind.CREDITS) GroqLimitKind.CREDITS else GroqLimitKind.DAILY
+            return kind to until
+        }
+        if (until > 0L) {
+            hardBlockUntilMs = 0L
+            hardBlockKind = GroqLimitKind.NONE
+            persistCallback?.invoke(0L, "")
+            if (_ui.value is GroqUi.HardBlocked) {
+                _ui.value = GroqUi.Ready
+            }
+        }
+        return null
+    }
+
+    fun record(model: String, headerFields: Map<String?, List<String>>?) {
+        val now = System.currentTimeMillis()
+        val b = GroqCodec.readBucket(headerFields, now) ?: return
+        buckets[model] = b
+        when {
+            b.remainingRequests == 0L && (b.limitRequests == null || b.limitRequests > 0L) -> {
+                val resetAt = if (b.resetRequestsAtMs > now) b.resetRequestsAtMs else (now + 3_600_000L)
+                hardBlock(GroqLimitKind.DAILY, resetAt)
+            }
+            b.remainingTokens == 0L && b.resetTokensAtMs > now -> {
+                cooling(b.resetTokensAtMs)
+            }
+        }
+    }
+
+    fun hardBlock(kind: GroqLimitKind, untilMs: Long) {
+        val safeKind = if (kind == GroqLimitKind.CREDITS) GroqLimitKind.CREDITS else GroqLimitKind.DAILY
+        hardBlockUntilMs = untilMs
+        hardBlockKind = safeKind
+        persistCallback?.invoke(untilMs, safeKind.name)
+        _ui.value = GroqUi.HardBlocked(safeKind, untilMs)
+    }
+
+    fun cooling(untilMs: Long) {
+        if (currentHardBlock() != null) return
+        _ui.value = GroqUi.Cooling(untilMs)
+    }
+
+    fun markReadyIfNotHardBlocked() {
+        val now = System.currentTimeMillis()
+        if (hardBlockUntilMs <= now) {
+            val current = _ui.value
+            if (current is GroqUi.Cooling && current.untilMs > now) {
+                return
+            }
+            _ui.value = GroqUi.Ready
+        }
+    }
+
+    fun reset() {
+        buckets.clear()
+        hardBlockUntilMs = 0L
+        hardBlockKind = GroqLimitKind.NONE
+        persistCallback?.invoke(0L, "")
+        _ui.value = GroqUi.Ready
+    }
+}
+
 object GroqClient {
 
-    private const val COOLDOWN_MS = 3 * 60_000L
     private const val MODELS_CACHE_TTL_MS = 5 * 60_000L
-    private const val SMALL_HTML_FULL_REWRITE_BYTES = 12 * 1024
+    private const val MAX_INLINE_WAIT_MS = 12_000L
 
     private data class CachedModels(
         val ids: Set<String>,
         val fetchedAtMs: Long
     )
 
-    private val modelCooldownUntilMs = ConcurrentHashMap<String, Long>()
     private val latestQuotaByKey = ConcurrentHashMap<String, GroqQuotaReport>()
     private val availableModelsByKey = ConcurrentHashMap<String, CachedModels>()
 
@@ -89,24 +205,6 @@ object GroqClient {
         "editorial terracotta archive",
         "warm ochre darkroom"
     )
-
-    fun activeCooledModels(nowMs: Long = System.currentTimeMillis()): Set<String> {
-        val expired = mutableListOf<String>()
-        val active = HashSet<String>()
-        for ((model, until) in modelCooldownUntilMs) {
-            if (until > nowMs) {
-                active.add(model)
-            } else {
-                expired.add(model)
-            }
-        }
-        expired.forEach { modelCooldownUntilMs.remove(it) }
-        return active
-    }
-
-    fun clearModelCooldowns() {
-        modelCooldownUntilMs.clear()
-    }
 
     fun getLatestQuota(apiKey: String): GroqQuotaReport? {
         val clean = GroqCodec.normalizeApiKey(apiKey)
@@ -140,6 +238,13 @@ object GroqClient {
                 val stream = if (code in 200..299) conn.inputStream else conn.errorStream
                 val body = stream?.bufferedReader(Charsets.UTF_8)?.use { it.readText() }.orEmpty()
                 if (code !in 200..299) {
+                    val lowerHeaders = GroqCodec.headerFieldsToLowerMap(conn.headerFields)
+                    val lim = GroqCodec.classifyLimit(code, body, lowerHeaders)
+                    if (lim.kind == GroqLimitKind.CREDITS || lim.kind == GroqLimitKind.DAILY) {
+                        val until = System.currentTimeMillis() + ((lim.waitSec ?: 3600.0) * 1000.0).toLong().coerceAtLeast(60_000L)
+                        GroqLimiter.hardBlock(lim.kind, until)
+                        throw GroqHardLimitException(kind = lim.kind, resetAtMs = until, quota = quota)
+                    }
                     val err = GroqCodec.extractErrorDetail(body, code)
                     throw GroqApiException(code, err.message, err.code, err.type, quota)
                 }
@@ -211,7 +316,7 @@ object GroqClient {
                 return@withContext Result.failure(IllegalStateException("Paste your Groq API key (gsk_...) first."))
             }
 
-            clearModelCooldowns()
+            GroqLimiter.reset()
             val t0 = System.currentTimeMillis()
             val modelsCount = verifyModelsEndpoint(cleanKey).getOrElse { err ->
                 throw err
@@ -452,50 +557,77 @@ object GroqClient {
     suspend fun reviewContactSheet(
         apiKey: String,
         samples: List<KeyframeSample>,
-        flaggedFrameFiles: List<Pair<KeyframeSample, File>>,
-        htmlCode: String,
         durationSec: Double,
-        validationError: String = "",
+        htmlHash: Int = 0,
         modelPref: String = GroqCodec.PREF_AUTO
     ): Result<SheetReviewResult> = withContext(Dispatchers.IO) {
         try {
-            val (plan, _) = runStage1Inspector(
-                apiKey = apiKey,
-                samples = samples,
-                flaggedFrameFiles = flaggedFrameFiles,
-                htmlCode = htmlCode,
-                durationSec = durationSec,
-                validationError = validationError,
-                modelPref = modelPref
+            val bundle = KeyframeSheetGenerator.buildReviewCollageBundle(samples, durationSec)
+            if (bundle.jpegBytes.isEmpty() || bundle.pickedSamples.isEmpty()) {
+                return@withContext Result.failure(IllegalStateException("No keyframe thumbnails available to inspect."))
+            }
+            val flagsText = if (bundle.flagLines.isEmpty()) {
+                "None"
+            } else {
+                bundle.flagLines.joinToString("\n")
+            }
+            val userPrompt = (
+                "DURATION: ${String.format(Locale.US, "%.1f", durationSec)}s\n" +
+                    "FLAGS (f|t|selector|x,y,wxh|issue):\n$flagsText"
+                ).take(1500)
+            val estTokens = GroqCodec.guardTokens(
+                images = 1,
+                REVIEW_SYSTEM,
+                userPrompt,
+                maxCompletion = 700
             )
-            val issues = plan.rootCauses.map { rc ->
-                val primaryT = rc.timesSec.firstOrNull()
-                val matchedSample = if (primaryT != null && samples.isNotEmpty()) {
-                    samples.minByOrNull { kotlin.math.abs(it.timeSec - primaryT) }
-                } else null
-                val frameTag = matchedSample?.let { "#${it.index + 1}" } ?: rc.id
-                val timeTag = if (rc.timesSec.isNotEmpty()) {
-                    rc.timesSec.joinToString(", ") { String.format(Locale.US, "t=%.2fs", it) }
-                } else {
-                    matchedSample?.let { String.format(Locale.US, "t=%.2fs", it.timeSec) }.orEmpty()
-                }
-                SheetIssue(
-                    frame = frameTag,
-                    time = timeTag,
-                    problem = "[${rc.type}] ${rc.element}: ${rc.evidence}".trim(),
-                    fix = rc.fix
+            val b64 = Base64.encodeToString(bundle.jpegBytes, Base64.NO_WRAP)
+            val res = callChatWithFallback(
+                apiKey = apiKey,
+                modelPref = modelPref,
+                prompt = userPrompt,
+                images = listOf(GroqImageInput(base64Data = b64, mimeType = "image/jpeg")),
+                requiresVision = true,
+                heavyTask = false,
+                systemInstruction = REVIEW_SYSTEM,
+                jsonObjectMode = true,
+                maxCompletionTokens = 700,
+                temperature = 0.1,
+                reasoningEffortOverride = "none",
+                estimatedTokens = estTokens
+            )
+            val parsed = GroqCodec.parseReviewJson(res.text, htmlHash)
+            if (parsed.parseFailed) {
+                return@withContext Result.success(
+                    SheetReviewResult(
+                        summary = "Unreadable review response — try again",
+                        issues = emptyList(),
+                        cachedReview = null
+                    )
                 )
             }
-            val summary = when {
-                plan.needsFull -> "Broad issue (${plan.reason.ifBlank { "structural fix needed" }}); found ${issues.size} root cause(s)."
-                issues.isEmpty() -> "Groq Vision checked ${flaggedFrameFiles.size} key frame(s): layout and readability look clean."
-                else -> "Found ${issues.size} root cause(s) across ${plan.edits.size} targeted patch(es)."
+            val mappedIssues = parsed.issues.map { issue ->
+                val picked = bundle.pickedSamples.getOrNull(
+                    (issue.f - 1).coerceIn(0, (bundle.pickedSamples.size - 1).coerceAtLeast(0))
+                )
+                SheetIssue(
+                    frame = picked?.let { "#${it.index + 1}" } ?: "F${issue.f}",
+                    time = picked?.let { String.format(Locale.US, "t=%.2fs", it.timeSec) }.orEmpty(),
+                    problem = "[${issue.type}] ${issue.where}".trim(),
+                    fix = issue.fix,
+                    sampleIndex = picked?.index ?: -1
+                )
+            }
+            val summary = if (mappedIssues.isEmpty()) {
+                "Groq Vision checked ${bundle.pickedSamples.size}-frame collage: layout and contrast look clean."
+            } else {
+                "Found ${mappedIssues.size} visual issue(s) across ${bundle.pickedSamples.size}-frame collage."
             }
             Result.success(
                 SheetReviewResult(
                     summary = summary,
-                    issues = issues,
-                    rootCauses = plan.rootCauses
+                    issues = mappedIssues,
+                    cachedReview = parsed
                 )
             )
         } catch (ce: CancellationException) {
@@ -508,177 +640,224 @@ object GroqClient {
     suspend fun autoFixHtmlTwoStage(
         apiKey: String,
         samples: List<KeyframeSample>,
-        flaggedFrameFiles: List<Pair<KeyframeSample, File>>,
         htmlCode: String,
         durationSec: Double,
         validationError: String = "",
         modelPref: String = GroqCodec.PREF_AUTO,
+        lastReview: GroqReviewResult? = null,
         validator: suspend (String) -> CodeValidationResult
     ): Result<GroqAutoFixOutcome> = withContext(Dispatchers.IO) {
         val originalHtml = htmlCode
         try {
             val cleanKey = GroqCodec.normalizeApiKey(apiKey)
+            val hash = originalHtml.hashCode()
+            val now = System.currentTimeMillis()
+            val domBundle = KeyframeSheetGenerator.extractDomFlagBundle(samples)
 
-            // === STAGE 1: INSPECTOR (Vision + Excerpt -> Root Causes + Targeted Edits JSON) ===
-            val (stage1Plan, stage1Res) = runStage1Inspector(
-                apiKey = cleanKey,
-                samples = samples,
-                flaggedFrameFiles = flaggedFrameFiles,
-                htmlCode = originalHtml,
-                durationSec = durationSec,
-                validationError = validationError,
-                modelPref = modelPref
-            )
+            var review = lastReview?.takeIf {
+                !it.parseFailed && it.htmlHash == hash && (now - it.atMs) < 15 * 60_000L
+            }
+            if (review == null && domBundle.flagLines.isEmpty()) {
+                val freshReview = reviewContactSheet(
+                    apiKey = cleanKey,
+                    samples = samples,
+                    durationSec = durationSec,
+                    htmlHash = hash,
+                    modelPref = modelPref
+                ).getOrElse { err -> throw err }
+                review = freshReview.cachedReview
+            }
 
-            var workingHtml = originalHtml
-            var lastModelUsed = stage1Res.modelUsed
-            var lastQuota = stage1Res.quota
-            var totalEditsApplied = 0
-            var repairRoundsUsed = 0
-
-            val initialApply = GroqCodec.applyExactOnceEdits(workingHtml, stage1Plan.edits)
-            workingHtml = initialApply.updatedHtml
-            totalEditsApplied += initialApply.appliedCount
-            var pendingFailedEdits = initialApply.failedEdits
-
-            if (stage1Plan.needsFull && stage1Plan.edits.isEmpty() &&
-                originalHtml.toByteArray(Charsets.UTF_8).size > SMALL_HTML_FULL_REWRITE_BYTES
+            if ((review?.ok == true && review.issues.isEmpty()) &&
+                domBundle.flagLines.isEmpty() &&
+                validationError.isBlank()
             ) {
-                return@withContext Result.failure(
-                    IllegalStateException(
-                        "Structural rewrite needed (${stage1Plan.reason.ifBlank { "too broad for patch" }}). Copy Prompt B for Cloud AI Full Mode."
+                return@withContext Result.success(
+                    GroqAutoFixOutcome(
+                        status = GroqAutoFixStatus.NOTHING_TO_FIX,
+                        fixedHtml = originalHtml,
+                        validation = null,
+                        failureSummary = "No visual or DOM issues found."
                     )
                 )
             }
 
-            if (totalEditsApplied == 0 && pendingFailedEdits.isEmpty() && stage1Plan.rootCauses.isEmpty()) {
-                return@withContext Result.failure(
-                    IllegalStateException("Groq Inspector found no broken elements or patches to apply.")
-                )
-            }
-
-            var currentValidation: CodeValidationResult? = if (totalEditsApplied > 0) {
-                validator(workingHtml)
-            } else null
-
-            var needsRepair = pendingFailedEdits.isNotEmpty() ||
-                totalEditsApplied == 0 ||
-                currentValidation == null ||
-                !currentValidation.isValid ||
-                !currentValidation.warning.isNullOrBlank()
-
-            // === STAGE 2: PATCH REPAIR (max 2 rounds, text-only JSON + +-40 line windows) ===
-            for (round in 1..2) {
-                if (!needsRepair) break
-                repairRoundsUsed = round
-
-                val failedText = buildFailedEditsText(
-                    failedEdits = pendingFailedEdits,
-                    validation = currentValidation,
-                    rootCauses = stage1Plan.rootCauses,
-                    noEditsAtAll = stage1Plan.edits.isEmpty()
-                )
-                val targetHtmlForWindows = if (currentValidation != null && !currentValidation.isValid && totalEditsApplied > 0) {
-                    // If applied patches caused a syntax error, show broken workingHtml windows so model can fix or see context
-                    workingHtml
-                } else {
-                    workingHtml
+            val findings = buildString {
+                if (validationError.isNotBlank()) {
+                    append("ERR|").append(validationError.trim()).append('\n')
                 }
-                val windowsText = GroqCodec.buildRepairWindows(
-                    fullHtml = targetHtmlForWindows,
-                    failedEdits = pendingFailedEdits,
-                    errorMessage = currentValidation?.summaryMessage.orEmpty(),
-                    radiusLines = 40,
-                    maxChars = 13_000
-                )
-                val remainingIssues = buildRemainingIssuesText(
-                    validation = currentValidation,
-                    rootCauses = stage1Plan.rootCauses,
-                    fallbackReason = stage1Plan.reason
-                )
+                review?.issues?.forEach { issue ->
+                    append("R|f").append(issue.f)
+                        .append('|').append(issue.type)
+                        .append('|').append(issue.where)
+                        .append('|').append(issue.sev)
+                        .append('|').append(issue.fix)
+                        .append('\n')
+                }
+                if (domBundle.flagLines.isNotEmpty()) {
+                    append("DOM (f|t|selector|x,y,wxh|issue):\n")
+                    append(domBundle.flagLines.joinToString("\n"))
+                }
+            }.trim().take(2600)
 
-                val stage2User = """
-                    FAILED: $failedText
-                    WINDOWS (plus or minus 40 lines around each target):
-                    $windowsText
-                    REMAINING ISSUES: $remainingIssues
-                """.trimIndent()
+            val issueTokens = review?.issues?.flatMap { issue ->
+                Regex("[A-Za-z0-9_#.-]{3,}").findAll("${issue.where} ${issue.fix}")
+                    .map { it.value }
+                    .toList()
+            }.orEmpty()
+            val errTokens = Regex("[A-Za-z0-9_#.-]{4,}").findAll(validationError)
+                .map { it.value }
+                .take(6)
+                .toList()
+            val excerptTokens = (domBundle.flagTokens + issueTokens + errTokens).distinct()
+            val excerpt = GroqCodec.buildCleanExcerpt(
+                html = originalHtml,
+                tokens = excerptTokens,
+                maxChars = 6000,
+                radius = 10
+            )
+            val durStr = String.format(Locale.US, "%.1f", durationSec)
+            val userPrompt = "DURATION: $durStr\nFINDINGS:\n$findings\nEXCERPT:\n$excerpt"
+            val est1 = GroqCodec.guardTokens(
+                images = 0,
+                PROMPT_C1_SYSTEM,
+                userPrompt,
+                maxCompletion = 1400
+            )
 
-                val stage2Res = callChatWithFallback(
+            val planRes = callChatWithFallback(
+                apiKey = cleanKey,
+                modelPref = modelPref,
+                prompt = userPrompt,
+                images = emptyList(),
+                requiresVision = false,
+                heavyTask = true,
+                systemInstruction = PROMPT_C1_SYSTEM,
+                jsonObjectMode = true,
+                maxCompletionTokens = 1400,
+                temperature = 0.1,
+                reasoningEffortOverride = "low",
+                estimatedTokens = est1
+            )
+            var lastModelUsed = planRes.modelUsed
+            var lastQuota = planRes.quota
+            val plan = GroqCodec.parseLeanPlanJson(planRes.text)
+
+            var applyOutcome = GroqCodec.applyEditsValidated(originalHtml, plan.edits) { candidate ->
+                validator(candidate).isValid
+            }
+            var totalApplied = applyOutcome.appliedCount
+            var repairRoundsUsed = 0
+
+            if (applyOutcome.failedEdits.isNotEmpty() && applyOutcome.appliedCount < plan.edits.size) {
+                repairRoundsUsed = 1
+                val failedTokens = applyOutcome.failedEdits.map { it.edit.find.take(40) }
+                val windows = GroqCodec.buildCleanExcerpt(
+                    html = applyOutcome.updatedHtml,
+                    tokens = failedTokens,
+                    maxChars = 2500,
+                    radius = 6
+                )
+                val failedText = applyOutcome.failedEdits.joinToString("\n") { fe ->
+                    "${fe.edit.rc}|${fe.reason}|find=${fe.edit.find.take(120)}|replace=${fe.edit.replace.take(160)}"
+                }.take(1000)
+                val repairPrompt = "FAILED:\n$failedText\nWINDOWS:\n$windows"
+                val est2 = GroqCodec.guardTokens(
+                    images = 0,
+                    PROMPT_C2_SYSTEM,
+                    repairPrompt,
+                    maxCompletion = 900
+                )
+                val repairRes = callChatWithFallback(
                     apiKey = cleanKey,
                     modelPref = modelPref,
-                    prompt = stage2User,
+                    prompt = repairPrompt,
+                    images = emptyList(),
                     requiresVision = false,
                     heavyTask = true,
                     systemInstruction = PROMPT_C2_SYSTEM,
                     jsonObjectMode = true,
-                    maxCompletionTokens = 6_144,
-                    temperature = 0.1
+                    maxCompletionTokens = 900,
+                    temperature = 0.0,
+                    reasoningEffortOverride = "low",
+                    estimatedTokens = est2
                 )
-                lastModelUsed = stage2Res.modelUsed
-                if (stage2Res.quota != null) lastQuota = stage2Res.quota
+                lastModelUsed = repairRes.modelUsed
+                if (repairRes.quota != null) lastQuota = repairRes.quota
+                val repairEdits = GroqCodec.parseLeanPlanJson(repairRes.text).edits
+                val secondPass = GroqCodec.applyEditsValidated(applyOutcome.updatedHtml, repairEdits) { candidate ->
+                    validator(candidate).isValid
+                }
+                totalApplied += secondPass.appliedCount
+                applyOutcome = secondPass
+            }
 
-                val (repairEdits, repairFullHtml) = GroqCodec.parseStage2Repair(stage2Res.text)
-
-                if (!repairFullHtml.isNullOrBlank() &&
-                    workingHtml.toByteArray(Charsets.UTF_8).size <= SMALL_HTML_FULL_REWRITE_BYTES
-                ) {
-                    val fullVal = validator(repairFullHtml)
-                    if (fullVal.isValid && fullVal.warning.isNullOrBlank()) {
-                        return@withContext Result.success(
-                            GroqAutoFixOutcome(
-                                fixedHtml = fullVal.cleanedHtml,
-                                validation = fullVal,
-                                rootCauses = stage1Plan.rootCauses,
-                                editsApplied = maxOf(1, totalEditsApplied),
-                                repairRoundsUsed = repairRoundsUsed,
-                                modelUsed = lastModelUsed,
-                                quota = lastQuota ?: getLatestQuota(cleanKey)
-                            )
-                        )
+            if (totalApplied > 0) {
+                val finalVal = validator(applyOutcome.updatedHtml)
+                val isDeterminismBroken = finalVal.warning?.contains("alter", ignoreCase = true) == true
+                if (!finalVal.isValid || isDeterminismBroken) {
+                    val rollbackReason = if (isDeterminismBroken) {
+                        "Rolled back: patched seek(t) failed determinism check (${finalVal.warning})."
                     } else {
-                        currentValidation = fullVal
-                        pendingFailedEdits = emptyList()
-                        continue
+                        "Rolled back: ${finalVal.summaryMessage}"
                     }
+                    return@withContext Result.success(
+                        GroqAutoFixOutcome(
+                            status = GroqAutoFixStatus.NOTHING_MATCHED,
+                            fixedHtml = originalHtml,
+                            validation = null,
+                            editsApplied = 0,
+                            failedCount = applyOutcome.failedEdits.size + 1,
+                            skippedCount = plan.skippedCount,
+                            failureSummary = rollbackReason,
+                            repairRoundsUsed = repairRoundsUsed,
+                            modelUsed = lastModelUsed,
+                            quota = lastQuota ?: getLatestQuota(cleanKey)
+                        )
+                    )
                 }
-
-                val repairOutcome = GroqCodec.applyExactOnceEdits(workingHtml, repairEdits)
-                workingHtml = repairOutcome.updatedHtml
-                totalEditsApplied += repairOutcome.appliedCount
-                pendingFailedEdits = repairOutcome.failedEdits
-
-                currentValidation = if (totalEditsApplied > 0) {
-                    validator(workingHtml)
-                } else null
-
-                needsRepair = pendingFailedEdits.isNotEmpty() ||
-                    totalEditsApplied == 0 ||
-                    currentValidation == null ||
-                    !currentValidation.isValid ||
-                    !currentValidation.warning.isNullOrBlank()
+                val failNote = applyOutcome.failedEdits.joinToString(", ") { "${it.edit.rc}:${it.reason}" }
+                return@withContext Result.success(
+                    GroqAutoFixOutcome(
+                        status = GroqAutoFixStatus.APPLIED,
+                        fixedHtml = finalVal.cleanedHtml,
+                        validation = finalVal,
+                        editsApplied = totalApplied,
+                        failedCount = applyOutcome.failedEdits.size,
+                        skippedCount = plan.skippedCount,
+                        failureSummary = failNote,
+                        repairRoundsUsed = repairRoundsUsed,
+                        modelUsed = lastModelUsed,
+                        quota = lastQuota ?: getLatestQuota(cleanKey)
+                    )
+                )
             }
 
-            // === SNAPSHOT VERIFY & ROLLBACK ON FAILURE ===
-            val finalVal = currentValidation
-            val isDeterminismBroken = finalVal?.warning?.contains("alter", ignoreCase = true) == true
-            if (totalEditsApplied == 0 || finalVal == null || !finalVal.isValid || isDeterminismBroken) {
-                // Guaranteed rollback: never return corrupted HTML; caller keeps originalHtml untouched.
-                val reason = when {
-                    isDeterminismBroken -> "Rolled back: patched seek(t) failed determinism check (${finalVal?.warning})."
-                    finalVal != null && !finalVal.isValid -> "Rolled back: ${finalVal.summaryMessage}"
-                    pendingFailedEdits.isNotEmpty() -> "Rolled back: could not match ${pendingFailedEdits.size} patch target(s) uniquely."
-                    else -> "Rolled back: no valid patches could be applied safely."
-                }
-                return@withContext Result.failure(IllegalStateException(reason))
+            if (plan.structural) {
+                return@withContext Result.success(
+                    GroqAutoFixOutcome(
+                        status = GroqAutoFixStatus.STRUCTURAL,
+                        fixedHtml = originalHtml,
+                        validation = null,
+                        skippedCount = plan.skippedCount,
+                        failureSummary = "Needs structural changes. Use the copyable Cloud AI fix prompt.",
+                        repairRoundsUsed = repairRoundsUsed,
+                        modelUsed = lastModelUsed,
+                        quota = lastQuota ?: getLatestQuota(cleanKey)
+                    )
+                )
             }
 
+            val reasons = applyOutcome.failedEdits.joinToString("; ") { "${it.edit.rc}: ${it.reason}" }
+                .ifBlank { "No matching code fragments found." }
             Result.success(
                 GroqAutoFixOutcome(
-                    fixedHtml = finalVal.cleanedHtml,
-                    validation = finalVal,
-                    rootCauses = stage1Plan.rootCauses,
-                    editsApplied = totalEditsApplied,
+                    status = GroqAutoFixStatus.NOTHING_MATCHED,
+                    fixedHtml = originalHtml,
+                    validation = null,
+                    failedCount = applyOutcome.failedEdits.size,
+                    skippedCount = plan.skippedCount,
+                    failureSummary = reasons,
                     repairRoundsUsed = repairRoundsUsed,
                     modelUsed = lastModelUsed,
                     quota = lastQuota ?: getLatestQuota(cleanKey)
@@ -691,133 +870,67 @@ object GroqClient {
         }
     }
 
-    private suspend fun runStage1Inspector(
-        apiKey: String,
-        samples: List<KeyframeSample>,
-        flaggedFrameFiles: List<Pair<KeyframeSample, File>>,
-        htmlCode: String,
-        durationSec: Double,
-        validationError: String,
-        modelPref: String
-    ): Pair<GroqStage1Plan, GroqCompletionResult> {
-        val boundedFrames = flaggedFrameFiles.take(GroqCodec.MAX_IMAGES_PER_REQUEST)
-        val encodedImages = boundedFrames.mapNotNull { (_, file) ->
-            if (!file.exists()) return@mapNotNull null
-            val (b64, mime) = encodeFileForVision(file, maxDim = 960)
-            GroqImageInput(base64Data = b64, mimeType = mime)
+    private suspend fun groqCall(
+        model: String,
+        estimatedTokens: Int,
+        post: suspend () -> Triple<Int, String, Map<String?, List<String>>?>
+    ): Pair<String, GroqQuotaReport?> {
+        GroqLimiter.currentHardBlock()?.let { (kind, until) ->
+            throw GroqHardLimitException(kind = kind, resetAtMs = until)
         }
-
-        val flaggedSamples = samples.filter { it.warnings.isNotEmpty() || it.autoFitCount > 0 }
-        val flaggedTimes = (boundedFrames.map { it.first.timeSec } + flaggedSamples.map { it.timeSec })
-            .distinct()
-            .take(16)
-
-        val domFlagsBlock = buildString {
-            if (flaggedSamples.isEmpty()) {
-                append("None flagged by DOM check")
-            } else {
-                flaggedSamples.take(24).forEach { s ->
-                    val ts = String.format(Locale.US, "%.2fs", s.timeSec)
-                    val issueParts = (s.warnings + s.autoFitNotes).joinToString("; ").ifBlank { "auto-fit triggered" }
-                    appendLine("- t=$ts (${s.sceneLabel.ifBlank { "scene" }}): $issueParts")
+        GroqLimiter.bucket(model)?.let { b ->
+            val now = System.currentTimeMillis()
+            if (b.remainingTokens != null && b.remainingTokens < estimatedTokens && b.resetTokensAtMs > now) {
+                val waitMs = b.resetTokensAtMs - now
+                GroqLimiter.cooling(b.resetTokensAtMs)
+                if (waitMs <= MAX_INLINE_WAIT_MS) {
+                    delay(waitMs + 250L)
+                } else {
+                    throw GroqCooldownException(((waitMs / 1000L).toInt() + 1).coerceAtLeast(1))
                 }
             }
-        }.trim()
-
-        val framesSummaryBlock = if (boundedFrames.isEmpty()) {
-            "No frame images attached"
-        } else {
-            boundedFrames.mapIndexed { idx, (s, _) ->
-                val tag = when {
-                    s.warnings.isNotEmpty() -> "WARN"
-                    s.autoFitCount > 0 -> "FIT"
-                    else -> "SAMPLE"
+        }
+        var attempt = 0
+        while (true) {
+            currentCoroutineContext().ensureActive()
+            val (status, body, rawHeaders) = post()
+            GroqLimiter.record(model, rawHeaders)
+            val quota = GroqCodec.parseQuotaHeaders(rawHeaders, status)
+            if (status in 200..299) {
+                GroqLimiter.markReadyIfNotHardBlocked()
+                return body to quota
+            }
+            val lowerHeaders = GroqCodec.headerFieldsToLowerMap(rawHeaders)
+            val lim = GroqCodec.classifyLimit(status, body, lowerHeaders)
+            when (lim.kind) {
+                GroqLimitKind.CREDITS, GroqLimitKind.DAILY -> {
+                    val until = System.currentTimeMillis() + ((lim.waitSec ?: 3600.0) * 1000.0).toLong().coerceAtLeast(60_000L)
+                    GroqLimiter.hardBlock(lim.kind, until)
+                    throw GroqHardLimitException(kind = lim.kind, resetAtMs = until, quota = quota)
                 }
-                val ts = String.format(Locale.US, "%.2fs", s.timeSec)
-                "Image ${idx + 1}: Frame #${s.index + 1} t=$ts ${s.sceneLabel} [$tag]"
-            }.joinToString(" | ")
+                GroqLimitKind.COOLDOWN -> {
+                    val waitMs = ((lim.waitSec ?: 20.0) * 1000.0).toLong().coerceAtLeast(1_000L)
+                    GroqLimiter.cooling(System.currentTimeMillis() + waitMs)
+                    if (attempt == 0 && waitMs <= MAX_INLINE_WAIT_MS) {
+                        attempt++
+                        delay(waitMs + 250L)
+                        continue
+                    }
+                    throw GroqCooldownException(((waitMs / 1000L).toInt() + 1).coerceAtLeast(1))
+                }
+                GroqLimitKind.NONE -> {
+                    val parsed = GroqCodec.extractErrorDetail(body, status)
+                    throw GroqApiException(
+                        httpCode = status,
+                        message = parsed.message,
+                        errorCode = parsed.code,
+                        errorType = parsed.type,
+                        quota = quota,
+                        headers = lowerHeaders
+                    )
+                }
+            }
         }
-
-        val hints = mutableListOf<String>()
-        if (validationError.isNotBlank()) hints.add(validationError)
-        flaggedSamples.take(12).forEach { s ->
-            hints.addAll(s.warnings)
-            hints.addAll(s.autoFitNotes)
-        }
-
-        val excerpt = GroqCodec.buildHtmlExcerpt(
-            fullHtml = htmlCode,
-            flaggedTimesSec = flaggedTimes,
-            extraHints = hints,
-            maxChars = 14_000
-        )
-
-        val errBlock = validationError.ifBlank { "None" }
-        val durStr = String.format(Locale.US, "%.2f", durationSec)
-
-        val userPrompt = """
-            DURATION: $durStr
-            ERRORS: $errBlock
-            DOM FLAGS (t, element, rect, issue):
-            $domFlagsBlock
-            FLAGGED FRAMES: $framesSummaryBlock (images attached)
-            EXCERPT (line-numbered; only the scene data, CSS and functions referenced by the flags):
-            $excerpt
-        """.trimIndent()
-
-        val res = callChatWithFallback(
-            apiKey = apiKey,
-            modelPref = modelPref,
-            prompt = userPrompt,
-            images = encodedImages,
-            requiresVision = encodedImages.isNotEmpty(),
-            heavyTask = true,
-            systemInstruction = PROMPT_C1_SYSTEM,
-            jsonObjectMode = true,
-            maxCompletionTokens = 4_096,
-            temperature = 0.15
-        )
-        val plan = GroqCodec.parseStage1Plan(res.text)
-        return plan to res
-    }
-
-    private fun buildFailedEditsText(
-        failedEdits: List<GroqFailedEdit>,
-        validation: CodeValidationResult?,
-        rootCauses: List<GroqRootCause>,
-        noEditsAtAll: Boolean
-    ): String {
-        val parts = mutableListOf<String>()
-        if (noEditsAtAll && rootCauses.isNotEmpty()) {
-            parts.add("Stage 1 produced 0 edits despite ${rootCauses.size} root cause(s): " + rootCauses.joinToString("; ") { "${it.id}(${it.element}): ${it.fix}" })
-        }
-        failedEdits.forEach { fe ->
-            parts.add("rc=${fe.edit.rc.ifBlank { "?" }} (${fe.reason}): find=${fe.edit.find.take(160)}")
-        }
-        if (validation != null && !validation.isValid) {
-            parts.add("CodeValidator: ${validation.summaryMessage}")
-        }
-        if (validation != null && !validation.warning.isNullOrBlank()) {
-            parts.add("CodeValidator warning: ${validation.warning}")
-        }
-        return parts.joinToString("\n").ifBlank { "Validation incomplete after initial edits." }
-    }
-
-    private fun buildRemainingIssuesText(
-        validation: CodeValidationResult?,
-        rootCauses: List<GroqRootCause>,
-        fallbackReason: String
-    ): String {
-        val parts = mutableListOf<String>()
-        if (validation != null) {
-            parts.add(validation.summaryMessage)
-            validation.warning?.takeIf { it.isNotBlank() }?.let { parts.add(it) }
-        }
-        if (rootCauses.isNotEmpty()) {
-            parts.add("Root causes: " + rootCauses.joinToString("; ") { "${it.id} [${it.type}] ${it.element}: ${it.evidence}" })
-        }
-        if (fallbackReason.isNotBlank()) parts.add("Note: $fallbackReason")
-        return parts.joinToString(" | ").ifBlank { "Ensure exact-once unique patch targets and valid deterministic HTML." }
     }
 
     private suspend fun callChatWithFallback(
@@ -830,11 +943,17 @@ object GroqClient {
         systemInstruction: String? = null,
         jsonObjectMode: Boolean = false,
         maxCompletionTokens: Int? = null,
-        temperature: Double = 0.2
+        temperature: Double = 0.2,
+        reasoningEffortOverride: String? = null,
+        estimatedTokens: Int? = null
     ): GroqCompletionResult {
         val cleanKey = GroqCodec.normalizeApiKey(apiKey)
         if (cleanKey.isEmpty()) {
             throw IllegalStateException("Please add your Groq API key first.")
+        }
+
+        GroqLimiter.currentHardBlock()?.let { (kind, until) ->
+            throw GroqHardLimitException(kind = kind, resetAtMs = until)
         }
 
         val liveAvailable = resolveAvailableChatModels(cleanKey)
@@ -842,7 +961,6 @@ object GroqClient {
             modelPref = modelPref,
             requiresVision = requiresVision,
             heavyTask = heavyTask,
-            cooledDownModels = activeCooledModels(),
             availableModels = liveAvailable
         )
         val attemptedModels = mutableListOf<String>()
@@ -852,6 +970,13 @@ object GroqClient {
         var lastRawMessage = ""
         var lastQuota: GroqQuotaReport? = null
         var lastCause: Throwable? = null
+
+        val estTok = estimatedTokens ?: (
+            images.size * GroqCodec.IMAGE_TOKENS +
+                GroqCodec.estTokens(systemInstruction.orEmpty()) +
+                GroqCodec.estTokens(prompt) +
+                (maxCompletionTokens ?: 512)
+            )
 
         for ((index, model) in candidates.withIndex()) {
             currentCoroutineContext().ensureActive()
@@ -865,24 +990,33 @@ object GroqClient {
             }
 
             try {
-                val (text, quota) = callSingleChatCompletion(
-                    cleanKey = cleanKey,
-                    model = model,
-                    prompt = prompt,
-                    images = if (requiresVision) images else emptyList(),
-                    systemInstruction = systemInstruction,
-                    jsonObjectMode = jsonObjectMode,
-                    maxCompletionTokens = maxCompletionTokens,
-                    temperature = temperature,
-                    heavyTask = heavyTask,
-                    connectTimeoutMs = connectTimeoutMs,
-                    readTimeoutMs = readTimeoutMs
-                )
-                modelCooldownUntilMs.remove(model)
+                val (rawBody, quota) = groqCall(model, estTok) {
+                    postSingleChatCompletion(
+                        cleanKey = cleanKey,
+                        model = model,
+                        prompt = prompt,
+                        images = if (requiresVision) images else emptyList(),
+                        systemInstruction = systemInstruction,
+                        jsonObjectMode = jsonObjectMode,
+                        maxCompletionTokens = maxCompletionTokens,
+                        temperature = temperature,
+                        heavyTask = heavyTask,
+                        reasoningEffortOverride = reasoningEffortOverride,
+                        connectTimeoutMs = connectTimeoutMs,
+                        readTimeoutMs = readTimeoutMs
+                    )
+                }
                 recordQuota(cleanKey, quota)
+                val text = GroqCodec.extractResponseText(rawBody, quota, modelId = model)
                 return GroqCompletionResult(text = text, modelUsed = model, quota = quota)
             } catch (ce: CancellationException) {
                 throw ce
+            } catch (cool: GroqCooldownException) {
+                throw cool
+            } catch (hard: GroqHardLimitException) {
+                throw hard
+            } catch (tooBig: GroqPromptTooLargeException) {
+                throw tooBig
             } catch (t: UnknownHostException) {
                 throw IllegalStateException(
                     "Cannot reach api.groq.com (DNS lookup failed). Check internet connection or VPN/Private DNS and retry.",
@@ -919,16 +1053,11 @@ object GroqClient {
                 lastRawMessage = rawMsg
 
                 if (category == GroqFailureCategory.QUOTA_OR_CREDITS_EXHAUSTED) {
-                    throw GroqQuotaExhaustedException(
-                        GroqCodec.buildFriendlyErrorMessage(
-                            lastCategory = category,
-                            lastRawMessage = rawMsg,
-                            attemptedModels = attemptedModels,
-                            sawAnyHttpResponse = sawAnyHttpResponse,
-                            quota = lastQuota,
-                            modelErrors = modelErrors
-                        ),
-                        httpCode = httpCode ?: 429,
+                    val resetAt = System.currentTimeMillis() + 3_600_000L
+                    GroqLimiter.hardBlock(GroqLimitKind.DAILY, resetAt)
+                    throw GroqHardLimitException(
+                        kind = GroqLimitKind.DAILY,
+                        resetAtMs = resetAt,
                         quota = lastQuota
                     )
                 }
@@ -947,8 +1076,6 @@ object GroqClient {
                     )
                 }
 
-                modelCooldownUntilMs[model] = System.currentTimeMillis() + COOLDOWN_MS
-
                 if (index < candidates.lastIndex) {
                     delay(Random.nextLong(220L, 450L))
                 }
@@ -966,7 +1093,7 @@ object GroqClient {
         throw IllegalStateException(friendly, lastCause)
     }
 
-    private fun callSingleChatCompletion(
+    private fun postSingleChatCompletion(
         cleanKey: String,
         model: String,
         prompt: String,
@@ -976,9 +1103,10 @@ object GroqClient {
         maxCompletionTokens: Int?,
         temperature: Double,
         heavyTask: Boolean,
+        reasoningEffortOverride: String?,
         connectTimeoutMs: Int,
         readTimeoutMs: Int
-    ): Pair<String, GroqQuotaReport?> {
+    ): Triple<Int, String, Map<String?, List<String>>?> {
         val payload = GroqCodec.buildChatCompletionJson(
             prompt = prompt,
             images = images,
@@ -987,7 +1115,8 @@ object GroqClient {
             jsonObjectMode = jsonObjectMode,
             maxCompletionTokens = maxCompletionTokens,
             temperature = temperature,
-            heavyTask = heavyTask
+            heavyTask = heavyTask,
+            reasoningEffortOverride = reasoningEffortOverride
         )
 
         val endpoint = URL(GroqCodec.CHAT_COMPLETIONS_URL)
@@ -1006,22 +1135,10 @@ object GroqClient {
             conn.outputStream.use { os -> os.write(bytes) }
 
             val code = conn.responseCode
-            val quota = GroqCodec.parseQuotaHeaders(conn.headerFields, code)
+            val headers = conn.headerFields
             val stream = if (code in 200..299) conn.inputStream else conn.errorStream
             val body = stream?.bufferedReader(Charsets.UTF_8)?.use { it.readText() }.orEmpty()
-
-            if (code !in 200..299) {
-                val parsed = GroqCodec.extractErrorDetail(body, code)
-                throw GroqApiException(
-                    httpCode = code,
-                    message = parsed.message,
-                    errorCode = parsed.code,
-                    errorType = parsed.type,
-                    quota = quota
-                )
-            }
-
-            return GroqCodec.extractResponseText(body, quota, modelId = model) to quota
+            return Triple(code, body, headers)
         } finally {
             conn.disconnect()
         }
@@ -1063,21 +1180,25 @@ object GroqClient {
         return Base64.encodeToString(baos.toByteArray(), Base64.NO_WRAP) to "image/jpeg"
     }
 
-    private const val PROMPT_C1_SYSTEM = """You are a QA inspector for deterministic 1920x1080 HTML reels rendered frame by frame. Reply with ONE JSON object only. No prose, no markdown.
+    private const val REVIEW_SYSTEM = """You review frames of a 1920x1080 explainer reel. The image is a 2x2 collage of 4 frames, each labeled "#n t=seconds FLAG" in a strip below it. Frames are at 1/3 scale. Cyan dashed line = safe bottom (nothing may cross it; the progress bar sits below). Red boxes = flagged elements.
+Report ONLY defects you can see or that the flag list states: clip (text/element cut at an edge), overlap (text or cards colliding), bar (content below the cyan line), blank (empty/black frame), contrast (low-contrast text or icon), broken (missing image).
+Reply with ONE JSON object, no prose:
+{"ok":false,"issues":[{"f":1,"type":"clip|overlap|bar|blank|contrast|broken","where":"max 8 words","sev":"high|med|low","fix":"max 12 words"}]}
+Max 6 issues. Omit clean frames. If everything is fine: {"ok":true,"issues":[]}."""
 
-Renderer rules: everything is a pure function of t inside RAW.seek(t). Forbidden: CSS transition/@keyframes/animation, rAF, setTimeout, setInterval, Date.now, performance.now, Math.random, video.play(), external URLs, innerHTML or append inside seek. Safe area: x 120..1800, y 70..930. Columns: left x 140..1040, right x 1160..1760. Card brackets extend 34 px outside the card. The last scene must be inclusive of t = duration. Engine types: ghost, kicker, sub, pill, headline, chips, card, row, phone, buttons, comment, round.
+    private const val PROMPT_C1_SYSTEM = """You patch a deterministic 1920x1080 HTML reel (everything is a pure function of t inside RAW.seek(t)).
+Rules of the renderer: safe area x120..1800, y70..930 (progress bar below 930). Columns: left x140..1040, right x1160..1760, full x140..1780. Card brackets extend 34px outside the card. Font size = floor(min(max, W/(chars*k))), k: Bebas/Anton/Oswald .45, Poppins/Montserrat/Inter/Space Grotesk .62 (.66 at 800-900), Playfair .58, JetBrains Mono .60. The last scene must use t<=end so t=duration is not blank.
+FORBIDDEN in any replacement: CSS transition/@keyframes/animation, requestAnimationFrame, setTimeout, setInterval, Date.now, performance.now, Math.random, video.play(), external URLs, innerHTML/append inside seek.
+Input: findings (what is wrong, with rects) and EXCERPT windows (verbatim code, no line numbers; "@@ window @@" separates windows).
+Reply with ONE JSON object, no prose:
+{"edits":[{"i":1,"find":"...","replace":"..."}],"skipped":[{"t":12.5,"why":"max 10 words"}],"structural":false}
+Edit rules:
+- `find` = ONE line fragment (no newline), 12-160 chars, copied EXACTLY from the excerpt, distinctive enough to appear once (include the selector or property name).
+- `replace` keeps the surrounding syntax valid. Change numbers, widths, positions or comparison operators. Fix a shared class once instead of many scenes.
+- Use real numbers from the rects, never guesses. Max 8 edits.
+- If the defect needs new elements, a new renderer, or seek() rewrites: "structural":true and no edits for it."""
 
-Output schema:
-{"rootCauses":[{"id":"R1","type":"overflow|collision|contrast|blank|runtime|determinism|forbidden|asset|sync","t":[seconds],"el":"scene id or selector","evidence":"max 20 words","fix":"max 20 words"}],
- "edits":[{"rc":"R1","find":"verbatim substring from EXCERPT, max 300 chars, unique","replace":"new text"}],
- "needsFull":false,"reason":""}
-
-Rules: max 12 edits. Prefer fixing a shared cause once. Never edit working scenes. `find` must be copied exactly from the excerpt without line numbers. Use measured numbers from the excerpt, not guesses. If edits cannot fix it, set needsFull true and give a one-line reason."""
-
-    private const val PROMPT_C2_SYSTEM = """You repair failed patches for a deterministic 1920x1080 reel. Reply with ONE JSON object only.
-
-Schema: {"edits":[{"rc":"R1","find":"verbatim, unique","replace":"..."}]}
-Or, only if the whole HTML is under 12 KB and no patch can work: {"html":"<!DOCTYPE html>..."}
-
-Rules: copy `find` exactly from the WINDOWS below without line numbers (whitespace included); make each one unique by adding neighbouring text. Keep every replacement minimal. Do not introduce any forbidden API, external URL or non-bundled font. Do not touch anything not named in FAILED."""
+    private const val PROMPT_C2_SYSTEM = """You fix failed patches for a deterministic 1920x1080 reel. Reply with ONE JSON object only: {"edits":[{"i":1,"find":"...","replace":"..."}]}.
+Each failed edit has a reason: not_found (text differs from the file), ambiguous(n) (matches n places), forbidden, breaks_validation.
+`find` must be ONE line fragment copied exactly from WINDOWS, unique (add neighbouring text on the same line). Keep the same intent. Never use transition, @keyframes, rAF, setTimeout, setInterval, Date.now, Math.random, external URLs. Do not touch anything not named in FAILED."""
 }

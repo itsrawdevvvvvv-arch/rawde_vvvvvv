@@ -45,7 +45,9 @@ import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import com.rawedit.app.domain.GroqClient
 import com.rawedit.app.domain.GroqCodec
-import com.rawedit.app.domain.GroqQuotaExhaustedException
+import com.rawedit.app.domain.GroqCooldownException
+import com.rawedit.app.domain.GroqHardLimitException
+import com.rawedit.app.domain.GroqLimiter
 import com.rawedit.app.domain.GroqQuotaReport
 import com.rawedit.app.ui.components.BigPrimaryButton
 import com.rawedit.app.ui.components.CircleActionButton
@@ -115,11 +117,14 @@ fun GroqKeyDialog(
                 }
             }.onFailure { err ->
                 isStatusError = true
-                if (err is GroqQuotaExhaustedException && err.quota != null) {
+                if (err is GroqHardLimitException && err.quota != null) {
                     liveQuota = err.quota
                     onSaveKeySession(targetKey, selectedPref, err.quota)
                 }
-                statusMessage = err.message ?: "Could not check Groq quota."
+                statusMessage = when (err) {
+                    is GroqCooldownException -> "Rate window cooling \u2014 retry in ${err.waitSec}s"
+                    else -> err.message ?: "Could not check Groq quota."
+                }
             }
         }
     }
@@ -139,6 +144,7 @@ fun GroqKeyDialog(
             val res = GroqClient.testConnectionDetailed(normalized, selectedPref)
             testing = false
             res.onSuccess { info ->
+                GroqLimiter.reset()
                 val quota = info.quota ?: GroqClient.getLatestQuota(normalized)
                 liveQuota = quota
                 onSaveKeySession(normalized, selectedPref, quota)
@@ -148,10 +154,13 @@ fun GroqKeyDialog(
                 statusMessage = "Connected in ${info.latencyMs}ms (${info.modelUsed}$fallbackNote, ${info.availableModelsCount} models)$quotaNote"
             }.onFailure { err ->
                 isStatusError = true
-                if (err is GroqQuotaExhaustedException && err.quota != null) {
+                if (err is GroqHardLimitException && err.quota != null) {
                     liveQuota = err.quota
                 }
-                statusMessage = err.message ?: "Connection failed."
+                statusMessage = when (err) {
+                    is GroqCooldownException -> "Rate window cooling \u2014 retry in ${err.waitSec}s"
+                    else -> err.message ?: "Connection failed."
+                }
             }
         }
     }
@@ -492,7 +501,10 @@ fun GroqKeyDialog(
                         text = "Clear key",
                         height = 46.dp,
                         enabled = !testing,
-                        onClick = onClearKey,
+                        onClick = {
+                            GroqLimiter.reset()
+                            onClearKey()
+                        },
                         modifier = Modifier.weight(1f)
                     )
                 }

@@ -7,9 +7,11 @@ import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.graphics.Canvas
 import android.graphics.Color
+import android.graphics.DashPathEffect
 import android.graphics.Matrix
 import android.graphics.Paint
 import android.graphics.PixelFormat
+import android.graphics.Rect
 import android.graphics.RectF
 import android.graphics.Typeface
 import android.graphics.pdf.PdfDocument
@@ -25,15 +27,11 @@ import android.view.ViewGroup
 import android.view.WindowManager
 import android.webkit.WebView
 import android.widget.FrameLayout
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.width
 import com.rawedit.app.data.CacheManager
 import com.rawedit.app.render.LocalAssetServer
-import kotlinx.coroutines.CompletableDeferred
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.delay
-import kotlinx.coroutines.withContext
-import kotlinx.coroutines.withTimeoutOrNull
-import kotlinx.serialization.Serializable
-import kotlinx.serialization.json.Json
+import java.io.ByteArrayOutputStream
 import java.io.File
 import java.io.FileOutputStream
 import java.util.Locale
@@ -41,6 +39,13 @@ import java.util.zip.ZipEntry
 import java.util.zip.ZipOutputStream
 import kotlin.math.abs
 import kotlin.math.roundToInt
+import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeoutOrNull
+import kotlinx.serialization.Serializable
+import kotlinx.serialization.json.Json
 
 enum class SheetSamplingMode(val label: String, val stepSec: Double, val maxFrames: Int) {
     STANDARD_05S("Every 0.5s", 0.5, 220),
@@ -79,6 +84,26 @@ data class KeyframeSheetResult(
     val totalAutoFits: Int,
     val warningCount: Int,
     val elapsedMs: Long
+)
+
+data class ReviewCollageFrame(
+    val bitmap: Bitmap,
+    val t: Double,
+    val badge: String,
+    val rects: List<RectF>
+)
+
+data class ReviewCollageBundle(
+    val jpegBytes: ByteArray,
+    val pickedSamples: List<KeyframeSample>,
+    val flagLines: List<String>,
+    val flagTokens: List<String>
+)
+
+data class DomFlagBundle(
+    val flagLines: List<String>,
+    val flagTokens: List<String>,
+    val rectsBySampleIndex: Map<Int, List<RectF>>
 )
 
 object KeyframeSheetGenerator {
@@ -351,6 +376,255 @@ $htmlSection
             out.add(sample to file)
         }
         out
+    }
+
+    private val FLAG_DESCRIBE_REGEX = Regex("""([A-Za-z0-9_#.\-]+)@\[(-?\d+),(-?\d+),(\d+)x(\d+)\]""")
+    private val QUOTED_SNIPPET_REGEX = Regex("\"([^\"]{3,24})\"")
+
+    private fun parseDomFlagDetails(raw: String, isWarning: Boolean): Triple<String, RectF?, String> {
+        val m = FLAG_DESCRIBE_REGEX.find(raw)
+        val selector = m?.groupValues?.getOrNull(1)?.trim().orEmpty()
+        val rect = if (m != null) {
+            val x = m.groupValues[2].toFloatOrNull() ?: 0f
+            val y = m.groupValues[3].toFloatOrNull() ?: 0f
+            val w = m.groupValues[4].toFloatOrNull() ?: 0f
+            val h = m.groupValues[5].toFloatOrNull() ?: 0f
+            if (w > 0f && h > 0f) RectF(x, y, x + w, y + h) else null
+        } else null
+
+        val lower = raw.lowercase(Locale.US)
+        val issueTag = when {
+            lower.contains("edge clip") -> "edge-clip"
+            lower.contains("overlap") -> "overlap"
+            lower.contains("resized") -> "auto-resize"
+            lower.contains("wrapped") -> "auto-wrap"
+            lower.contains("progress bar") || lower.contains("lifted") || lower.contains("raised") -> "above-bar"
+            isWarning -> "warn"
+            else -> "auto-fit"
+        }
+        return Triple(selector, rect, issueTag)
+    }
+
+    fun pickCollageFrames(
+        samples: List<KeyframeSample>,
+        durationSec: Double
+    ): List<KeyframeSample> {
+        if (samples.isEmpty()) return emptyList()
+        val picked = mutableListOf<KeyframeSample>()
+        fun tooClose(candidate: KeyframeSample): Boolean =
+            picked.any { abs(it.timeSec - candidate.timeSec) < 1.0 }
+
+        val warningsFirst = samples
+            .filter { it.warnings.isNotEmpty() }
+            .sortedWith(compareByDescending<KeyframeSample> { it.warnings.size }.thenByDescending { it.autoFitCount }.thenBy { it.timeSec })
+        for (s in warningsFirst) {
+            if (picked.size >= 4) break
+            if (!tooClose(s)) picked.add(s)
+        }
+
+        val fitsNext = samples
+            .filter { it.warnings.isEmpty() && it.autoFitCount > 0 }
+            .sortedWith(compareByDescending<KeyframeSample> { it.autoFitCount }.thenBy { it.timeSec })
+        for (s in fitsNext) {
+            if (picked.size >= 4) break
+            if (!tooClose(s)) picked.add(s)
+        }
+
+        if (picked.size < 4) {
+            val anchorTargets = mutableListOf<KeyframeSample>()
+            samples.firstOrNull()?.let { anchorTargets.add(it) }
+            val tailTarget = (durationSec - 0.04).coerceAtLeast(0.0)
+            samples.minByOrNull { abs(it.timeSec - tailTarget) }?.let { anchorTargets.add(it) }
+            for (a in anchorTargets) {
+                if (picked.size >= 4) break
+                if (picked.none { it.index == a.index } && !tooClose(a)) {
+                    picked.add(a)
+                }
+            }
+        }
+
+        if (picked.size < 4) {
+            val slots = listOf(0.25, 0.50, 0.75, 0.12, 0.88)
+            for (frac in slots) {
+                if (picked.size >= 4) break
+                val idx = (frac * samples.lastIndex).roundToInt().coerceIn(0, samples.lastIndex)
+                val s = samples[idx]
+                if (picked.none { it.index == s.index } && !tooClose(s)) {
+                    picked.add(s)
+                }
+            }
+        }
+
+        if (picked.size < 4) {
+            for (s in samples) {
+                if (picked.size >= 4) break
+                if (picked.none { it.index == s.index }) picked.add(s)
+            }
+        }
+
+        return picked.take(4).sortedBy { it.timeSec }
+    }
+
+    fun extractDomFlagBundle(
+        samples: List<KeyframeSample>,
+        collageSamples: List<KeyframeSample> = emptyList()
+    ): DomFlagBundle {
+        val rectsMap = LinkedHashMap<Int, List<RectF>>()
+        val lines = mutableListOf<String>()
+        val tokens = LinkedHashSet<String>()
+
+        fun addTokensFrom(raw: String, selector: String, timeSec: Double) {
+            if (selector.isNotBlank()) {
+                val idIdx = selector.indexOf('#')
+                val dotIdx = selector.indexOf('.')
+                if (idIdx >= 0) {
+                    val endIdx = if (dotIdx > idIdx) dotIdx else selector.length
+                    val idTok = selector.substring(idIdx, endIdx).trim()
+                    if (idTok.length >= 2) tokens.add(idTok.removePrefix("#"))
+                }
+                if (dotIdx >= 0) {
+                    selector.substring(dotIdx).split('.').filter { it.length >= 3 }.forEach { tokens.add(it) }
+                }
+            }
+            QUOTED_SNIPPET_REGEX.find(raw)?.groupValues?.getOrNull(1)?.trim()?.takeIf { it.length >= 3 }?.let { snippet ->
+                tokens.add(snippet)
+            }
+            val tInt = timeSec.roundToInt()
+            tokens.add("start: $tInt")
+            tokens.add("start:$tInt")
+        }
+
+        val collageIdxBySampleIdx = collageSamples.mapIndexed { pos, s -> s.index to (pos + 1) }.toMap()
+        val orderedFlagged = (collageSamples.filter { it.warnings.isNotEmpty() || it.autoFitCount > 0 } +
+            samples.filter { (it.warnings.isNotEmpty() || it.autoFitCount > 0) && it.index !in collageIdxBySampleIdx })
+            .distinctBy { it.index }
+
+        for (s in orderedFlagged) {
+            val sampleRects = mutableListOf<RectF>()
+            val framePos = collageIdxBySampleIdx[s.index] ?: (s.index + 1)
+            val entries = s.warnings.map { it to true } + s.autoFitNotes.map { it to false }
+            for ((msg, isWarn) in entries) {
+                val (sel, rect, issueTag) = parseDomFlagDetails(msg, isWarn)
+                if (rect != null) sampleRects.add(rect)
+                addTokensFrom(msg, sel, s.timeSec)
+                val rectStr = if (rect != null) {
+                    "${rect.left.roundToInt()},${rect.top.roundToInt()},${rect.width().roundToInt()}x${rect.height().roundToInt()}"
+                } else {
+                    "0,0,0x0"
+                }
+                val ts = String.format(Locale.US, "%.2f", s.timeSec)
+                val line = "$framePos|$ts|${sel.ifBlank { "stage" }}|$rectStr|$issueTag"
+                if (line !in lines) lines.add(line)
+            }
+            if (sampleRects.isNotEmpty()) {
+                rectsMap[s.index] = sampleRects
+            }
+        }
+
+        return DomFlagBundle(
+            flagLines = lines.take(24),
+            flagTokens = tokens.take(28),
+            rectsBySampleIndex = rectsMap
+        )
+    }
+
+    fun buildReviewCollage(frames: List<ReviewCollageFrame>): ByteArray {
+        val totalW = 1280
+        val totalH = 760
+        val cw = 640
+        val ch = 380
+        val fh = 360
+        val out = Bitmap.createBitmap(totalW, totalH, Bitmap.Config.ARGB_8888)
+        val c = Canvas(out)
+        c.drawColor(Color.BLACK)
+
+        val txt = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            color = Color.WHITE
+            textSize = 15f
+            typeface = Typeface.create(Typeface.MONOSPACE, Typeface.BOLD)
+        }
+        val fill = Paint()
+        val imgPaint = Paint(Paint.FILTER_BITMAP_FLAG)
+        val red = Paint().apply {
+            color = 0xFFE5484D.toInt()
+            style = Paint.Style.STROKE
+            strokeWidth = 2f
+        }
+        val cyan = Paint().apply {
+            color = 0xFF00E5FF.toInt()
+            strokeWidth = 1.5f
+            pathEffect = DashPathEffect(floatArrayOf(8f, 6f), 0f)
+        }
+
+        frames.take(4).forEachIndexed { i, f ->
+            val ox = (i % 2) * cw
+            val oy = (i / 2) * ch
+            val srcH = minOf(f.bitmap.height, (f.bitmap.width * 9) / 16).coerceAtLeast(1)
+            c.drawBitmap(
+                f.bitmap,
+                Rect(0, 0, f.bitmap.width, srcH),
+                Rect(ox, oy, ox + cw, oy + fh),
+                imgPaint
+            )
+            c.drawLine(ox.toFloat(), oy + 310f, (ox + cw).toFloat(), oy + 310f, cyan)
+            f.rects.forEach { r ->
+                c.drawRect(ox + r.left / 3f, oy + r.top / 3f, ox + r.right / 3f, oy + r.bottom / 3f, red)
+            }
+
+            fill.color = 0xFF111111.toInt()
+            c.drawRect(ox.toFloat(), (oy + fh).toFloat(), (ox + cw).toFloat(), (oy + ch).toFloat(), fill)
+            val labelText = "#${i + 1}  t=${String.format(Locale.US, "%.2f", f.t)}s"
+            c.drawText(labelText, ox + 8f, oy + fh + 15f, txt)
+
+            fill.color = when (f.badge) {
+                "WARN" -> 0xFFE5484D.toInt()
+                "FIT" -> 0xFFF5A524.toInt()
+                else -> 0xFF2E9E5B.toInt()
+            }
+            c.drawRect(ox + cw - 70f, (oy + fh + 2).toFloat(), ox + cw - 6f, (oy + ch - 2).toFloat(), fill)
+            c.drawText(f.badge, ox + cw - 62f, oy + fh + 15f, txt)
+        }
+
+        fill.color = Color.WHITE
+        c.drawRect(cw - 1f, 0f, cw + 1f, totalH.toFloat(), fill)
+        c.drawRect(0f, ch - 1f, totalW.toFloat(), ch + 1f, fill)
+
+        val baos = ByteArrayOutputStream()
+        out.compress(Bitmap.CompressFormat.JPEG, 80, baos)
+        out.recycle()
+        return baos.toByteArray()
+    }
+
+    suspend fun buildReviewCollageBundle(
+        samples: List<KeyframeSample>,
+        durationSec: Double
+    ): ReviewCollageBundle = withContext(Dispatchers.IO) {
+        val picked = pickCollageFrames(samples, durationSec)
+        val domBundle = extractDomFlagBundle(samples, picked)
+        val collageFrames = mutableListOf<ReviewCollageFrame>()
+        val bitmapsToRecycle = mutableListOf<Bitmap>()
+        try {
+            for (s in picked) {
+                val bmp = runCatching { BitmapFactory.decodeFile(s.thumbPath) }.getOrNull() ?: continue
+                bitmapsToRecycle.add(bmp)
+                val badge = when {
+                    s.warnings.isNotEmpty() -> "WARN"
+                    s.autoFitCount > 0 -> "FIT"
+                    else -> "OK"
+                }
+                val rects = domBundle.rectsBySampleIndex[s.index].orEmpty()
+                collageFrames.add(ReviewCollageFrame(bitmap = bmp, t = s.timeSec, badge = badge, rects = rects))
+            }
+            val jpegBytes = if (collageFrames.isNotEmpty()) buildReviewCollage(collageFrames) else ByteArray(0)
+            ReviewCollageBundle(
+                jpegBytes = jpegBytes,
+                pickedSamples = picked,
+                flagLines = domBundle.flagLines,
+                flagTokens = domBundle.flagTokens
+            )
+        } finally {
+            bitmapsToRecycle.forEach { if (!it.isRecycled) it.recycle() }
+        }
     }
 
     suspend fun captureKeyframes(

@@ -31,7 +31,8 @@ import com.rawedit.app.data.local.UserProfile
 import com.rawedit.app.data.repository.RawEditRepository
 import com.rawedit.app.domain.GroqClient
 import com.rawedit.app.domain.GroqCodec
-import com.rawedit.app.domain.GroqQuotaExhaustedException
+import com.rawedit.app.domain.GroqHardLimitException
+import com.rawedit.app.domain.GroqLimiter
 import com.rawedit.app.domain.PaletteJsonCodec
 import com.rawedit.app.domain.PaletteState
 import com.rawedit.app.ui.components.MainTab
@@ -179,6 +180,15 @@ private fun MainAuthenticatedHost(
     var hostToastMsg by remember { mutableStateOf<String?>(null) }
     val currentRoute = backStack.last()
 
+    LaunchedEffect(Unit) {
+        val (untilMs, kindRaw) = container.userPreferences.clearLegacyGroqQuotaFlagOnce()
+        GroqLimiter.bindPersistence(initialUntilMs = untilMs, initialKindRaw = kindRaw) { newUntil, newKind ->
+            scope.launch {
+                container.userPreferences.setGroqHardBlock(newUntil, newKind)
+            }
+        }
+    }
+
     fun openGroqDialog(switchMode: Boolean) {
         groqDialogSwitchMode = switchMode
         showGroqKeyDialog = true
@@ -206,21 +216,13 @@ private fun MainAuthenticatedHost(
                     }
                 }
             }.onFailure { err ->
-                if (err is GroqQuotaExhaustedException) {
-                    container.userPreferences.markGroqQuotaExhausted(err.quota)
+                if (err is GroqHardLimitException && err.quota != null) {
+                    container.userPreferences.saveGroqQuota(err.quota)
                 }
                 if (!silent) {
                     hostToastMsg = err.message ?: "Could not refresh Groq quota"
                 }
             }
-        }
-    }
-
-    fun markQuotaExhausted() {
-        scope.launch {
-            val latest = GroqClient.getLatestQuota(userProfile.groqApiKey)
-            container.userPreferences.markGroqQuotaExhausted(latest)
-            hostToastMsg = "Groq quota exhausted \u2014 switch API key"
         }
     }
 
@@ -290,9 +292,9 @@ private fun MainAuthenticatedHost(
                             refreshGroqQuota(silent = true)
                             hostToastMsg = "Saved & described ${imp.relativePath}"
                         }.onFailure { err ->
-                            if (err is GroqQuotaExhaustedException) {
-                                container.userPreferences.markGroqQuotaExhausted(err.quota)
-                                hostToastMsg = "Saved ${imp.relativePath} (Groq quota exhausted)"
+                            if (err is GroqHardLimitException) {
+                                err.quota?.let { container.userPreferences.saveGroqQuota(it) }
+                                hostToastMsg = "Saved ${imp.relativePath} (Groq limit reached)"
                             } else {
                                 hostToastMsg = "Saved ${imp.relativePath}"
                             }
@@ -388,8 +390,7 @@ private fun MainAuthenticatedHost(
                                     },
                                     onOpenGroqKey = { openGroqDialog(switchMode = false) },
                                     onSwitchGroqKey = { openGroqDialog(switchMode = true) },
-                                    onRefreshGroqQuota = { refreshGroqQuota(silent = true) },
-                                    onMarkQuotaExhausted = { markQuotaExhausted() }
+                                    onRefreshGroqQuota = { refreshGroqQuota(silent = true) }
                                 )
 
                                 MainTab.CREATE -> Unit
@@ -537,9 +538,9 @@ private fun MainAuthenticatedHost(
                                                     refreshGroqQuota(silent = true)
                                                     hostToastMsg = "Added & described ${imp.relativePath}"
                                                 }.onFailure { err ->
-                                                    if (err is GroqQuotaExhaustedException) {
-                                                        container.userPreferences.markGroqQuotaExhausted(err.quota)
-                                                        hostToastMsg = "Added ${imp.relativePath} (Groq quota exhausted)"
+                                                    if (err is GroqHardLimitException) {
+                                                        err.quota?.let { container.userPreferences.saveGroqQuota(it) }
+                                                        hostToastMsg = "Added ${imp.relativePath} (Groq limit reached)"
                                                     } else {
                                                         hostToastMsg = "Added ${imp.relativePath} (Groq note skipped)"
                                                     }
@@ -574,8 +575,7 @@ private fun MainAuthenticatedHost(
                             },
                             onOpenGroqKey = { openGroqDialog(switchMode = false) },
                             onSwitchGroqKey = { openGroqDialog(switchMode = true) },
-                            onRefreshGroqQuota = { refreshGroqQuota(silent = true) },
-                            onMarkQuotaExhausted = { markQuotaExhausted() }
+                            onRefreshGroqQuota = { refreshGroqQuota(silent = true) }
                         )
                     }
                 }
@@ -591,8 +591,7 @@ private fun MainAuthenticatedHost(
                         },
                         onOpenGroqKey = { openGroqDialog(switchMode = false) },
                         onSwitchGroqKey = { openGroqDialog(switchMode = true) },
-                        onRefreshGroqQuota = { refreshGroqQuota(silent = true) },
-                        onMarkQuotaExhausted = { markQuotaExhausted() }
+                        onRefreshGroqQuota = { refreshGroqQuota(silent = true) }
                     )
                 }
 
@@ -683,7 +682,6 @@ private fun MainAuthenticatedHost(
                             onOpenGroqKey = { openGroqDialog(switchMode = false) },
                             onSwitchGroqKey = { openGroqDialog(switchMode = true) },
                             onRefreshGroqQuota = { refreshGroqQuota(silent = true) },
-                            onMarkQuotaExhausted = { markQuotaExhausted() },
                             onRenderNow = {
                                 isForward = true
                                 backStack = backStack.dropLast(1) + AppRoute.Rendering(proj.id)
@@ -773,6 +771,7 @@ private fun MainAuthenticatedHost(
             startInSwitchMode = groqDialogSwitchMode,
             onSaveKeySession = { apiKey, modelPref, quota ->
                 scope.launch {
+                    GroqLimiter.reset()
                     container.userPreferences.saveGroqSession(
                         apiKey = apiKey,
                         modelPref = modelPref,
@@ -790,6 +789,7 @@ private fun MainAuthenticatedHost(
             },
             onClearKey = {
                 scope.launch {
+                    GroqLimiter.reset()
                     container.userPreferences.clearGroqSession()
                     showGroqKeyDialog = false
                     hostToastMsg = "Groq API key cleared"

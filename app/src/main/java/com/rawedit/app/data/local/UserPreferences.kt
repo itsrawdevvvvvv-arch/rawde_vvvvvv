@@ -10,6 +10,7 @@ import androidx.datastore.preferences.core.longPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
 import com.rawedit.app.domain.GroqCodec
+import com.rawedit.app.domain.GroqLimitKind
 import com.rawedit.app.domain.GroqQuotaReport
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map
@@ -29,7 +30,8 @@ data class UserProfile(
     val groqRemainingTokens: Int = -1,
     val groqLimitTokens: Int = -1,
     val groqResetTokens: String = "",
-    val groqQuotaExhausted: Boolean = false,
+    val groqHardBlockUntilMs: Long = 0L,
+    val groqHardBlockKind: String = "",
     val groqQuotaUpdatedAtMs: Long = 0L,
     val paletteCounter: Int = 1,
     val paletteJson: String = ""
@@ -37,12 +39,19 @@ data class UserProfile(
     val hasGroqKey: Boolean
         get() = groqApiKey.isNotBlank()
 
-    fun toGroqQuotaReportOrNull(): GroqQuotaReport? {
+    fun isHardBlocked(nowMs: Long = System.currentTimeMillis()): Boolean =
+        groqHardBlockUntilMs > nowMs
+
+    val groqQuotaExhausted: Boolean
+        get() = isHardBlocked()
+
+    fun toGroqQuotaReportOrNull(nowMs: Long = System.currentTimeMillis()): GroqQuotaReport? {
+        val blocked = isHardBlocked(nowMs)
         val hasValues = groqRemainingRequests >= 0 ||
             groqLimitRequests > 0 ||
             groqRemainingTokens >= 0 ||
             groqLimitTokens > 0 ||
-            groqQuotaExhausted
+            blocked
         if (groqQuotaUpdatedAtMs <= 0L && !hasValues) return null
         return GroqQuotaReport(
             remainingRequests = groqRemainingRequests,
@@ -51,20 +60,27 @@ data class UserProfile(
             remainingTokens = groqRemainingTokens,
             limitTokens = groqLimitTokens,
             resetTokens = groqResetTokens,
-            creditsDepleted402 = groqQuotaExhausted && groqRemainingRequests != 0 && groqRemainingTokens != 0,
+            creditsDepleted402 = blocked && groqHardBlockKind == GroqLimitKind.CREDITS.name,
             updatedAtMs = groqQuotaUpdatedAtMs
         )
     }
 
-    fun quotaSummaryText(): String {
+    fun quotaSummaryText(nowMs: Long = System.currentTimeMillis()): String {
         if (!hasGroqKey) return "Add Groq key"
-        if (groqQuotaExhausted) return "Quota 0 \u2022 Switch"
+        if (isHardBlocked(nowMs)) {
+            return if (groqHardBlockKind == GroqLimitKind.CREDITS.name) {
+                "Credits out \u2022 Switch"
+            } else {
+                val left = GroqCodec.formatDurationShort(groqHardBlockUntilMs - nowMs)
+                "Daily limit \u2022 $left"
+            }
+        }
         return GroqCodec.formatQuotaBannerLabel(
             remainingRequests = groqRemainingRequests,
             limitRequests = groqLimitRequests,
             remainingTokens = groqRemainingTokens,
             limitTokens = groqLimitTokens,
-            exhausted = groqQuotaExhausted
+            exhausted = false
         )
     }
 }
@@ -84,13 +100,18 @@ class UserPreferences(private val context: Context) {
         val GROQ_REM_TOK = intPreferencesKey("groq_rem_tok")
         val GROQ_LIM_TOK = intPreferencesKey("groq_lim_tok")
         val GROQ_RST_TOK = stringPreferencesKey("groq_rst_tok")
-        val GROQ_QUOTA_EXHAUSTED = booleanPreferencesKey("groq_quota_exhausted")
+        val LEGACY_GROQ_QUOTA_EXHAUSTED = booleanPreferencesKey("groq_quota_exhausted")
+        val GROQ_HARD_BLOCK_UNTIL = longPreferencesKey("groq_hard_block_until")
+        val GROQ_HARD_BLOCK_KIND = stringPreferencesKey("groq_hard_block_kind")
+        val GROQ_LIMIT_V2_MIGRATED = booleanPreferencesKey("groq_limit_v2_migrated")
         val GROQ_QUOTA_UPDATED_AT = longPreferencesKey("groq_quota_updated_at")
         val PALETTE_COUNTER = intPreferencesKey("palette_counter")
         val PALETTE_JSON = stringPreferencesKey("palette_json")
     }
 
     val userProfile: Flow<UserProfile> = context.dataStore.data.map { prefs ->
+        val rawBlockUntil = prefs[Keys.GROQ_HARD_BLOCK_UNTIL] ?: 0L
+        val activeBlockUntil = if (rawBlockUntil > System.currentTimeMillis()) rawBlockUntil else 0L
         UserProfile(
             userName = prefs[Keys.USER_NAME] ?: "",
             profilePhotoPath = prefs[Keys.PHOTO_PATH]?.takeIf { it.isNotBlank() },
@@ -104,7 +125,8 @@ class UserPreferences(private val context: Context) {
             groqRemainingTokens = prefs[Keys.GROQ_REM_TOK] ?: -1,
             groqLimitTokens = prefs[Keys.GROQ_LIM_TOK] ?: -1,
             groqResetTokens = prefs[Keys.GROQ_RST_TOK] ?: "",
-            groqQuotaExhausted = prefs[Keys.GROQ_QUOTA_EXHAUSTED] ?: false,
+            groqHardBlockUntilMs = activeBlockUntil,
+            groqHardBlockKind = if (activeBlockUntil > 0L) (prefs[Keys.GROQ_HARD_BLOCK_KIND] ?: GroqLimitKind.DAILY.name) else "",
             groqQuotaUpdatedAtMs = prefs[Keys.GROQ_QUOTA_UPDATED_AT] ?: 0L,
             paletteCounter = (prefs[Keys.PALETTE_COUNTER] ?: 1).coerceAtLeast(1),
             paletteJson = prefs[Keys.PALETTE_JSON] ?: ""
@@ -159,10 +181,12 @@ class UserPreferences(private val context: Context) {
                 clearGroqKeysFromPrefs(prefs)
             } else {
                 prefs[Keys.GROQ_API_KEY] = cleanedKey
+                prefs.remove(Keys.LEGACY_GROQ_QUOTA_EXHAUSTED)
                 if (quota != null) {
                     writeQuotaToPrefs(prefs, quota)
                 } else {
-                    prefs[Keys.GROQ_QUOTA_EXHAUSTED] = false
+                    prefs[Keys.GROQ_HARD_BLOCK_UNTIL] = 0L
+                    prefs.remove(Keys.GROQ_HARD_BLOCK_KIND)
                 }
             }
             prefs[Keys.GROQ_MODEL_PREF] = normalizedPref
@@ -181,14 +205,38 @@ class UserPreferences(private val context: Context) {
         }
     }
 
-    suspend fun markGroqQuotaExhausted(quota: GroqQuotaReport? = null) {
+    suspend fun setGroqHardBlock(untilMs: Long, kind: String = GroqLimitKind.DAILY.name) {
         context.dataStore.edit { prefs ->
-            if (quota != null) {
-                writeQuotaToPrefs(prefs, quota)
+            prefs.remove(Keys.LEGACY_GROQ_QUOTA_EXHAUSTED)
+            prefs[Keys.GROQ_HARD_BLOCK_UNTIL] = untilMs.coerceAtLeast(0L)
+            if (untilMs > 0L) {
+                prefs[Keys.GROQ_HARD_BLOCK_KIND] = kind
+                prefs[Keys.GROQ_QUOTA_UPDATED_AT] = System.currentTimeMillis()
+            } else {
+                prefs.remove(Keys.GROQ_HARD_BLOCK_KIND)
             }
-            prefs[Keys.GROQ_QUOTA_EXHAUSTED] = true
-            prefs[Keys.GROQ_QUOTA_UPDATED_AT] = System.currentTimeMillis()
         }
+    }
+
+    suspend fun clearLegacyGroqQuotaFlagOnce(): Pair<Long, String> {
+        var result = 0L to ""
+        context.dataStore.edit { prefs ->
+            val alreadyMigrated = prefs[Keys.GROQ_LIMIT_V2_MIGRATED] ?: false
+            if (!alreadyMigrated) {
+                prefs.remove(Keys.LEGACY_GROQ_QUOTA_EXHAUSTED)
+                prefs[Keys.GROQ_HARD_BLOCK_UNTIL] = 0L
+                prefs.remove(Keys.GROQ_HARD_BLOCK_KIND)
+                prefs[Keys.GROQ_LIMIT_V2_MIGRATED] = true
+            }
+            val rawUntil = prefs[Keys.GROQ_HARD_BLOCK_UNTIL] ?: 0L
+            if (rawUntil > System.currentTimeMillis()) {
+                result = rawUntil to (prefs[Keys.GROQ_HARD_BLOCK_KIND] ?: GroqLimitKind.DAILY.name)
+            } else if (rawUntil > 0L) {
+                prefs[Keys.GROQ_HARD_BLOCK_UNTIL] = 0L
+                prefs.remove(Keys.GROQ_HARD_BLOCK_KIND)
+            }
+        }
+        return result
     }
 
     suspend fun clearGroqSession() {
@@ -207,8 +255,24 @@ class UserPreferences(private val context: Context) {
         if (quota.remainingTokens >= 0) prefs[Keys.GROQ_REM_TOK] = quota.remainingTokens
         if (quota.limitTokens > 0) prefs[Keys.GROQ_LIM_TOK] = quota.limitTokens
         if (quota.resetTokens.isNotBlank()) prefs[Keys.GROQ_RST_TOK] = quota.resetTokens
-        prefs[Keys.GROQ_QUOTA_EXHAUSTED] = quota.isExhausted
-        prefs[Keys.GROQ_QUOTA_UPDATED_AT] = if (quota.updatedAtMs > 0L) quota.updatedAtMs else System.currentTimeMillis()
+        prefs.remove(Keys.LEGACY_GROQ_QUOTA_EXHAUSTED)
+        val now = System.currentTimeMillis()
+        when {
+            quota.creditsDepleted402 -> {
+                prefs[Keys.GROQ_HARD_BLOCK_UNTIL] = now + 3_600_000L
+                prefs[Keys.GROQ_HARD_BLOCK_KIND] = GroqLimitKind.CREDITS.name
+            }
+            quota.limitRequests > 0 && quota.remainingRequests == 0 -> {
+                val resetSec = GroqCodec.parseDurationSec(quota.resetRequests) ?: 3600.0
+                prefs[Keys.GROQ_HARD_BLOCK_UNTIL] = now + (resetSec * 1000.0).toLong().coerceAtLeast(60_000L)
+                prefs[Keys.GROQ_HARD_BLOCK_KIND] = GroqLimitKind.DAILY.name
+            }
+            quota.remainingRequests > 0 -> {
+                prefs[Keys.GROQ_HARD_BLOCK_UNTIL] = 0L
+                prefs.remove(Keys.GROQ_HARD_BLOCK_KIND)
+            }
+        }
+        prefs[Keys.GROQ_QUOTA_UPDATED_AT] = if (quota.updatedAtMs > 0L) quota.updatedAtMs else now
     }
 
     private fun clearGroqKeysFromPrefs(prefs: androidx.datastore.preferences.core.MutablePreferences) {
@@ -219,7 +283,9 @@ class UserPreferences(private val context: Context) {
         prefs.remove(Keys.GROQ_REM_TOK)
         prefs.remove(Keys.GROQ_LIM_TOK)
         prefs.remove(Keys.GROQ_RST_TOK)
-        prefs.remove(Keys.GROQ_QUOTA_EXHAUSTED)
+        prefs.remove(Keys.LEGACY_GROQ_QUOTA_EXHAUSTED)
+        prefs.remove(Keys.GROQ_HARD_BLOCK_UNTIL)
+        prefs.remove(Keys.GROQ_HARD_BLOCK_KIND)
         prefs.remove(Keys.GROQ_QUOTA_UPDATED_AT)
     }
 
