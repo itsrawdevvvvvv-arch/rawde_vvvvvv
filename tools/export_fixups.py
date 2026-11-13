@@ -96,6 +96,12 @@ COMMON_IMPORTS = [
     (r'\bReelEditingStyle\b', 'com.rawedit.app.domain.ReelEditingStyle'),
     (r'\bBitmapFactory\.', 'android.graphics.BitmapFactory'),
     (r'\bCircleAvatarCropperDialog\(', 'com.rawedit.app.ui.components.CircleAvatarCropperDialog'),
+    (r'\baspectRatio\(', 'androidx.compose.foundation.layout.aspectRatio'),
+    (r'\bImage\(', 'androidx.compose.foundation.Image'),
+    (r'\.asImageBitmap\(\)', 'androidx.compose.ui.graphics.asImageBitmap'),
+    (r'\bContentScale\b', 'androidx.compose.ui.layout.ContentScale'),
+    (r'\bDispatchers\.', 'kotlinx.coroutines.Dispatchers'),
+    (r'\bSvgSanitizerAndPadding\b', 'com.rawedit.app.domain.SvgSanitizerAndPadding'),
 ]
 
 

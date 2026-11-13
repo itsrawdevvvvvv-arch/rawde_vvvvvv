@@ -74,6 +74,7 @@ import com.rawedit.app.domain.CutoutPadRatios
 import com.rawedit.app.domain.CutoutProcessor
 import com.rawedit.app.domain.DownloadedWebMedia
 import com.rawedit.app.domain.IconSearchItem
+import com.rawedit.app.domain.SvgSanitizerAndPadding
 import com.rawedit.app.domain.WebAssetFetcher
 import com.rawedit.app.domain.WebCaptureHelper
 import com.rawedit.app.domain.WebUiElementBox
@@ -88,6 +89,7 @@ import com.rawedit.app.ui.theme.JetBrainsMonoFamily
 import com.rawedit.app.ui.theme.RawColors
 import java.util.Locale
 import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import org.json.JSONArray
