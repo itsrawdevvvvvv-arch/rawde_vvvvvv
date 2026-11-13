@@ -2,6 +2,7 @@ package com.rawedit.app.ui.screens
 
 import android.annotation.SuppressLint
 import android.graphics.Bitmap
+import android.graphics.BitmapFactory
 import android.graphics.Canvas
 import android.view.ViewGroup
 import android.webkit.WebChromeClient
@@ -85,12 +86,12 @@ import com.rawedit.app.ui.icons.RawIconType
 import com.rawedit.app.ui.theme.BricolageFamily
 import com.rawedit.app.ui.theme.JetBrainsMonoFamily
 import com.rawedit.app.ui.theme.RawColors
+import java.util.Locale
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import org.json.JSONArray
 import org.json.JSONObject
-import java.util.Locale
 
 private enum class BrowserMode {
     WEB,

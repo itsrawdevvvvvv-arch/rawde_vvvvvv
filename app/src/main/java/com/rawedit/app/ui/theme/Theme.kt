@@ -36,6 +36,7 @@ object RawColors {
 
     val Divider = Color(0x14F7ECE6)       // rgba(247,236,230,0.08)
     val DividerStrong = Color(0x26F7ECE6) // rgba(247,236,230,0.15)
+    val CardBorder = Color(0x26F7ECE6)
 
     val AccentSoft = Color(0x24CAA07D)    // rgba(202,160,125,0.14)
     val AccentBorder = Color(0x61CAA07D)  // rgba(202,160,125,0.38)

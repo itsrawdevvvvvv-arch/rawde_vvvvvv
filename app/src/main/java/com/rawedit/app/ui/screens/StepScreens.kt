@@ -4,6 +4,7 @@ import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
 import android.content.Intent
+import android.graphics.BitmapFactory
 import android.os.Build
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -86,6 +87,7 @@ import com.rawedit.app.domain.GroqClient
 import com.rawedit.app.domain.PaletteColorMath
 import com.rawedit.app.domain.PaletteState
 import com.rawedit.app.domain.PromptGenerator
+import com.rawedit.app.domain.ReelEditingStyle
 import com.rawedit.app.domain.SrtParser
 import com.rawedit.app.ui.components.BigPrimaryButton
 import com.rawedit.app.ui.components.CircleActionButton
@@ -106,12 +108,12 @@ import com.rawedit.app.ui.theme.BricolageFamily
 import com.rawedit.app.ui.theme.JetBrainsMonoFamily
 import com.rawedit.app.ui.theme.RawColors
 import com.rawedit.app.ui.theme.RawTypography
+import java.io.File
+import java.util.zip.ZipInputStream
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
-import java.io.File
-import java.util.zip.ZipInputStream
 
 private const val LARGE_EDITOR_THRESHOLD = 15_000
 private const val HELPER_ENTRY_PATH = "kinetic-explainer-style/engine/raw-helpers.js"
