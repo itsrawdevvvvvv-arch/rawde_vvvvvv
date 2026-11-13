@@ -114,6 +114,7 @@ fun AssetLockerScreen(
 ) {
     val scope = rememberCoroutineScope()
     val listState = rememberLazyListState()
+    val context = LocalContext.current
 
     val attachedIds = remember(project.attachedAssetIds) {
         RawEditRepository.parseAttachedAssetIds(project.attachedAssetIds).toSet()
