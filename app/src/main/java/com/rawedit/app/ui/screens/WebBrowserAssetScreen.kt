@@ -94,7 +94,45 @@ import java.util.Locale
 
 private enum class BrowserMode {
     WEB,
-    ICONS
+    ICONS,
+    STUDIO
+}
+
+private enum class StudioTool(
+    val title: String,
+    val sourceRepo: String,
+    val emoji: String,
+    val url: String,
+    val description: String
+) {
+    EMOJI_KITCHEN(
+        title = "Emoji Kitchen",
+        sourceRepo = "xsalazar/emoji-kitchen",
+        emoji = "\uD83D\uDC31\u200D\uD83D\uDE80",
+        url = "https://raw.local/tools/emoji_kitchen.html",
+        description = "Mashup 100k+ hybrid stickers & transparent cutouts"
+    ),
+    SVG_EDIT(
+        title = "SVG-Edit Vector",
+        sourceRepo = "SVG-Edit/svgedit",
+        emoji = "\uD83C\uDFA8",
+        url = "https://raw.local/tools/svg_editor.html",
+        description = "Path node editing, bezier curves & vector shapes"
+    ),
+    CANVAS_STUDIO(
+        title = "Canvas & Stickers",
+        sourceRepo = "scaleflex/filerobot-image-editor",
+        emoji = "\uD83D\uDDBC\uFE0F",
+        url = "https://raw.local/tools/canvas_studio.html",
+        description = "Multi-layer photo cards, stickers, arrows & annotations"
+    ),
+    LOTTIE_MOTION(
+        title = "Lottie Inspector",
+        sourceRepo = "marciogranzotto/lottie-tools",
+        emoji = "⚡",
+        url = "https://raw.local/tools/lottie_studio.html",
+        description = "Vector keyframe inspector & timeline motion shapes"
+    )
 }
 
 private data class QuickBookmark(
@@ -178,6 +216,7 @@ fun WebBrowserAssetScreen(
     val focusManager = LocalFocusManager.current
 
     var mode by remember { mutableStateOf(BrowserMode.WEB) }
+    var activeStudioTool by remember { mutableStateOf(StudioTool.EMOJI_KITCHEN) }
     var desktopMode by remember { mutableStateOf(false) }
     var urlInput by remember { mutableStateOf("https://www.google.com") }
     var activeUrl by remember { mutableStateOf("https://www.google.com") }
@@ -291,10 +330,12 @@ fun WebBrowserAssetScreen(
         }
     }
 
-    LaunchedEffect(mode) {
+    LaunchedEffect(mode, activeStudioTool) {
         if (mode == BrowserMode.ICONS && !iconsInitialLoaded) {
             iconsInitialLoaded = true
             runIconSearch(iconQuery)
+        } else if (mode == BrowserMode.STUDIO) {
+            webViewRef?.loadUrl(activeStudioTool.url)
         }
     }
 
@@ -446,7 +487,7 @@ fun WebBrowserAssetScreen(
             ) {
                 CircleActionButton(icon = RawIconType.BACK, size = 44.dp, onClick = onBack)
 
-                // URL or Icon Search Input Pill
+                // URL or Icon Search Input Pill or Studio Tool Banner
                 Row(
                     modifier = Modifier
                         .weight(1f)
@@ -458,60 +499,78 @@ fun WebBrowserAssetScreen(
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
-                    RawIcon(
-                        type = if (mode == BrowserMode.WEB) RawIconType.GLOBE else RawIconType.SEARCH,
-                        size = 16.dp,
-                        tint = RawColors.Tan
-                    )
-                    BasicTextField(
-                        value = if (mode == BrowserMode.WEB) urlInput else iconQuery,
-                        onValueChange = {
-                            if (mode == BrowserMode.WEB) urlInput = it else iconQuery = it
-                        },
-                        singleLine = true,
-                        cursorBrush = SolidColor(RawColors.Tan),
-                        textStyle = TextStyle(
+                    if (mode == BrowserMode.STUDIO) {
+                        Text(
+                            text = "${activeStudioTool.emoji} ${activeStudioTool.title}",
+                            fontFamily = BricolageFamily,
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 13.sp,
+                            color = RawColors.Tan
+                        )
+                        Text(
+                            text = "• ${activeStudioTool.sourceRepo}",
                             fontFamily = JetBrainsMonoFamily,
-                            fontSize = 12.5.sp,
-                            color = RawColors.TextPrimary
-                        ),
-                        keyboardOptions = KeyboardOptions(imeAction = ImeAction.Go),
-                        keyboardActions = KeyboardActions(
-                            onGo = {
-                                if (mode == BrowserMode.WEB) navigateBrowser(urlInput) else runIconSearch(iconQuery)
-                            }
-                        ),
-                        decorationBox = { innerTextField ->
-                            Box(contentAlignment = Alignment.CenterStart) {
-                                val currentTxt = if (mode == BrowserMode.WEB) urlInput else iconQuery
-                                if (currentTxt.isEmpty()) {
-                                    Text(
-                                        text = if (mode == BrowserMode.WEB) "Enter URL or search web..." else "Search icons (e.g. login, cursor)...",
-                                        fontFamily = JetBrainsMonoFamily,
-                                        fontSize = 12.sp,
-                                        color = RawColors.TextMuted,
-                                        maxLines = 1,
-                                        overflow = TextOverflow.Ellipsis
-                                    )
+                            fontSize = 11.sp,
+                            color = RawColors.TextMuted,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                    } else {
+                        RawIcon(
+                            type = if (mode == BrowserMode.WEB) RawIconType.GLOBE else RawIconType.SEARCH,
+                            size = 16.dp,
+                            tint = RawColors.Tan
+                        )
+                        BasicTextField(
+                            value = if (mode == BrowserMode.WEB) urlInput else iconQuery,
+                            onValueChange = {
+                                if (mode == BrowserMode.WEB) urlInput = it else iconQuery = it
+                            },
+                            singleLine = true,
+                            cursorBrush = SolidColor(RawColors.Tan),
+                            textStyle = TextStyle(
+                                fontFamily = JetBrainsMonoFamily,
+                                fontSize = 12.5.sp,
+                                color = RawColors.TextPrimary
+                            ),
+                            keyboardOptions = KeyboardOptions(imeAction = ImeAction.Go),
+                            keyboardActions = KeyboardActions(
+                                onGo = {
+                                    if (mode == BrowserMode.WEB) navigateBrowser(urlInput) else runIconSearch(iconQuery)
                                 }
-                                innerTextField()
-                            }
-                        },
-                        modifier = Modifier.weight(1f)
-                    )
-                    if ((mode == BrowserMode.WEB && urlInput.isNotEmpty()) ||
-                        (mode == BrowserMode.ICONS && iconQuery.isNotEmpty())
-                    ) {
-                        Box(
-                            modifier = Modifier
-                                .size(22.dp)
-                                .clip(CircleShape)
-                                .clickable {
-                                    if (mode == BrowserMode.WEB) urlInput = "" else iconQuery = ""
-                                },
-                            contentAlignment = Alignment.Center
+                            ),
+                            decorationBox = { innerTextField ->
+                                Box(contentAlignment = Alignment.CenterStart) {
+                                    val currentTxt = if (mode == BrowserMode.WEB) urlInput else iconQuery
+                                    if (currentTxt.isEmpty()) {
+                                        Text(
+                                            text = if (mode == BrowserMode.WEB) "Enter URL or search web..." else "Search icons (e.g. login, cursor)...",
+                                            fontFamily = JetBrainsMonoFamily,
+                                            fontSize = 12.sp,
+                                            color = RawColors.TextMuted,
+                                            maxLines = 1,
+                                            overflow = TextOverflow.Ellipsis
+                                        )
+                                    }
+                                    innerTextField()
+                                }
+                            },
+                            modifier = Modifier.weight(1f)
+                        )
+                        if ((mode == BrowserMode.WEB && urlInput.isNotEmpty()) ||
+                            (mode == BrowserMode.ICONS && iconQuery.isNotEmpty())
                         ) {
-                            RawIcon(RawIconType.CLOSE, size = 13.dp, tint = RawColors.TextMuted)
+                            Box(
+                                modifier = Modifier
+                                    .size(22.dp)
+                                    .clip(CircleShape)
+                                    .clickable {
+                                        if (mode == BrowserMode.WEB) urlInput = "" else iconQuery = ""
+                                    },
+                                contentAlignment = Alignment.Center
+                            ) {
+                                RawIcon(RawIconType.CLOSE, size = 13.dp, tint = RawColors.TextMuted)
+                            }
                         }
                     }
                 }
@@ -536,20 +595,33 @@ fun WebBrowserAssetScreen(
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                val modes = listOf(BrowserMode.WEB to "Live Browser", BrowserMode.ICONS to "Icon Finder")
+                val modes = listOf(
+                    BrowserMode.WEB to "Live Browser",
+                    BrowserMode.ICONS to "Icon Finder",
+                    BrowserMode.STUDIO to "Creative Studios (GitHub)"
+                )
                 modes.forEach { (m, label) ->
                     val sel = mode == m
                     Row(
                         modifier = Modifier
                             .clip(CircleShape)
                             .background(if (sel) RawColors.Cream else RawColors.CardSurface)
-                            .clickable { mode = m }
+                            .clickable {
+                                mode = m
+                                if (m == BrowserMode.STUDIO) {
+                                    webViewRef?.loadUrl(activeStudioTool.url)
+                                }
+                            }
                             .padding(horizontal = 12.dp, vertical = 7.dp),
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.spacedBy(5.dp)
                     ) {
                         RawIcon(
-                            type = if (m == BrowserMode.WEB) RawIconType.GLOBE else RawIconType.SEARCH,
+                            type = when (m) {
+                                BrowserMode.WEB -> RawIconType.GLOBE
+                                BrowserMode.ICONS -> RawIconType.SEARCH
+                                BrowserMode.STUDIO -> RawIconType.SPARK
+                            },
                             size = 13.dp,
                             tint = if (sel) RawColors.Ink else RawColors.Tan
                         )
@@ -587,7 +659,7 @@ fun WebBrowserAssetScreen(
                             )
                         }
                     }
-                } else {
+                } else if (mode == BrowserMode.ICONS) {
                     ICON_QUICK_QUERIES.forEach { kw ->
                         val activeKw = iconQuery.equals(kw, ignoreCase = true)
                         Box(
@@ -603,6 +675,28 @@ fun WebBrowserAssetScreen(
                                 fontWeight = FontWeight.Bold,
                                 fontSize = 12.sp,
                                 color = if (activeKw) RawColors.Tan else RawColors.TextMuted
+                            )
+                        }
+                    }
+                } else {
+                    StudioTool.entries.forEach { tool ->
+                        val active = activeStudioTool == tool
+                        Box(
+                            modifier = Modifier
+                                .clip(CircleShape)
+                                .background(if (active) RawColors.AccentSoft else RawColors.RaisedCard)
+                                .clickable {
+                                    activeStudioTool = tool
+                                    webViewRef?.loadUrl(tool.url)
+                                }
+                                .padding(horizontal = 11.dp, vertical = 7.dp)
+                        ) {
+                            Text(
+                                text = "${tool.emoji} ${tool.title}",
+                                fontFamily = BricolageFamily,
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 12.sp,
+                                color = if (active) RawColors.Tan else RawColors.TextMuted
                             )
                         }
                     }
@@ -654,6 +748,41 @@ fun WebBrowserAssetScreen(
                                 loadWithOverviewMode = desktopMode
                                 mediaPlaybackRequiresUserGesture = true
                             }
+                            addJavascriptInterface(object {
+                                @android.webkit.JavascriptInterface
+                                fun saveAsset(data: String, suggestedName: String, kind: String) {
+                                    scope.launch(Dispatchers.Main) {
+                                        runCatching {
+                                            if (data.startsWith("data:image/")) {
+                                                val base64 = data.substringAfter("base64,")
+                                                val bytes = android.util.Base64.decode(base64, android.util.Base64.DEFAULT)
+                                                val bmp = android.graphics.BitmapFactory.decodeByteArray(bytes, 0, bytes.size)
+                                                if (bmp != null) {
+                                                    onSaveCapturedBitmap(
+                                                        bmp,
+                                                        kind.equals("CUTOUT", ignoreCase = true),
+                                                        suggestedName,
+                                                        "Studio asset (${activeStudioTool.sourceRepo})",
+                                                        null
+                                                    )
+                                                    toastMsg = "Saved $suggestedName to Asset Locker!"
+                                                }
+                                            } else if (data.contains("<svg")) {
+                                                val cleanSvg = SvgSanitizerAndPadding.sanitizeSvg(data)
+                                                val bmp = CutoutProcessor.rasterizeSingleSvgToCutout(context, cleanSvg).resultBitmap
+                                                onSaveCapturedBitmap(
+                                                    bmp,
+                                                    true,
+                                                    suggestedName.ifBlank { "vector.png" },
+                                                    "Vector asset (${activeStudioTool.sourceRepo})",
+                                                    null
+                                                )
+                                                toastMsg = "Saved $suggestedName to Asset Locker!"
+                                            }
+                                        }
+                                    }
+                                }
+                            }, "AndroidLocker")
                             webChromeClient = object : WebChromeClient() {
                                 override fun onProgressChanged(view: WebView?, newProgress: Int) {
                                     loadProgress = newProgress

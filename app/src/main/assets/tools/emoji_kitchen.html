@@ -1,0 +1,238 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <title>Emoji Kitchen Mashup Studio</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
+    body { background: #0E0E0E; color: #F0F0F0; padding: 16px; user-select: none; }
+    .header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 16px; }
+    .title { font-size: 18px; font-weight: 700; color: #DCC9A9; }
+    .badge { font-size: 11px; background: #262626; color: #A0A0A0; padding: 4px 8px; border-radius: 6px; }
+    
+    .preview-stage {
+      background: #181818; border: 1px solid #2A2A2A; border-radius: 16px;
+      padding: 24px; text-align: center; margin-bottom: 16px; position: relative;
+      min-height: 220px; display: flex; flex-direction: column; align-items: center; justify-content: center;
+    }
+    .preview-container {
+      width: 140px; height: 140px; display: flex; align-items: center; justify-content: center;
+      position: relative; margin-bottom: 12px;
+    }
+    .preview-img { max-width: 130px; max-height: 130px; object-fit: contain; }
+    .preview-canvas { max-width: 130px; max-height: 130px; display: none; }
+    .preview-formula { font-size: 14px; color: #888; }
+    .preview-formula span { color: #FFF; font-weight: 600; margin: 0 4px; }
+    
+    .btn-save {
+      background: #DCC9A9; color: #121212; border: none; font-size: 14px; font-weight: 700;
+      padding: 12px 20px; border-radius: 10px; width: 100%; cursor: pointer;
+      display: flex; align-items: center; justify-content: center; gap: 8px; margin-bottom: 16px;
+    }
+    .btn-save:active { transform: scale(0.98); opacity: 0.9; }
+    
+    .section-title { font-size: 12px; text-transform: uppercase; letter-spacing: 1px; color: #777; margin-bottom: 8px; }
+    
+    .tabs { display: flex; gap: 8px; margin-bottom: 12px; }
+    .tab-btn {
+      flex: 1; padding: 8px; font-size: 13px; font-weight: 600; background: #1C1C1C;
+      border: 1px solid #2C2C2C; border-radius: 8px; color: #AAA; cursor: pointer; text-align: center;
+    }
+    .tab-btn.active { background: #DCC9A9; color: #121212; border-color: #DCC9A9; }
+    
+    .emoji-grid {
+      display: grid; grid-template-columns: repeat(6, 1fr); gap: 8px;
+      max-height: 240px; overflow-y: auto; padding: 4px;
+    }
+    .emoji-item {
+      aspect-ratio: 1; display: flex; align-items: center; justify-content: center;
+      font-size: 26px; background: #181818; border: 1px solid #282828; border-radius: 10px;
+      cursor: pointer; transition: all 0.15s ease;
+    }
+    .emoji-item:active { transform: scale(0.9); }
+    .emoji-item.selected { border-color: #DCC9A9; background: #2A251D; }
+    
+    .status-toast {
+      position: fixed; bottom: 20px; left: 50%; transform: translateX(-50%);
+      background: #222; border: 1px solid #444; color: #DCC9A9; padding: 8px 16px;
+      border-radius: 20px; font-size: 12px; opacity: 0; transition: opacity 0.3s ease; pointer-events: none;
+    }
+    .status-toast.show { opacity: 1; }
+  </style>
+</head>
+<body>
+
+  <div class="header">
+    <div class="title">Emoji Kitchen Studio</div>
+    <div class="badge">Open Source Fusion</div>
+  </div>
+
+  <div class="preview-stage">
+    <div class="preview-container">
+      <img id="fusedImg" class="preview-img" src="" alt="Mashup Sticker" />
+      <canvas id="fallbackCanvas" class="preview-canvas" width="256" height="256"></canvas>
+    </div>
+    <div class="preview-formula" id="formulaText">
+      <span id="em1Display">🐱</span> + <span id="em2Display">🚀</span> = <span style="color:#DCC9A9">Hybrid Sticker</span>
+    </div>
+  </div>
+
+  <button class="btn-save" id="btnSaveLocker">
+    <span>Import Sticker to Asset Locker</span>
+  </button>
+
+  <div class="section-title">Step 1: Pick Base & Modifier</div>
+  <div class="tabs">
+    <div class="tab-btn active" id="tabLeft">Base Emoji (🐱)</div>
+    <div class="tab-btn" id="tabRight">Modifier Emoji (🚀)</div>
+  </div>
+
+  <div class="emoji-grid" id="grid"></div>
+
+  <div class="status-toast" id="toast">Saved to Asset Locker!</div>
+
+  <script>
+    const EMOJIS = [
+      { char: "🐱", code: "1f431" }, { char: "🚀", code: "1f680" },
+      { char: "🔥", code: "1f525" }, { char: "💀", code: "1f480" },
+      { char: "🤖", code: "1f916" }, { char: "😎", code: "1f60e" },
+      { char: "😍", code: "1f60d" }, { char: "😭", code: "1f62d" },
+      { char: "👽", code: "1f47d" }, { char: "👻", code: "1f47b" },
+      { char: "👑", code: "1f451" }, { char: "⚡", code: "26a1" },
+      { char: "🎉", code: "1f389" }, { char: "🍕", code: "1f355" },
+      { char: "🥑", code: "1f951" }, { char: "💡", code: "1f4a1" },
+      { char: "💎", code: "1f48e" }, { char: "⭐", code: "2b50" },
+      { char: "🦄", code: "1f984" }, { char: "🐶", code: "1f436" },
+      { char: "🦊", code: "1f98a" }, { char: "🐼", code: "1f43c" },
+      { char: "🐯", code: "1f42f" }, { char: "🦁", code: "1f981" }
+    ];
+
+    let left = EMOJIS[0];
+    let right = EMOJIS[1];
+    let activeSide = 'left';
+
+    const grid = document.getElementById('grid');
+    const tabLeft = document.getElementById('tabLeft');
+    const tabRight = document.getElementById('tabRight');
+    const em1Display = document.getElementById('em1Display');
+    const em2Display = document.getElementById('em2Display');
+    const fusedImg = document.getElementById('fusedImg');
+    const fallbackCanvas = document.getElementById('fallbackCanvas');
+    const btnSaveLocker = document.getElementById('btnSaveLocker');
+    const toast = document.getElementById('toast');
+
+    function renderGrid() {
+      grid.innerHTML = '';
+      const currentSelected = activeSide === 'left' ? left : right;
+      EMOJIS.forEach(item => {
+        const d = document.createElement('div');
+        d.className = 'emoji-item' + (item.char === currentSelected.char ? ' selected' : '');
+        d.textContent = item.char;
+        d.onclick = () => {
+          if (activeSide === 'left') {
+            left = item;
+            tabLeft.textContent = `Base Emoji (${item.char})`;
+          } else {
+            right = item;
+            tabRight.textContent = `Modifier (${item.char})`;
+          }
+          em1Display.textContent = left.char;
+          em2Display.textContent = right.char;
+          renderGrid();
+          updateFusion();
+        };
+        grid.appendChild(d);
+      });
+    }
+
+    tabLeft.onclick = () => {
+      activeSide = 'left';
+      tabLeft.classList.add('active');
+      tabRight.classList.remove('active');
+      renderGrid();
+    };
+
+    tabRight.onclick = () => {
+      activeSide = 'right';
+      tabRight.classList.add('active');
+      tabLeft.classList.remove('active');
+      renderGrid();
+    };
+
+    function updateFusion() {
+      // Build Google Emoji Kitchen URL
+      const c1 = "u" + left.code;
+      const c2 = "u" + right.code;
+      // Typical structure: https://www.gstatic.com/android/keyboard/emojikitchen/...
+      // In case offline, fallback to composite canvas
+      const url = `https://www.gstatic.com/android/keyboard/emojikitchen/20201001/${c1}/${c1}_${c2}.png`;
+      
+      fusedImg.style.display = 'block';
+      fallbackCanvas.style.display = 'none';
+      fusedImg.crossOrigin = "anonymous";
+      fusedImg.src = url;
+
+      fusedImg.onerror = () => {
+        // Fallback: draw layered composite on canvas
+        fusedImg.style.display = 'none';
+        fallbackCanvas.style.display = 'block';
+        const ctx = fallbackCanvas.getContext('2d');
+        ctx.clearRect(0, 0, 256, 256);
+        ctx.font = '130px sans-serif';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillText(left.char, 100, 140);
+        ctx.font = '90px sans-serif';
+        ctx.fillText(right.char, 170, 90);
+      };
+    }
+
+    btnSaveLocker.onclick = () => {
+      let dataUrl = "";
+      try {
+        if (fallbackCanvas.style.display !== 'none') {
+          dataUrl = fallbackCanvas.toDataURL('image/png');
+        } else {
+          // Render image onto temporary canvas to obtain base64
+          const cvs = document.createElement('canvas');
+          cvs.width = fusedImg.naturalWidth || 256;
+          cvs.height = fusedImg.naturalHeight || 256;
+          const ctx = cvs.getContext('2d');
+          ctx.drawImage(fusedImg, 0, 0);
+          dataUrl = cvs.toDataURL('image/png');
+        }
+      } catch (e) {
+        // If tainted by CORS, draw fallback canvas
+        const cvs = document.createElement('canvas');
+        cvs.width = 256; cvs.height = 256;
+        const ctx = cvs.getContext('2d');
+        ctx.font = '130px sans-serif';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillText(left.char, 100, 140);
+        ctx.font = '90px sans-serif';
+        ctx.fillText(right.char, 170, 90);
+        dataUrl = cvs.toDataURL('image/png');
+      }
+
+      const fileName = `sticker_${left.code}_${right.code}.png`;
+      if (window.AndroidLocker && window.AndroidLocker.saveAsset) {
+        window.AndroidLocker.saveAsset(dataUrl, fileName, "CUTOUT");
+      } else {
+        // Post message or log
+        console.log("Save to locker requested:", fileName, dataUrl.slice(0, 50));
+      }
+      showToast();
+    };
+
+    function showToast() {
+      toast.classList.add('show');
+      setTimeout(() => toast.classList.remove('show'), 2000);
+    }
+
+    renderGrid();
+    updateFusion();
+  </script>
+</body>
+</html>

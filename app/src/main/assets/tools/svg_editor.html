@@ -1,0 +1,265 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <title>SVG Vector & Path Studio</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
+    body { background: #0E0E0E; color: #F0F0F0; padding: 16px; user-select: none; }
+    .header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px; }
+    .title { font-size: 18px; font-weight: 700; color: #DCC9A9; }
+    .badge { font-size: 11px; background: #262626; color: #A0A0A0; padding: 4px 8px; border-radius: 6px; }
+    
+    .toolbar { display: flex; gap: 6px; margin-bottom: 12px; overflow-x: auto; padding-bottom: 4px; }
+    .tool-btn {
+      padding: 8px 12px; font-size: 12px; font-weight: 600; background: #1C1C1C;
+      border: 1px solid #2C2C2C; border-radius: 8px; color: #BBB; cursor: pointer; white-space: nowrap;
+    }
+    .tool-btn.active { background: #DCC9A9; color: #121212; border-color: #DCC9A9; }
+    
+    .canvas-box {
+      width: 100%; aspect-ratio: 1; background: #141414; border: 1px solid #2B2B2B; border-radius: 12px;
+      position: relative; overflow: hidden; margin-bottom: 12px; touch-action: none;
+      background-image: linear-gradient(#1E1E1E 1px, transparent 1px), linear-gradient(90deg, #1E1E1E 1px, transparent 1px);
+      background-size: 20px 20px;
+    }
+    svg#svgStage { width: 100%; height: 100%; display: block; }
+    
+    .controls { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 14px; }
+    .ctrl-group { background: #181818; padding: 10px; border-radius: 8px; border: 1px solid #262626; }
+    .ctrl-label { font-size: 11px; color: #888; text-transform: uppercase; margin-bottom: 6px; display: block; }
+    .color-row { display: flex; gap: 6px; }
+    .color-swatch { width: 24px; height: 24px; border-radius: 50%; cursor: pointer; border: 2px solid transparent; }
+    .color-swatch.active { border-color: #FFF; }
+    
+    .btn-save {
+      background: #DCC9A9; color: #121212; border: none; font-size: 14px; font-weight: 700;
+      padding: 12px 20px; border-radius: 10px; width: 100%; cursor: pointer;
+      display: flex; align-items: center; justify-content: center; gap: 8px;
+    }
+    .btn-save:active { transform: scale(0.98); opacity: 0.9; }
+    
+    .status-toast {
+      position: fixed; bottom: 20px; left: 50%; transform: translateX(-50%);
+      background: #222; border: 1px solid #444; color: #DCC9A9; padding: 8px 16px;
+      border-radius: 20px; font-size: 12px; opacity: 0; transition: opacity 0.3s ease; pointer-events: none;
+    }
+    .status-toast.show { opacity: 1; }
+  </style>
+</head>
+<body>
+
+  <div class="header">
+    <div class="title">SVG-Edit Vector Studio</div>
+    <div class="badge">Open Source Engine</div>
+  </div>
+
+  <div class="toolbar">
+    <button class="tool-btn active" data-tool="pen">Pen / Path</button>
+    <button class="tool-btn" data-tool="rect">Rectangle</button>
+    <button class="tool-btn" data-tool="circle">Circle</button>
+    <button class="tool-btn" data-tool="star">Star Badge</button>
+    <button class="tool-btn" id="btnClear" style="color:#E5484D">Clear</button>
+  </div>
+
+  <div class="canvas-box" id="canvasBox">
+    <svg id="svgStage" viewBox="0 0 400 400" xmlns="http://www.w3.org/2000/svg">
+      <defs>
+        <filter id="glow"><feGaussianBlur stdDeviation="3" result="coloredBlur"/><feMerge><feMergeNode in="coloredBlur"/><feMergeNode in="SourceGraphic"/></feMerge></filter>
+      </defs>
+      <g id="drawGroup"></g>
+    </svg>
+  </div>
+
+  <div class="controls">
+    <div class="ctrl-group">
+      <span class="ctrl-label">Stroke Color</span>
+      <div class="color-row">
+        <div class="color-swatch active" style="background:#DCC9A9" data-color="#DCC9A9"></div>
+        <div class="color-swatch" style="background:#E5484D" data-color="#E5484D"></div>
+        <div class="color-swatch" style="background:#00E5FF" data-color="#00E5FF"></div>
+        <div class="color-swatch" style="background:#FFFFFF" data-color="#FFFFFF"></div>
+      </div>
+    </div>
+    <div class="ctrl-group">
+      <span class="ctrl-label">Fill Mode</span>
+      <div class="color-row">
+        <div class="color-swatch active" style="background:transparent;border:2px dashed #666" data-fill="none"></div>
+        <div class="color-swatch" style="background:#DCC9A9" data-fill="#DCC9A9"></div>
+        <div class="color-swatch" style="background:#E5484D" data-fill="#E5484D"></div>
+        <div class="color-swatch" style="background:#1C1C1C" data-fill="#1C1C1C"></div>
+      </div>
+    </div>
+  </div>
+
+  <button class="btn-save" id="btnSaveSvg">
+    Save Vector SVG to Asset Locker
+  </button>
+
+  <div class="status-toast" id="toast">Vector SVG Saved!</div>
+
+  <script>
+    let activeTool = 'pen';
+    let strokeColor = '#DCC9A9';
+    let fillColor = 'none';
+    let strokeWidth = 4;
+    let isDrawing = false;
+    let currentPoints = [];
+
+    const stage = document.getElementById('svgStage');
+    const drawGroup = document.getElementById('drawGroup');
+    const canvasBox = document.getElementById('canvasBox');
+    const btnSaveSvg = document.getElementById('btnSaveSvg');
+    const btnClear = document.getElementById('btnClear');
+    const toast = document.getElementById('toast');
+
+    document.querySelectorAll('.tool-btn[data-tool]').forEach(btn => {
+      btn.onclick = () => {
+        document.querySelectorAll('.tool-btn[data-tool]').forEach(b => b.classList.remove('active'));
+        btn.classList.add('active');
+        activeTool = btn.dataset.tool;
+      };
+    });
+
+    document.querySelectorAll('[data-color]').forEach(sw => {
+      sw.onclick = () => {
+        document.querySelectorAll('[data-color]').forEach(s => s.classList.remove('active'));
+        sw.classList.add('active');
+        strokeColor = sw.dataset.color;
+      };
+    });
+
+    document.querySelectorAll('[data-fill]').forEach(sw => {
+      sw.onclick = () => {
+        document.querySelectorAll('[data-fill]').forEach(s => s.classList.remove('active'));
+        sw.classList.add('active');
+        fillColor = sw.dataset.fill;
+      };
+    });
+
+    btnClear.onclick = () => {
+      drawGroup.innerHTML = '';
+      currentPoints = [];
+    };
+
+    function getCoords(e) {
+      const rect = stage.getBoundingClientRect();
+      const clientX = e.touches ? e.touches[0].clientX : e.clientX;
+      const clientY = e.touches ? e.touches[0].clientY : e.clientY;
+      const x = ((clientX - rect.left) / rect.width) * 400;
+      const y = ((clientY - rect.top) / rect.height) * 400;
+      return { x: Math.round(x), y: Math.round(y) };
+    }
+
+    let activeEl = null;
+
+    canvasBox.addEventListener('pointerdown', e => {
+      isDrawing = true;
+      const pt = getCoords(e);
+      currentPoints = [pt];
+
+      if (activeTool === 'pen') {
+        activeEl = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+        activeEl.setAttribute('stroke', strokeColor);
+        activeEl.setAttribute('fill', fillColor);
+        activeEl.setAttribute('stroke-width', strokeWidth);
+        activeEl.setAttribute('stroke-linecap', 'round');
+        activeEl.setAttribute('stroke-linejoin', 'round');
+        activeEl.setAttribute('d', `M ${pt.x} ${pt.y}`);
+        drawGroup.appendChild(activeEl);
+      } else if (activeTool === 'rect') {
+        activeEl = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
+        activeEl.setAttribute('x', pt.x);
+        activeEl.setAttribute('y', pt.y);
+        activeEl.setAttribute('width', 0);
+        activeEl.setAttribute('height', 0);
+        activeEl.setAttribute('stroke', strokeColor);
+        activeEl.setAttribute('fill', fillColor);
+        activeEl.setAttribute('stroke-width', strokeWidth);
+        activeEl.setAttribute('rx', 8);
+        drawGroup.appendChild(activeEl);
+      } else if (activeTool === 'circle') {
+        activeEl = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
+        activeEl.setAttribute('cx', pt.x);
+        activeEl.setAttribute('cy', pt.y);
+        activeEl.setAttribute('r', 0);
+        activeEl.setAttribute('stroke', strokeColor);
+        activeEl.setAttribute('fill', fillColor);
+        activeEl.setAttribute('stroke-width', strokeWidth);
+        drawGroup.appendChild(activeEl);
+      } else if (activeTool === 'star') {
+        addStar(pt.x, pt.y);
+      }
+    });
+
+    canvasBox.addEventListener('pointermove', e => {
+      if (!isDrawing || !activeEl) return;
+      const pt = getCoords(e);
+
+      if (activeTool === 'pen') {
+        currentPoints.push(pt);
+        const d = currentPoints.reduce((acc, p, i) => acc + (i === 0 ? `M ${p.x} ${p.y}` : ` L ${p.x} ${p.y}`), '');
+        activeEl.setAttribute('d', d);
+      } else if (activeTool === 'rect') {
+        const start = currentPoints[0];
+        const x = Math.min(start.x, pt.x);
+        const y = Math.min(start.y, pt.y);
+        const w = Math.abs(pt.x - start.x);
+        const h = Math.abs(pt.y - start.y);
+        activeEl.setAttribute('x', x);
+        activeEl.setAttribute('y', y);
+        activeEl.setAttribute('width', w);
+        activeEl.setAttribute('height', h);
+      } else if (activeTool === 'circle') {
+        const start = currentPoints[0];
+        const r = Math.round(Math.hypot(pt.x - start.x, pt.y - start.y));
+        activeEl.setAttribute('r', r);
+      }
+    });
+
+    window.addEventListener('pointerup', () => {
+      isDrawing = false;
+      activeEl = null;
+    });
+
+    function addStar(cx, cy) {
+      const p = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+      const rOuter = 40, rInner = 20, points = 5;
+      let d = '';
+      for (let i = 0; i < points * 2; i++) {
+        const r = i % 2 === 0 ? rOuter : rInner;
+        const angle = (i * Math.PI) / points - Math.PI / 2;
+        const x = cx + r * Math.cos(angle);
+        const y = cy + r * Math.sin(angle);
+        d += (i === 0 ? 'M' : 'L') + ` ${Math.round(x)} ${Math.round(y)} `;
+      }
+      d += 'Z';
+      p.setAttribute('d', d);
+      p.setAttribute('stroke', strokeColor);
+      p.setAttribute('fill', fillColor === 'none' ? strokeColor : fillColor);
+      p.setAttribute('stroke-width', strokeWidth);
+      drawGroup.appendChild(p);
+    }
+
+    btnSaveSvg.onclick = () => {
+      const serializer = new XMLSerializer();
+      const svgString = serializer.serializeToString(stage);
+      const name = `vector_${Date.now()}.svg`;
+
+      if (window.AndroidLocker && window.AndroidLocker.saveAsset) {
+        window.AndroidLocker.saveAsset(svgString, name, "SVG");
+      }
+      showToast();
+    };
+
+    function showToast() {
+      toast.classList.add('show');
+      setTimeout(() => toast.classList.remove('show'), 2000);
+    }
+
+    // Default sample star icon
+    addStar(200, 200);
+  </script>
+</body>
+</html>

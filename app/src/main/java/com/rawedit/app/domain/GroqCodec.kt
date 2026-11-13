@@ -293,6 +293,9 @@ object GroqCodec {
     const val TRANSCRIPTIONS_URL = "$API_ORIGIN/openai/v1/audio/transcriptions"
 
     private val VISION_MODELS = setOf(
+        MODEL_LLAMA4_SCOUT,
+        MODEL_LLAMA4_MAVERICK,
+        MODEL_QWEN38_27B,
         MODEL_LLAMA32_11B_VISION,
         MODEL_LLAMA32_90B_VISION
     )
@@ -302,7 +305,7 @@ object GroqCodec {
             prefId = PREF_AUTO,
             shortLabel = "Auto",
             badgeLabel = "GROQ AUTO ROUTE",
-            detail = "Directs vision tasks to Llama 3.2 Vision, text/palettes/code to Llama 3.3 70B & 3.1 8B."
+            detail = "Directs vision tasks to Llama 4 Scout & Qwen 3.8, text/palettes/code to Llama 3.3 70B & 3.1 8B."
         ),
         GroqModelOption(
             prefId = MODEL_LLAMA33_70B,
@@ -317,9 +320,9 @@ object GroqCodec {
             detail = "Ultra-fast ~1,000 t/s Meta Llama 3.1 8B Instant for rapid checks, palettes, and low-latency responses."
         ),
         GroqModelOption(
-            prefId = MODEL_LLAMA32_11B_VISION,
-            shortLabel = "Llama 3.2 Vision",
-            badgeLabel = "GROQ LLAMA 3.2 VISION",
+            prefId = MODEL_LLAMA4_SCOUT,
+            shortLabel = "Llama 4 Scout",
+            badgeLabel = "GROQ LLAMA 4 SCOUT",
             detail = "Official Groq multimodal vision model for Cutout Studio audit, asset notes, and keyframe inspection."
         )
     )
@@ -328,6 +331,11 @@ object GroqCodec {
         PREF_AUTO,
         MODEL_LLAMA33_70B,
         MODEL_LLAMA31_8B,
+        MODEL_LLAMA4_SCOUT,
+        MODEL_LLAMA4_MAVERICK,
+        MODEL_QWEN38_27B,
+        MODEL_GPT_OSS_120B,
+        MODEL_GPT_OSS_20B,
         MODEL_LLAMA32_11B_VISION,
         MODEL_LLAMA32_90B_VISION,
         MODEL_MIXTRAL_8X7B
@@ -469,14 +477,24 @@ object GroqCodec {
     fun isVisionModel(modelId: String): Boolean {
         if (modelId in VISION_MODELS) return true
         val lower = modelId.lowercase(Locale.US)
-        return lower.contains("vision")
+        return lower.contains("vision") ||
+            lower.contains("scout") ||
+            lower.contains("maverick") ||
+            lower.contains("qwen3.8") ||
+            lower.contains("llama-4")
     }
 
     fun maxImagesForModel(modelId: String): Int = MAX_IMAGES_PER_REQUEST
 
-    fun isGptOssModel(modelId: String): Boolean = false
+    fun isGptOssModel(modelId: String): Boolean {
+        val lower = modelId.lowercase(Locale.US)
+        return lower.contains("gpt-oss") || lower.contains("deepseek-r1")
+    }
 
-    fun isQwen3Model(modelId: String): Boolean = false
+    fun isQwen3Model(modelId: String): Boolean {
+        val lower = modelId.lowercase(Locale.US)
+        return lower.contains("qwen")
+    }
 
     fun parseAvailableChatModelIds(rawBody: String): Set<String> {
         val obj = runCatching { JSONObject(rawBody) }.getOrNull() ?: return emptySet()
@@ -569,17 +587,26 @@ object GroqCodec {
         val pref = normalizeModelPref(modelPref)
         val defaults = if (requiresVision) {
             when (pref) {
-                MODEL_LLAMA32_90B_VISION -> listOf(
-                    MODEL_LLAMA32_90B_VISION,
-                    MODEL_LLAMA32_11B_VISION
+                MODEL_LLAMA4_SCOUT -> listOf(
+                    MODEL_LLAMA4_SCOUT,
+                    MODEL_LLAMA4_MAVERICK,
+                    MODEL_QWEN38_27B
                 )
-                MODEL_LLAMA32_11B_VISION -> listOf(
-                    MODEL_LLAMA32_11B_VISION,
-                    MODEL_LLAMA32_90B_VISION
+                MODEL_LLAMA4_MAVERICK -> listOf(
+                    MODEL_LLAMA4_MAVERICK,
+                    MODEL_LLAMA4_SCOUT,
+                    MODEL_QWEN38_27B
+                )
+                MODEL_QWEN38_27B -> listOf(
+                    MODEL_QWEN38_27B,
+                    MODEL_LLAMA4_SCOUT,
+                    MODEL_LLAMA4_MAVERICK
                 )
                 else -> listOf(
-                    MODEL_LLAMA32_11B_VISION,
-                    MODEL_LLAMA32_90B_VISION
+                    MODEL_LLAMA4_SCOUT,
+                    MODEL_LLAMA4_MAVERICK,
+                    MODEL_QWEN38_27B,
+                    MODEL_LLAMA32_11B_VISION
                 )
             }
         } else {
@@ -587,17 +614,22 @@ object GroqCodec {
                 MODEL_LLAMA31_8B -> listOf(
                     MODEL_LLAMA31_8B,
                     MODEL_LLAMA33_70B,
-                    MODEL_MIXTRAL_8X7B
+                    MODEL_GPT_OSS_120B
                 )
                 MODEL_LLAMA33_70B -> listOf(
                     MODEL_LLAMA33_70B,
                     MODEL_LLAMA31_8B,
-                    MODEL_MIXTRAL_8X7B
+                    MODEL_GPT_OSS_120B
+                )
+                MODEL_GPT_OSS_120B -> listOf(
+                    MODEL_GPT_OSS_120B,
+                    MODEL_LLAMA33_70B,
+                    MODEL_LLAMA31_8B
                 )
                 else -> listOf(
                     MODEL_LLAMA33_70B,
                     MODEL_LLAMA31_8B,
-                    MODEL_MIXTRAL_8X7B
+                    MODEL_GPT_OSS_120B
                 )
             }
         }
@@ -843,7 +875,7 @@ object GroqCodec {
 
         val rawContent = when {
             msgObj == null -> ""
-            msgObj.has("content") && !msgObj.isNull("content") -> {
+            msgObj.has("content") && !msgObj.isNull("content") && msgObj.optString("content", "").isNotBlank() -> {
                 val c = msgObj.opt("content")
                 when (c) {
                     is String -> c
@@ -860,17 +892,27 @@ object GroqCodec {
                     else -> c?.toString().orEmpty()
                 }
             }
-            msgObj.has("reasoning") && !msgObj.isNull("reasoning") -> msgObj.optString("reasoning", "")
-            msgObj.has("reasoning_content") && !msgObj.isNull("reasoning_content") -> msgObj.optString("reasoning_content", "")
+            msgObj.has("reasoning") && !msgObj.isNull("reasoning") && msgObj.optString("reasoning", "").isNotBlank() ->
+                msgObj.optString("reasoning", "")
+            msgObj.has("reasoning_content") && !msgObj.isNull("reasoning_content") && msgObj.optString("reasoning_content", "").isNotBlank() ->
+                msgObj.optString("reasoning_content", "")
+            msgObj.has("content") && !msgObj.isNull("content") -> msgObj.optString("content", "")
             else -> ""
         }
 
-        val textOut = THINK_BLOCK_REGEX.replace(rawContent, "").trim()
+        var textOut = THINK_BLOCK_REGEX.replace(rawContent, "").trim()
+        if (textOut.isEmpty() && rawContent.isNotBlank()) {
+            val insideThink = THINK_BLOCK_REGEX.findAll(rawContent).map { match ->
+                match.value.removePrefix("<think>").removePrefix("<THINK>").removeSuffix("</think>").removeSuffix("</THINK>").trim()
+            }.firstOrNull { it.isNotBlank() }
+            textOut = if (!insideThink.isNullOrBlank()) insideThink else rawContent.trim()
+        }
+
         if (textOut.isEmpty()) {
             val fallbackMsg = when {
                 finishReason.equals("length", ignoreCase = true) -> {
                     val m = modelId.ifBlank { "Groq model" }
-                    "$m hit max_completion_tokens before answering (finish_reason=length)."
+                    "$m hit token limit before answering (finish_reason=length)."
                 }
                 finishReason.isNotBlank() -> {
                     val m = modelId.ifBlank { "Groq model" }
@@ -879,7 +921,7 @@ object GroqCodec {
                 else -> {
                     val m = modelId.ifBlank { "Groq model" }
                     val msgKeys = msgObj?.keys()?.asSequence()?.toList()?.joinToString(",") ?: "null"
-                    "$m returned empty output (message keys: $msgKeys)."
+                    "$m returned empty output (keys: $msgKeys)."
                 }
             }
             throw GroqApiException(

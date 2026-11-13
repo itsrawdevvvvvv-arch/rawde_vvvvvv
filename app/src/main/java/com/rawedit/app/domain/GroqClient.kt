@@ -333,10 +333,11 @@ object GroqClient {
                     heavyTask = false,
                     systemInstruction = null,
                     jsonObjectMode = false,
-                    maxCompletionTokens = 64,
-                    temperature = 0.7
+                    maxCompletionTokens = 128,
+                    temperature = 0.5
                 )
             }
+            GroqLimiter.markReadyIfNotHardBlocked()
 
             val totalMs = (System.currentTimeMillis() - t0).coerceAtLeast(1L)
             val modelUsed = probeOutcome.map { it.modelUsed }.getOrDefault(expectedPrimary)

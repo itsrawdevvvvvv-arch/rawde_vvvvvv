@@ -284,16 +284,13 @@ fun CircleActionButton(
     backgroundColor: Color = RawColors.RaisedCard,
     iconTint: Color = RawColors.TextPrimary,
     borderColor: Color = Color.Transparent,
-    enabled: Boolean = true,
-    isDanger: Boolean = false
+    enabled: Boolean = true
 ) {
-    val dangerTint = isDanger && iconTint == RawColors.TextPrimary
-    val effectiveBg = if (isDanger || (iconTint == RawColors.ErrorCoral && backgroundColor == RawColors.RaisedCard)) {
+    val effectiveBg = if (iconTint == RawColors.ErrorCoral && backgroundColor == RawColors.RaisedCard) {
         RawColors.ErrorSoft
     } else {
         backgroundColor
     }
-    val effectiveTint = if (dangerTint) RawColors.ErrorCoral else iconTint
     RawPressButton(
         onClick = onClick,
         enabled = enabled,
@@ -316,7 +313,7 @@ fun CircleActionButton(
             RawIcon(
                 type = icon,
                 size = if (size >= 46.dp) 21.dp else size * 0.48f,
-                tint = effectiveTint,
+                tint = iconTint,
                 strokeWidth = if (size <= 36.dp) 1.9.dp else 2.2.dp
             )
         }

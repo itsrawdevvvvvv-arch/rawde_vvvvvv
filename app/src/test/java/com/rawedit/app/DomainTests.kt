@@ -73,6 +73,21 @@ class DomainTests {
         val withSrt = PromptGenerator.buildPrompt("voice.mp3", 32.5, "Product launch", "1\n00:00:00,000 --> 00:00:02,000\nHello")
         assertTrue(withSrt.contains("00:00:00,000 --> 00:00:02,000"))
         assertTrue(withSrt.contains("Hello"))
+        assertTrue(withSrt.contains("SVG-Edit"))
+        assertTrue(withSrt.contains("Emoji Kitchen"))
+
+        val swissPrompt = PromptGenerator.buildPrompt(
+            fileName = "swiss.mp3",
+            durationSeconds = 18.0,
+            topic = "Design studio showcase",
+            srtText = "",
+            style = com.rawedit.app.domain.ReelEditingStyle.SWISS_GRID_MOTION
+        )
+        assertTrue(swissPrompt.contains("Swiss Grid Motion Style"))
+        assertTrue(swissPrompt.contains("swiss-grid-motion-style.zip"))
+        assertTrue(swissPrompt.contains("The Grid is the Design"))
+        assertTrue(swissPrompt.contains("SVG-Edit"))
+        assertTrue(swissPrompt.contains("Emoji Kitchen"))
     }
 
     @Test
@@ -459,10 +474,8 @@ Enjoy!
         assertEquals(0, report.remainingPercent)
 
         val visionModels = GroqCodec.buildCandidateModels(GroqCodec.PREF_AUTO, requiresVision = true, heavyTask = false)
-        assertEquals(
-            listOf(GroqCodec.MODEL_LLAMA32_11B_VISION, GroqCodec.MODEL_LLAMA32_90B_VISION),
-            visionModels
-        )
+        assertTrue(visionModels.contains(GroqCodec.MODEL_LLAMA4_SCOUT))
+        assertEquals(GroqCodec.MODEL_LLAMA4_SCOUT, visionModels.first())
 
         val heavyTextModels = GroqCodec.buildCandidateModels(GroqCodec.PREF_AUTO, requiresVision = false, heavyTask = true)
         assertEquals(GroqCodec.MODEL_LLAMA33_70B, heavyTextModels.first())
@@ -698,5 +711,9 @@ Enjoy!
         val domBundle = KeyframeSheetGenerator.extractDomFlagBundle(samples, picked)
         assertTrue(domBundle.flagLines.any { it.contains("span.sub") && it.contains("edge-clip") })
         assertTrue(domBundle.flagTokens.contains("sub"))
+
+        assertEquals(2, KeyframeSheetGenerator.countIssues(samples))
+        val compressed = KeyframeSheetGenerator.compressFlagLines(domBundle.flagLines)
+        assertTrue(compressed.contains("span.sub") || compressed.isBlank())
     }
 }

@@ -179,9 +179,9 @@ class CacheManager(private val context: Context) {
         }
     }
 
-    suspend fun prepareStylePackShareFile(): File = withContext(Dispatchers.IO) {
-        val outFile = File(sharedPacksDir, STYLE_PACK_ASSET_NAME)
-        context.assets.open(STYLE_PACK_ASSET_NAME).use { input ->
+    suspend fun prepareStylePackShareFile(packName: String = STYLE_PACK_ASSET_NAME): File = withContext(Dispatchers.IO) {
+        val outFile = File(sharedPacksDir, packName)
+        context.assets.open(packName).use { input ->
             FileOutputStream(outFile).use { output ->
                 input.copyTo(output)
             }
@@ -189,10 +189,10 @@ class CacheManager(private val context: Context) {
         outFile
     }
 
-    suspend fun saveStylePackToUri(destUri: Uri): Result<Unit> = withContext(Dispatchers.IO) {
+    suspend fun saveStylePackToUri(destUri: Uri, packName: String = STYLE_PACK_ASSET_NAME): Result<Unit> = withContext(Dispatchers.IO) {
         runCatching {
             context.contentResolver.openOutputStream(destUri)?.use { output ->
-                context.assets.open(STYLE_PACK_ASSET_NAME).use { input ->
+                context.assets.open(packName).use { input ->
                     input.copyTo(output)
                 }
             } ?: throw IllegalStateException("Could not open selected location.")
@@ -200,11 +200,11 @@ class CacheManager(private val context: Context) {
         }
     }
 
-    suspend fun saveStylePackToDownloads(): Result<String> = withContext(Dispatchers.IO) {
+    suspend fun saveStylePackToDownloads(packName: String = STYLE_PACK_ASSET_NAME): Result<String> = withContext(Dispatchers.IO) {
         runCatching {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
                 val values = ContentValues().apply {
-                    put(MediaStore.Downloads.DISPLAY_NAME, STYLE_PACK_ASSET_NAME)
+                    put(MediaStore.Downloads.DISPLAY_NAME, packName)
                     put(MediaStore.Downloads.MIME_TYPE, "application/zip")
                     put(MediaStore.Downloads.RELATIVE_PATH, "${Environment.DIRECTORY_DOWNLOADS}/raw_edit")
                     put(MediaStore.Downloads.IS_PENDING, 1)
@@ -214,7 +214,7 @@ class CacheManager(private val context: Context) {
                     ?: throw IllegalStateException("Could not create Downloads entry.")
                 try {
                     resolver.openOutputStream(uri)?.use { out ->
-                        context.assets.open(STYLE_PACK_ASSET_NAME).use { input ->
+                        context.assets.open(packName).use { input ->
                             input.copyTo(out)
                         }
                     } ?: throw IllegalStateException("Could not write ZIP to Downloads.")
@@ -226,7 +226,7 @@ class CacheManager(private val context: Context) {
                     resolver.delete(uri, null, null)
                     throw t
                 }
-                "Saved to Downloads/raw_edit/$STYLE_PACK_ASSET_NAME"
+                "Saved to Downloads/raw_edit/$packName"
             } else {
                 throw UnsupportedOperationException("Picker required on Android 9")
             }
@@ -886,6 +886,8 @@ class CacheManager(private val context: Context) {
         const val CODE_FILE_PREFIX = "@rawfile:"
         const val TOPIC_FILE_PREFIX = "@rawtxt:"
         const val SRT_FILE_PREFIX = "@rawsrt:"
-        const val STYLE_PACK_ASSET_NAME = "kinetic-explainer-style.zip"
+        const val STYLE_PACK_KINETIC = "kinetic-explainer-style.zip"
+        const val STYLE_PACK_SWISS = "swiss-grid-motion-style.zip"
+        const val STYLE_PACK_ASSET_NAME = STYLE_PACK_KINETIC
     }
 }

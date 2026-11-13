@@ -112,7 +112,6 @@ fun AssetLockerScreen(
     onSwitchGroqKey: () -> Unit,
     onRefreshGroqQuota: () -> Unit
 ) {
-    val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val listState = rememberLazyListState()
 
@@ -293,6 +292,12 @@ fun AssetLockerScreen(
                                 text = "In-App Web Capture & Icon Finder",
                                 height = 50.dp,
                                 leadingIcon = RawIconType.GLOBE,
+                                onClick = onOpenWebBrowser
+                            )
+                            RawSecondaryButton(
+                                text = "Open-Source Studios (Emoji / SVG / Canvas / Lottie)",
+                                height = 50.dp,
+                                leadingIcon = RawIconType.SPARK,
                                 onClick = onOpenWebBrowser
                             )
                             RawSecondaryButton(

@@ -1,0 +1,156 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <title>Lottie Motion Inspector</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
+    body { background: #0E0E0E; color: #F0F0F0; padding: 16px; user-select: none; }
+    .header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px; }
+    .title { font-size: 18px; font-weight: 700; color: #DCC9A9; }
+    .badge { font-size: 11px; background: #262626; color: #A0A0A0; padding: 4px 8px; border-radius: 6px; }
+    
+    .anim-stage {
+      width: 100%; aspect-ratio: 1; background: #161616; border: 1px solid #2B2B2B; border-radius: 14px;
+      display: flex; align-items: center; justify-content: center; position: relative; margin-bottom: 14px;
+    }
+    .svg-anim { width: 180px; height: 180px; }
+    
+    .timeline-card { background: #1A1A1A; border: 1px solid #2D2D2D; border-radius: 12px; padding: 14px; margin-bottom: 14px; }
+    .timeline-header { display: flex; justify-content: space-between; font-size: 12px; color: #888; margin-bottom: 8px; }
+    .scrubber { width: 100%; height: 8px; -webkit-appearance: none; background: #2A2A2A; border-radius: 4px; outline: none; }
+    .scrubber::-webkit-slider-thumb { -webkit-appearance: none; width: 18px; height: 18px; border-radius: 50%; background: #DCC9A9; cursor: pointer; }
+    
+    .controls-row { display: flex; gap: 8px; margin-top: 10px; }
+    .ctrl-btn { flex: 1; padding: 8px; background: #242424; border: 1px solid #333; color: #EEE; border-radius: 8px; font-size: 12px; font-weight: 600; cursor: pointer; }
+    .ctrl-btn.active { background: #DCC9A9; color: #121212; border-color: #DCC9A9; }
+    
+    .btn-save {
+      background: #DCC9A9; color: #121212; border: none; font-size: 14px; font-weight: 700;
+      padding: 12px 20px; border-radius: 10px; width: 100%; cursor: pointer;
+      display: flex; align-items: center; justify-content: center; gap: 8px;
+    }
+    .btn-save:active { transform: scale(0.98); opacity: 0.9; }
+    
+    .status-toast {
+      position: fixed; bottom: 20px; left: 50%; transform: translateX(-50%);
+      background: #222; border: 1px solid #444; color: #DCC9A9; padding: 8px 16px;
+      border-radius: 20px; font-size: 12px; opacity: 0; transition: opacity 0.3s ease; pointer-events: none;
+    }
+    .status-toast.show { opacity: 1; }
+  </style>
+</head>
+<body>
+
+  <div class="header">
+    <div class="title">Lottie Tools Motion Studio</div>
+    <div class="badge">Keyframe Engine</div>
+  </div>
+
+  <div class="anim-stage">
+    <svg id="vectorTarget" class="svg-anim" viewBox="0 0 200 200" xmlns="http://www.w3.org/2000/svg">
+      <circle id="bgPulse" cx="100" cy="100" r="80" fill="none" stroke="#E5484D" stroke-width="4" stroke-dasharray="12 8" opacity="0.4" />
+      <polygon id="centerShape" points="100,30 160,150 40,150" fill="#DCC9A9" />
+      <circle id="centerCore" cx="100" cy="115" r="16" fill="#121212" />
+    </svg>
+  </div>
+
+  <div class="timeline-card">
+    <div class="timeline-header">
+      <span>Timeline Scrub</span>
+      <span id="timeDisplay">0.00s / 2.00s</span>
+    </div>
+    <input type="range" id="timeScrubber" class="scrubber" min="0" max="200" value="0">
+    <div class="controls-row">
+      <button class="ctrl-btn" id="btnPlayPause">Play</button>
+      <button class="ctrl-btn" id="btnPreset1">Morph Pulse</button>
+      <button class="ctrl-btn" id="btnPreset2">Spin Star</button>
+    </div>
+  </div>
+
+  <button class="btn-save" id="btnSaveLottie">
+    Export Animated Vector to Asset Locker
+  </button>
+
+  <div class="status-toast" id="toast">Vector Asset Exported!</div>
+
+  <script>
+    let isPlaying = false;
+    let t = 0; // 0..2 seconds
+    let lastTime = performance.now();
+    let currentPreset = 'pulse';
+
+    const scrubber = document.getElementById('timeScrubber');
+    const timeDisplay = document.getElementById('timeDisplay');
+    const btnPlayPause = document.getElementById('btnPlayPause');
+    const btnPreset1 = document.getElementById('btnPreset1');
+    const btnPreset2 = document.getElementById('btnPreset2');
+    const btnSaveLottie = document.getElementById('btnSaveLottie');
+    const toast = document.getElementById('toast');
+
+    const bgPulse = document.getElementById('bgPulse');
+    const centerShape = document.getElementById('centerShape');
+    const centerCore = document.getElementById('centerCore');
+    const vectorTarget = document.getElementById('vectorTarget');
+
+    function applyFrame(progress) {
+      // progress: 0..1
+      const p = progress;
+      if (currentPreset === 'pulse') {
+        const scale = 1 + 0.25 * Math.sin(p * Math.PI * 2);
+        const rot = p * 360;
+        centerShape.setAttribute('transform', `rotate(${rot} 100 115) scale(${scale})`);
+        centerShape.setAttribute('transform-origin', '100px 115px');
+        bgPulse.setAttribute('r', `${70 + 20 * Math.sin(p * Math.PI * 2)}`);
+        bgPulse.setAttribute('stroke', p > 0.5 ? '#E5484D' : '#00E5FF');
+      } else {
+        const rot = p * 720;
+        centerShape.setAttribute('transform', `rotate(${rot} 100 115)`);
+        centerShape.setAttribute('transform-origin', '100px 115px');
+        bgPulse.setAttribute('r', '80');
+      }
+    }
+
+    function tick(now) {
+      if (isPlaying) {
+        const dt = (now - lastTime) / 1000;
+        t = (t + dt) % 2.0;
+        scrubber.value = Math.round((t / 2.0) * 200);
+        timeDisplay.textContent = t.toFixed(2) + 's / 2.00s';
+        applyFrame(t / 2.0);
+      }
+      lastTime = now;
+      requestAnimationFrame(tick);
+    }
+    requestAnimationFrame(tick);
+
+    scrubber.oninput = () => {
+      isPlaying = false;
+      btnPlayPause.textContent = 'Play';
+      t = (scrubber.value / 200) * 2.0;
+      timeDisplay.textContent = t.toFixed(2) + 's / 2.00s';
+      applyFrame(t / 2.0);
+    };
+
+    btnPlayPause.onclick = () => {
+      isPlaying = !isPlaying;
+      btnPlayPause.textContent = isPlaying ? 'Pause' : 'Play';
+    };
+
+    btnPreset1.onclick = () => { currentPreset = 'pulse'; };
+    btnPreset2.onclick = () => { currentPreset = 'spin'; };
+
+    btnSaveLottie.onclick = () => {
+      const serializer = new XMLSerializer();
+      const svgStr = serializer.serializeToString(vectorTarget);
+      const name = `lottie_shape_${Date.now()}.svg`;
+      if (window.AndroidLocker && window.AndroidLocker.saveAsset) {
+        window.AndroidLocker.saveAsset(svgStr, name, "SVG");
+      }
+      toast.classList.add('show');
+      setTimeout(() => toast.classList.remove('show'), 2000);
+    };
+  </script>
+</body>
+</html>

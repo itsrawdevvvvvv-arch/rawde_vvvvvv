@@ -141,13 +141,17 @@ private suspend fun readClipboardText(context: Context): String {
     }
 }
 
-private suspend fun readRawHelperFromStylePack(context: Context): String = withContext(Dispatchers.IO) {
+private suspend fun readRawHelperFromStylePack(
+    context: Context,
+    packName: String = CacheManager.STYLE_PACK_ASSET_NAME,
+    targetEntryPath: String = HELPER_ENTRY_PATH
+): String = withContext(Dispatchers.IO) {
     runCatching {
-        context.assets.open(CacheManager.STYLE_PACK_ASSET_NAME).use { input ->
+        context.assets.open(packName).use { input ->
             ZipInputStream(input).use { zis ->
                 var entry = zis.nextEntry
                 while (entry != null) {
-                    if (entry.name == HELPER_ENTRY_PATH) {
+                    if (entry.name == targetEntryPath) {
                         return@use zis.bufferedReader(Charsets.UTF_8).readText()
                     }
                     zis.closeEntry()
@@ -796,7 +800,9 @@ fun CopyPromptScreen(
         cacheManager.listCustomFonts().map { it.nameWithoutExtension }
     }
 
-    val promptText = remember(project.audioName, project.audioDurationSec, resolvedTopic, resolvedSrt, attachedAssets, palette, customFontNames) {
+    var selectedStyle by remember { mutableStateOf(ReelEditingStyle.KINETIC_EXPLAINER) }
+
+    val promptText = remember(project.audioName, project.audioDurationSec, resolvedTopic, resolvedSrt, attachedAssets, palette, customFontNames, selectedStyle) {
         PromptGenerator.buildPrompt(
             fileName = project.audioName,
             durationSeconds = project.audioDurationSec.coerceAtLeast(1.0),
@@ -804,7 +810,8 @@ fun CopyPromptScreen(
             srtText = resolvedSrt,
             assets = attachedAssets,
             palette = palette,
-            customFonts = customFontNames
+            customFonts = customFontNames,
+            style = selectedStyle
         )
     }
     val displayPrompt = remember(promptText) {
@@ -842,11 +849,11 @@ fun CopyPromptScreen(
             zipBusy = true
             zipError = null
             scope.launch {
-                val res = cacheManager.saveStylePackToUri(destUri)
+                val res = cacheManager.saveStylePackToUri(destUri, selectedStyle.zipName)
                 zipBusy = false
                 res.onSuccess {
                     zipSaved = true
-                    zipStatus = "Saved ${CacheManager.STYLE_PACK_ASSET_NAME}"
+                    zipStatus = "Saved ${selectedStyle.zipName}"
                 }.onFailure { err ->
                     zipError = err.message ?: "Could not save ZIP."
                 }
@@ -947,6 +954,122 @@ fun CopyPromptScreen(
                 }
             }
 
+            // 16:9 Style Selector Header
+            Text(
+                text = "SELECT EDITING STYLE (16:9 SAMPLE)",
+                fontFamily = JetBrainsMonoFamily,
+                fontWeight = FontWeight.Bold,
+                fontSize = 11.5.sp,
+                color = RawColors.Tan
+            )
+
+            // 16:9 Style Cards Row
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
+                ReelEditingStyle.entries.forEach { st ->
+                    val isSel = selectedStyle == st
+                    val sampleBmp = remember(st) {
+                        runCatching {
+                            context.assets.open(st.previewAssetPath).use { stream ->
+                                BitmapFactory.decodeStream(stream)
+                            }
+                        }.getOrNull()
+                    }
+
+                    Column(
+                        modifier = Modifier
+                            .weight(1f)
+                            .clip(RoundedCornerShape(18.dp))
+                            .background(if (isSel) RawColors.AccentSoft else RawColors.CardSurface)
+                            .border(
+                                width = if (isSel) 2.dp else 1.dp,
+                                color = if (isSel) RawColors.Tan else RawColors.CardBorder,
+                                shape = RoundedCornerShape(18.dp)
+                            )
+                            .clickable {
+                                selectedStyle = st
+                                haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                            }
+                            .padding(10.dp),
+                        verticalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        // 16:9 Preview Image
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .aspectRatio(16f / 9f)
+                                .clip(RoundedCornerShape(10.dp))
+                                .background(Color.Black)
+                        ) {
+                            if (sampleBmp != null) {
+                                Image(
+                                    bitmap = sampleBmp.asImageBitmap(),
+                                    contentDescription = st.title,
+                                    modifier = Modifier.fillMaxSize(),
+                                    contentScale = ContentScale.Crop
+                                )
+                            }
+                            // Badge overlay
+                            Box(
+                                modifier = Modifier
+                                    .align(Alignment.TopEnd)
+                                    .padding(4.dp)
+                                    .clip(RoundedCornerShape(4.dp))
+                                    .background(Color(0xDD121212))
+                                    .padding(horizontal = 6.dp, vertical = 2.dp)
+                            ) {
+                                Text(
+                                    text = st.badge,
+                                    fontFamily = JetBrainsMonoFamily,
+                                    fontSize = 9.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = if (isSel) RawColors.Tan else RawColors.TextMuted
+                                )
+                            }
+                        }
+
+                        // Title and selection check
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text(
+                                text = st.title,
+                                fontFamily = BricolageFamily,
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 14.5.sp,
+                                color = if (isSel) RawColors.Tan else RawColors.TextPrimary,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                                modifier = Modifier.weight(1f)
+                            )
+                            Box(
+                                modifier = Modifier
+                                    .size(18.dp)
+                                    .clip(CircleShape)
+                                    .background(if (isSel) RawColors.Tan else RawColors.RaisedCard),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                if (isSel) {
+                                    RawIcon(RawIconType.CHECK, size = 11.dp, tint = Color.Black)
+                                }
+                            }
+                        }
+
+                        Text(
+                            text = st.description,
+                            style = RawTypography.labelMedium.copy(fontSize = 11.sp, lineHeight = 14.5.sp),
+                            color = RawColors.TextMuted,
+                            maxLines = 2,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                    }
+                }
+            }
+
             // Style Pack ZIP Card (28dp)
             val zipBorder by animateColorAsState(
                 targetValue = if (zipSaved) RawColors.AccentBorder else Color.Transparent,
@@ -982,7 +1105,7 @@ fun CopyPromptScreen(
                     }
                     Column(modifier = Modifier.weight(1f)) {
                         Text(
-                            text = CacheManager.STYLE_PACK_ASSET_NAME,
+                            text = selectedStyle.zipName,
                             fontFamily = BricolageFamily,
                             fontWeight = FontWeight.Bold,
                             fontSize = 16.5.sp,
@@ -991,7 +1114,11 @@ fun CopyPromptScreen(
                             overflow = TextOverflow.Ellipsis
                         )
                         Text(
-                            text = "Includes engine/raw-helpers.js",
+                            text = if (selectedStyle == ReelEditingStyle.KINETIC_EXPLAINER) {
+                                "Includes engine/raw-helpers.js"
+                            } else {
+                                "Includes engine/engine.js (Swiss grid)"
+                            },
                             style = RawTypography.labelMedium
                         )
                     }
@@ -1002,7 +1129,7 @@ fun CopyPromptScreen(
                             .padding(horizontal = 11.dp, vertical = 6.dp)
                     ) {
                         Text(
-                            text = if (zipSaved) "Saved" else "552 KB",
+                            text = if (zipSaved) "Saved" else if (selectedStyle == ReelEditingStyle.KINETIC_EXPLAINER) "552 KB" else "356 KB",
                             fontFamily = JetBrainsMonoFamily,
                             fontWeight = FontWeight.SemiBold,
                             fontSize = 11.5.sp,
@@ -1012,14 +1139,17 @@ fun CopyPromptScreen(
                     }
                 }
 
-                // Helper inspect chip for RAW.syncVideo
+                // Helper inspect chip
                 RawPressButton(
                     onClick = {
                         showHelperDialog = true
-                        if (helperCode == null) {
-                            scope.launch {
-                                helperCode = readRawHelperFromStylePack(context)
+                        scope.launch {
+                            helperCode = if (selectedStyle == ReelEditingStyle.KINETIC_EXPLAINER) {
+                                readRawHelperFromStylePack(context, CacheManager.STYLE_PACK_KINETIC, "kinetic-explainer-style/engine/raw-helpers.js")
                                     .ifBlank { "// raw-helpers.js missing from bundle" }
+                            } else {
+                                readRawHelperFromStylePack(context, CacheManager.STYLE_PACK_SWISS, "swiss-grid-motion-style/engine/engine.js")
+                                    .ifBlank { "// engine.js missing from bundle" }
                             }
                         }
                     }
@@ -1034,11 +1164,11 @@ fun CopyPromptScreen(
                     ) {
                         RawIcon(type = RawIconType.CODE, size = 14.dp, tint = RawColors.Tan)
                         Text(
-                            text = "Inspect helper: RAW.syncVideo(...)",
+                            text = if (selectedStyle == ReelEditingStyle.KINETIC_EXPLAINER) "Inspect helper: RAW.syncVideo(...)" else "Inspect engine: Swiss Grid Engine",
                             fontFamily = JetBrainsMonoFamily,
                             fontWeight = FontWeight.SemiBold,
                             fontSize = 12.sp,
-                            color = RawColors.TextPrimary
+                            color = RawColors.Tan
                         )
                     }
                 }
@@ -1061,18 +1191,18 @@ fun CopyPromptScreen(
                             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
                                 zipBusy = true
                                 scope.launch {
-                                    val res = cacheManager.saveStylePackToDownloads()
+                                    val res = cacheManager.saveStylePackToDownloads(selectedStyle.zipName)
                                     zipBusy = false
                                     res.onSuccess { msg ->
                                         haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
                                         zipSaved = true
                                         zipStatus = msg
                                     }.onFailure {
-                                        zipCreateLauncher.launch(CacheManager.STYLE_PACK_ASSET_NAME)
+                                        zipCreateLauncher.launch(selectedStyle.zipName)
                                     }
                                 }
                             } else {
-                                zipCreateLauncher.launch(CacheManager.STYLE_PACK_ASSET_NAME)
+                                zipCreateLauncher.launch(selectedStyle.zipName)
                             }
                         },
                         modifier = Modifier.weight(1f)
@@ -1087,7 +1217,7 @@ fun CopyPromptScreen(
                             zipError = null
                             scope.launch {
                                 runCatching {
-                                    val zipFile = cacheManager.prepareStylePackShareFile()
+                                    val zipFile = cacheManager.prepareStylePackShareFile(selectedStyle.zipName)
                                     val shareUri = FileProvider.getUriForFile(
                                         context,
                                         "${context.packageName}.fileprovider",
@@ -1096,11 +1226,11 @@ fun CopyPromptScreen(
                                     val share = Intent(Intent.ACTION_SEND).apply {
                                         type = "application/zip"
                                         putExtra(Intent.EXTRA_STREAM, shareUri)
-                                        putExtra(Intent.EXTRA_SUBJECT, CacheManager.STYLE_PACK_ASSET_NAME)
-                                        clipData = ClipData.newRawUri(CacheManager.STYLE_PACK_ASSET_NAME, shareUri)
+                                        putExtra(Intent.EXTRA_SUBJECT, selectedStyle.zipName)
+                                        clipData = ClipData.newRawUri(selectedStyle.zipName, shareUri)
                                         addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
                                     }
-                                    context.startActivity(Intent.createChooser(share, "Share Style Pack ZIP"))
+                                    context.startActivity(Intent.createChooser(share, "Share ${selectedStyle.title} Style Pack"))
                                 }.onFailure { err ->
                                     zipError = err.message ?: "Could not share ZIP."
                                 }

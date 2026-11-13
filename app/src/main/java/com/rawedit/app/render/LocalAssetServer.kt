@@ -48,6 +48,9 @@ class LocalAssetServer(
         val path = url.path.orEmpty()
 
         if (scheme == "https" && host == RAW_HOST) {
+            if (path.startsWith("/tools/")) {
+                return serveToolAsset(path.removePrefix("/tools/"))
+            }
             if (path.startsWith("/fonts/")) {
                 return serveBundledFont(path.removePrefix("/fonts/"))
             }
@@ -236,6 +239,30 @@ class LocalAssetServer(
         }
 
         return forbidden()
+    }
+
+    private fun serveToolAsset(toolName: String): WebResourceResponse {
+        val cleanName = toolName.trim().removePrefix("/")
+        val mime = when {
+            cleanName.endsWith(".html") -> "text/html"
+            cleanName.endsWith(".js") -> "application/javascript"
+            cleanName.endsWith(".css") -> "text/css"
+            cleanName.endsWith(".svg") -> "image/svg+xml"
+            cleanName.endsWith(".png") -> "image/png"
+            cleanName.endsWith(".jpg") || cleanName.endsWith(".jpeg") -> "image/jpeg"
+            else -> "text/html"
+        }
+        return runCatching {
+            val stream = context.assets.open("tools/$cleanName")
+            WebResourceResponse(
+                mime,
+                "UTF-8",
+                200,
+                "OK",
+                CORS_HEADERS,
+                stream
+            )
+        }.getOrElse { forbidden() }
     }
 
     private fun forbidden(): WebResourceResponse {

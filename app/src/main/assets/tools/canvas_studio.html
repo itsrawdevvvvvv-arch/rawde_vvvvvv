@@ -1,0 +1,183 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <title>Canvas & Annotation Studio</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
+    body { background: #0E0E0E; color: #F0F0F0; padding: 16px; user-select: none; }
+    .header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px; }
+    .title { font-size: 18px; font-weight: 700; color: #DCC9A9; }
+    .badge { font-size: 11px; background: #262626; color: #A0A0A0; padding: 4px 8px; border-radius: 6px; }
+    
+    .toolbar { display: flex; gap: 6px; margin-bottom: 12px; overflow-x: auto; padding-bottom: 4px; }
+    .tool-btn {
+      padding: 8px 12px; font-size: 12px; font-weight: 600; background: #1C1C1C;
+      border: 1px solid #2C2C2C; border-radius: 8px; color: #BBB; cursor: pointer; white-space: nowrap;
+    }
+    .tool-btn:active { transform: scale(0.95); }
+    
+    .canvas-wrap {
+      width: 100%; aspect-ratio: 9/16; max-height: 440px; background: #181818;
+      border: 1px solid #2E2E2E; border-radius: 12px; position: relative; overflow: hidden;
+      margin: 0 auto 12px auto; touch-action: none;
+    }
+    canvas#mainCanvas { width: 100%; height: 100%; display: block; }
+    
+    .btn-save {
+      background: #DCC9A9; color: #121212; border: none; font-size: 14px; font-weight: 700;
+      padding: 12px 20px; border-radius: 10px; width: 100%; cursor: pointer;
+      display: flex; align-items: center; justify-content: center; gap: 8px;
+    }
+    .btn-save:active { transform: scale(0.98); opacity: 0.9; }
+    
+    .status-toast {
+      position: fixed; bottom: 20px; left: 50%; transform: translateX(-50%);
+      background: #222; border: 1px solid #444; color: #DCC9A9; padding: 8px 16px;
+      border-radius: 20px; font-size: 12px; opacity: 0; transition: opacity 0.3s ease; pointer-events: none;
+    }
+    .status-toast.show { opacity: 1; }
+  </style>
+</head>
+<body>
+
+  <div class="header">
+    <div class="title">Filerobot / tldraw Canvas Studio</div>
+    <div class="badge">Multi-Asset Layers</div>
+  </div>
+
+  <div class="toolbar">
+    <button class="tool-btn" id="btnAddText">+ Headline</button>
+    <button class="tool-btn" id="btnAddSticker">+ Sticker Stamp</button>
+    <button class="tool-btn" id="btnAddBadge">+ Pill Badge</button>
+    <button class="tool-btn" id="btnAddArrow">+ Arrow</button>
+    <button class="tool-btn" id="btnClear" style="color:#E5484D">Clear</button>
+  </div>
+
+  <div class="canvas-wrap">
+    <canvas id="mainCanvas" width="540" height="960"></canvas>
+  </div>
+
+  <button class="btn-save" id="btnSaveCanvas">
+    Export Canvas Graphic to Asset Locker
+  </button>
+
+  <div class="status-toast" id="toast">Canvas Artwork Saved to Locker!</div>
+
+  <script>
+    const cvs = document.getElementById('mainCanvas');
+    const ctx = cvs.getContext('2d');
+    const toast = document.getElementById('toast');
+
+    let elements = [
+      { type: 'badge', text: 'VERIFIED REEL', x: 270, y: 180, color: '#DCC9A9', bg: '#2A251D' },
+      { type: 'text', text: 'HOW THIS WORKS', x: 270, y: 320, size: 48, color: '#FFFFFF' },
+      { type: 'sticker', emoji: '🚀', x: 270, y: 520, size: 100 },
+      { type: 'arrow', x1: 270, y1: 620, x2: 270, y2: 740, color: '#E5484D' }
+    ];
+
+    function draw() {
+      // Clear transparent / dark backdrop
+      ctx.clearRect(0, 0, 540, 960);
+      ctx.fillStyle = '#101010';
+      ctx.fillRect(0, 0, 540, 960);
+
+      // Subtle grid
+      ctx.strokeStyle = '#1C1C1C';
+      ctx.lineWidth = 1;
+      for (let x = 0; x < 540; x += 40) { ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, 960); ctx.stroke(); }
+      for (let y = 0; y < 960; y += 40) { ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(540, y); ctx.stroke(); }
+
+      elements.forEach(el => {
+        if (el.type === 'text') {
+          ctx.font = `bold ${el.size || 40}px sans-serif`;
+          ctx.fillStyle = el.color || '#FFF';
+          ctx.textAlign = 'center';
+          ctx.textBaseline = 'middle';
+          ctx.fillText(el.text, el.x, el.y);
+        } else if (el.type === 'badge') {
+          ctx.font = 'bold 18px sans-serif';
+          ctx.textAlign = 'center';
+          ctx.textBaseline = 'middle';
+          const w = ctx.measureText(el.text).width + 36;
+          const h = 38;
+          ctx.fillStyle = el.bg || '#222';
+          ctx.beginPath();
+          ctx.roundRect(el.x - w/2, el.y - h/2, w, h, 19);
+          ctx.fill();
+          ctx.strokeStyle = el.color || '#DCC9A9';
+          ctx.lineWidth = 1.5;
+          ctx.stroke();
+          ctx.fillStyle = el.color || '#DCC9A9';
+          ctx.fillText(el.text, el.x, el.y);
+        } else if (el.type === 'sticker') {
+          ctx.font = `${el.size || 80}px sans-serif`;
+          ctx.textAlign = 'center';
+          ctx.textBaseline = 'middle';
+          ctx.fillText(el.emoji, el.x, el.y);
+        } else if (el.type === 'arrow') {
+          ctx.strokeStyle = el.color || '#DCC9A9';
+          ctx.lineWidth = 4;
+          ctx.beginPath();
+          ctx.moveTo(el.x1, el.y1);
+          ctx.lineTo(el.x2, el.y2);
+          ctx.stroke();
+          // Arrowhead
+          const angle = Math.atan2(el.y2 - el.y1, el.x2 - el.x1);
+          ctx.fillStyle = el.color || '#DCC9A9';
+          ctx.beginPath();
+          ctx.moveTo(el.x2, el.y2);
+          ctx.lineTo(el.x2 - 16 * Math.cos(angle - Math.PI / 6), el.y2 - 16 * Math.sin(angle - Math.PI / 6));
+          ctx.lineTo(el.x2 - 16 * Math.cos(angle + Math.PI / 6), el.y2 - 16 * Math.sin(angle + Math.PI / 6));
+          ctx.closePath();
+          ctx.fill();
+        }
+      });
+    }
+
+    document.getElementById('btnAddText').onclick = () => {
+      elements.push({ type: 'text', text: 'KEY TAKEAWAY', x: 270, y: 400 + Math.random()*100, size: 38, color: '#DCC9A9' });
+      draw();
+    };
+
+    document.getElementById('btnAddSticker').onclick = () => {
+      const stickers = ['🔥', '✨', '⚡', '💡', '💎', '🎯'];
+      const st = stickers[Math.floor(Math.random() * stickers.length)];
+      elements.push({ type: 'sticker', emoji: st, x: 120 + Math.random()*300, y: 200 + Math.random()*500, size: 90 });
+      draw();
+    };
+
+    document.getElementById('btnAddBadge').onclick = () => {
+      elements.push({ type: 'badge', text: 'STEP 01', x: 270, y: 120, color: '#E5484D', bg: '#2D1618' });
+      draw();
+    };
+
+    document.getElementById('btnAddArrow').onclick = () => {
+      elements.push({ type: 'arrow', x1: 270, y1: 440, x2: 270, y2: 520, color: '#00E5FF' });
+      draw();
+    };
+
+    document.getElementById('btnClear').onclick = () => {
+      elements = [];
+      draw();
+    };
+
+    document.getElementById('btnSaveCanvas').onclick = () => {
+      const dataUrl = cvs.toDataURL('image/png');
+      const name = `canvas_${Date.now()}.png`;
+      if (window.AndroidLocker && window.AndroidLocker.saveAsset) {
+        window.AndroidLocker.saveAsset(dataUrl, name, "IMAGE");
+      }
+      showToast();
+    };
+
+    function showToast() {
+      toast.classList.add('show');
+      setTimeout(() => toast.classList.remove('show'), 2000);
+    }
+
+    draw();
+  </script>
+</body>
+</html>
