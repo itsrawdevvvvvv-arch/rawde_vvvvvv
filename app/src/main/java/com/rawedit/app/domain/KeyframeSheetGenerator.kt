@@ -379,6 +379,107 @@ $htmlSection
         out
     }
 
+    private val PROBE_JS = """
+        (function() {
+          try {
+            var stage = document.getElementById('stage') || document.body;
+            var sr = stage.getBoundingClientRect();
+            var out = [];
+            function eff(el) {
+              var o = 1;
+              for (var n = el; n && n !== document.documentElement; n = n.parentElement) {
+                var cs = getComputedStyle(n);
+                if (cs.display === 'none' || cs.visibility === 'hidden') return 0;
+                o *= parseFloat(cs.opacity);
+              }
+              return o;
+            }
+            function rectOf(el) {
+              var r = el.getBoundingClientRect();
+              return { x: Math.round(r.left - sr.left), y: Math.round(r.top - sr.top), w: Math.round(r.width), h: Math.round(r.height) };
+            }
+            function desc(el, r) {
+              var rawCls = (el.className && typeof el.className === 'string') ? el.className.trim() : '';
+              var c = rawCls ? ('.' + rawCls.split(/\s+/).slice(0, 2).join('.')) : '';
+              return (el.tagName || 'div').toLowerCase() + (el.id ? '#' + el.id : '') + c + '@[' + r.x + ',' + r.y + ',' + r.w + 'x' + r.h + ']';
+            }
+            function txt(el) { return (el.textContent || '').trim().replace(/\s+/g, ' ').slice(0, 22); }
+            function parseRgb(s) {
+              var m = /rgba?\(([^)]+)\)/.exec(s || '');
+              if (!m) return null;
+              var p = m[1].split(',').map(function(v) { return parseFloat(v); });
+              return { r: p[0], g: p[1], b: p[2], a: p.length > 3 ? p[3] : 1 };
+            }
+            function lum(c) {
+              function f(v) { v /= 255; return v <= 0.03928 ? v / 12.92 : Math.pow((v + 0.055) / 1.055, 2.4); }
+              return 0.2126 * f(c.r) + 0.7152 * f(c.g) + 0.0722 * f(c.b);
+            }
+            var texts = [];
+            var all = stage.querySelectorAll('*');
+            for (var i = 0; i < all.length && texts.length < 80; i++) {
+              var el = all[i];
+              var tag = (el.tagName || '').toUpperCase();
+              if (tag === 'SCRIPT' || tag === 'STYLE' || tag === 'SVG' || tag === 'PATH') continue;
+              var cls = (el.className && typeof el.className === 'string') ? el.className.toLowerCase() : '';
+              if (cls.indexOf('ghost') !== -1 || cls.indexOf('dust') !== -1 || cls.indexOf('progress') !== -1) continue;
+              if (tag === 'IMG') {
+                if (eff(el) > 0.2 && el.complete && el.naturalWidth === 0) {
+                  var ir = rectOf(el);
+                  out.push('Broken image ' + (el.getAttribute('src') || '').slice(0, 30) + ' (' + desc(el, ir) + ')');
+                }
+                continue;
+              }
+              var hasOwnText = false;
+              for (var k = 0; k < el.childNodes.length; k++) {
+                if (el.childNodes[k].nodeType === 3 && el.childNodes[k].nodeValue.trim().length > 0) { hasOwnText = true; break; }
+              }
+              if (!hasOwnText) continue;
+              var op = eff(el);
+              if (op < 0.35) continue;
+              var r = rectOf(el);
+              if (r.w < 8 || r.h < 8) continue;
+              texts.push({ el: el, r: r, op: op });
+              var cs = getComputedStyle(el);
+              if ((el.scrollWidth > el.clientWidth + 6 && cs.overflowX !== 'visible') ||
+                  (el.scrollHeight > el.clientHeight + 6 && cs.overflowY !== 'visible' && el.clientHeight > 0)) {
+                out.push('Text clipped "' + txt(el) + '" (' + desc(el, r) + ')');
+              }
+              var fg = parseRgb(cs.color);
+              if (fg && fg.a > 0.5) {
+                var bg = null;
+                for (var n = el; n; n = n.parentElement) {
+                  var ncs = getComputedStyle(n);
+                  if (ncs.backgroundImage && ncs.backgroundImage !== 'none') { bg = null; break; }
+                  var b = parseRgb(ncs.backgroundColor);
+                  if (b && b.a > 0.9) { bg = b; break; }
+                }
+                if (bg) {
+                  var l1 = lum(fg), l2 = lum(bg);
+                  var ratio = (Math.max(l1, l2) + 0.05) / (Math.min(l1, l2) + 0.05);
+                  if (ratio < 3.0) {
+                    out.push('Low contrast ' + ratio.toFixed(1) + ':1 "' + txt(el) + '" fg ' + cs.color + ' bg ' + 'rgb(' + bg.r + ',' + bg.g + ',' + bg.b + ') (' + desc(el, r) + ')');
+                  }
+                }
+              }
+            }
+            for (var a = 0; a < texts.length; a++) {
+              for (var b2 = a + 1; b2 < texts.length; b2++) {
+                var A = texts[a], B = texts[b2];
+                if (A.el.contains(B.el) || B.el.contains(A.el)) continue;
+                var ix = Math.min(A.r.x + A.r.w, B.r.x + B.r.w) - Math.max(A.r.x, B.r.x);
+                var iy = Math.min(A.r.y + A.r.h, B.r.y + B.r.h) - Math.max(A.r.y, B.r.y);
+                if (ix <= 4 || iy <= 4) continue;
+                var minArea = Math.min(A.r.w * A.r.h, B.r.w * B.r.h);
+                if ((ix * iy) / minArea > 0.25) {
+                  out.push('Text overlap "' + txt(A.el) + '" (' + desc(A.el, A.r) + ') with "' + txt(B.el) + '" (' + desc(B.el, B.r).split('@')[0] + ')');
+                }
+              }
+            }
+            return JSON.stringify(out.slice(0, 6));
+          } catch (e) { return '[]'; }
+        })()
+    """.trimIndent()
+
     private val FLAG_DESCRIBE_REGEX = Regex("""([A-Za-z0-9_#.\-]+)@\[(-?\d+),(-?\d+),(\d+)x(\d+)\]""")
     private val QUOTED_SNIPPET_REGEX = Regex("\"([^\"]{3,24})\"")
 
@@ -396,6 +497,9 @@ $htmlSection
         val lower = raw.lowercase(Locale.US)
         val issueTag = when {
             lower.contains("edge clip") -> "edge-clip"
+            lower.contains("low contrast") -> "contrast"
+            lower.contains("broken image") -> "broken-img"
+            lower.contains("text clipped") -> "text-clip"
             lower.contains("overlap") -> "overlap"
             lower.contains("resized") -> "auto-resize"
             lower.contains("wrapped") -> "auto-wrap"
@@ -1090,7 +1194,41 @@ $htmlSection
         }
         val raw = d.await()
         val unquoted = runCatching { jsonParser.decodeFromString<String>(raw) }.getOrDefault("{}")
-        runCatching { jsonParser.decodeFromString<FrameDiagnostics>(unquoted) }.getOrDefault(FrameDiagnostics())
+        val base = runCatching { jsonParser.decodeFromString<FrameDiagnostics>(unquoted) }.getOrDefault(FrameDiagnostics())
+        val probe = runProbe(webView)
+        if (probe.isEmpty()) base else base.copy(warnings = (base.warnings + probe).distinct().take(8))
+    }
+
+    /** Extra deterministic checks (text-text overlap, contrast, clipped text, broken images). */
+    private suspend fun runProbe(webView: WebView): List<String> = withContext(Dispatchers.Main) {
+        val d = CompletableDeferred<String>()
+        webView.evaluateJavascript(PROBE_JS) { res -> d.complete(res ?: "\"[]\"") }
+        val raw = d.await()
+        val unquoted = runCatching { jsonParser.decodeFromString<String>(raw) }.getOrDefault("[]")
+        runCatching { jsonParser.decodeFromString<List<String>>(unquoted) }.getOrDefault(emptyList())
+    }
+
+    /** Issues that remain in the source code (warnings + runtime auto-fits). Used to verify AI patches. */
+    fun countIssues(samples: List<KeyframeSample>): Int =
+        samples.sumOf { it.warnings.size + it.autoFitNotes.size }
+
+    /** Collapses per-frame flag lines into one line per (selector, issue): sel|x,y,wxh|issue|times. */
+    fun compressFlagLines(lines: List<String>): String {
+        val groups = LinkedHashMap<String, MutableList<String>>()
+        val firstRect = HashMap<String, String>()
+        for (line in lines) {
+            val p = line.split('|')
+            if (p.size < 5) continue
+            val key = p[2] + "|" + p[4]
+            groups.getOrPut(key) { mutableListOf() }.add(p[1])
+            firstRect.putIfAbsent(key, p[3])
+        }
+        return groups.entries.joinToString("\n") { (key, times) ->
+            val sel = key.substringBefore('|')
+            val tag = key.substringAfter('|')
+            val shown = times.take(3).joinToString(",") + if (times.size > 3) "(+${times.size - 3})" else ""
+            sel + "|" + firstRect[key] + "|" + tag + "|t=" + shown
+        }
     }
 
     private suspend fun evalAndWaitTwoFrames(webView: WebView, reqId: Int, tSec: Double) {

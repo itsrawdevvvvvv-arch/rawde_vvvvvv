@@ -98,6 +98,7 @@ import com.rawedit.app.domain.GroqLimiter
 import com.rawedit.app.domain.GroqPromptTooLargeException
 import com.rawedit.app.domain.GroqReviewResult
 import com.rawedit.app.domain.GroqUi
+import com.rawedit.app.domain.HtmlVersionStore
 import com.rawedit.app.domain.KeyframeSample
 import com.rawedit.app.domain.KeyframeSheetGenerator
 import com.rawedit.app.domain.KeyframeSheetResult
@@ -199,6 +200,9 @@ fun KeyframeSheetScreen(
 
     var aiBusy by remember { mutableStateOf(false) }
     var aiAction by remember { mutableStateOf("") }
+    var fixProgress by remember { mutableStateOf("") }
+    var undoTick by remember { mutableIntStateOf(0) }
+    val versions = remember(resolvedHtml.hashCode(), undoTick) { HtmlVersionStore.list(context, project.id) }
     var reviewResult by remember { mutableStateOf<SheetReviewResult?>(null) }
     var lastReview by remember(project.id, resolvedHtml.hashCode()) { mutableStateOf<GroqReviewResult?>(null) }
     var needsStructuralPrompt by remember { mutableStateOf(false) }
@@ -897,7 +901,7 @@ fun KeyframeSheetScreen(
                                         )
 
                                         BigPrimaryButton(
-                                            text = if (aiBusy && aiAction == "fix") "Patching..." else "Auto-fix",
+                                            text = if (aiBusy && aiAction == "fix") fixProgress.ifBlank { "Patching..." } else "Auto-fix",
                                             height = 48.dp,
                                             enabled = !aiBusy && (apiKey.isBlank() || canTapAi || isHardBlockedUi),
                                             leadingIcon = RawIconType.SPARK,
@@ -921,33 +925,55 @@ fun KeyframeSheetScreen(
                                                 aiError = null
                                                 needsStructuralPrompt = false
                                                 scope.launch {
-                                                    val outcomeRes = GroqClient.autoFixHtmlTwoStage(
+                                                    val htmlBeforeFix = resolvedHtml
+                                                    fixProgress = "Patching..."
+                                                    val outcomeRes = GroqClient.autoFixLoop(
                                                         apiKey = apiKey,
                                                         samples = res.samples,
-                                                        htmlCode = resolvedHtml,
+                                                        htmlCode = htmlBeforeFix,
                                                         durationSec = res.durationSec,
                                                         modelPref = modelPref,
-                                                        lastReview = lastReview
-                                                    ) { candidateHtml ->
-                                                        CodeValidator.validateFull(context, cacheManager, candidateHtml)
-                                                    }
+                                                        lastReview = lastReview,
+                                                        maxRounds = 3,
+                                                        validator = { candidateHtml ->
+                                                            CodeValidator.validateFull(context, cacheManager, candidateHtml)
+                                                        },
+                                                        recapture = { candidateHtml ->
+                                                            fixProgress = "Verifying..."
+                                                            KeyframeSheetGenerator.captureKeyframes(
+                                                                context = context,
+                                                                cacheManager = cacheManager,
+                                                                projectId = project.id,
+                                                                rawHtml = candidateHtml,
+                                                                durationSec = res.durationSec,
+                                                                mode = selectedMode,
+                                                                onProgress = { _, _, _, _ -> },
+                                                                cancelled = { isScreenDisposed }
+                                                            ).samples
+                                                        },
+                                                        onRound = { round, issuesNow ->
+                                                            fixProgress = "Round $round: $issuesNow issues left"
+                                                        }
+                                                    )
                                                     aiBusy = false
                                                     aiAction = ""
+                                                    fixProgress = ""
                                                     outcomeRes.onSuccess { outcome ->
                                                         onRefreshGroqQuota()
                                                         when (outcome.status) {
                                                             GroqAutoFixStatus.APPLIED -> {
                                                                 val validated = outcome.validation
                                                                 if (validated != null) {
+                                                                    HtmlVersionStore.save(context, project.id, htmlBeforeFix, "Before AI fix")
                                                                     resolvedHtml = validated.cleanedHtml
                                                                     onApplyFixedHtml(validated.cleanedHtml, validated.durationSec)
+                                                                    undoTick++
                                                                 }
                                                                 reviewResult = null
                                                                 lastReview = null
                                                                 aiError = null
                                                                 needsStructuralPrompt = false
-                                                                toastMsg = "Applied ${outcome.editsApplied} edits, ${outcome.failedCount} failed, ${outcome.skippedCount} skipped \u2014 re-capturing"
-                                                                captureGen++
+                                                                toastMsg = "Fixed: ${outcome.issuesBefore} \u2192 ${outcome.issuesAfter} issues in ${outcome.roundsRun} round(s), ${outcome.editsApplied} edits"
                                                             }
                                                             GroqAutoFixStatus.NOTHING_TO_FIX -> {
                                                                 aiError = null
@@ -965,6 +991,7 @@ fun KeyframeSheetScreen(
                                                                 aiError = "No patches applied: ${outcome.failureSummary}".trim()
                                                             }
                                                         }
+                                                        if (outcome.roundsRun > 0) captureGen++
                                                     }.onFailure { err ->
                                                         when (err) {
                                                             is GroqCooldownException -> {
@@ -987,6 +1014,34 @@ fun KeyframeSheetScreen(
                                                 }
                                             },
                                             modifier = Modifier.weight(1f)
+                                        )
+                                    }
+
+                                    if (versions.isNotEmpty() && !aiBusy) {
+                                        RawSecondaryButton(
+                                            text = "Undo last AI fix",
+                                            height = 44.dp,
+                                            leadingIcon = RawIconType.UNDO,
+                                            onClick = {
+                                                val v = versions.firstOrNull() ?: return@RawSecondaryButton
+                                                scope.launch {
+                                                    val prevHtml = HtmlVersionStore.readHtml(v)
+                                                    val vr = CodeValidator.validateFull(context, cacheManager, prevHtml)
+                                                    if (vr.isValid) {
+                                                        HtmlVersionStore.save(context, project.id, resolvedHtml, "Before undo")
+                                                        HtmlVersionStore.remove(v)
+                                                        resolvedHtml = vr.cleanedHtml
+                                                        onApplyFixedHtml(vr.cleanedHtml, vr.durationSec)
+                                                        reviewResult = null
+                                                        lastReview = null
+                                                        undoTick++
+                                                        captureGen++
+                                                        toastMsg = "Restored previous version"
+                                                    } else {
+                                                        toastMsg = "Could not restore: ${vr.summaryMessage}"
+                                                    }
+                                                }
+                                            }
                                         )
                                     }
 

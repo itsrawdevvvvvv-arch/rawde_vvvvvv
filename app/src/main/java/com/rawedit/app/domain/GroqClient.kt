@@ -67,7 +67,10 @@ data class GroqAutoFixOutcome(
     val failureSummary: String = "",
     val repairRoundsUsed: Int = 0,
     val modelUsed: String = "",
-    val quota: GroqQuotaReport? = null
+    val quota: GroqQuotaReport? = null,
+    val issuesBefore: Int = -1,
+    val issuesAfter: Int = -1,
+    val roundsRun: Int = 0
 )
 
 private data class GroqCompletionResult(
@@ -787,8 +790,8 @@ object GroqClient {
                         .append('\n')
                 }
                 if (domBundle.flagLines.isNotEmpty()) {
-                    append("DOM (f|t|selector|x,y,wxh|issue):\n")
-                    append(domBundle.flagLines.joinToString("\n"))
+                    append("DOM (selector|x,y,wxh|issue|times):\n")
+                    append(KeyframeSheetGenerator.compressFlagLines(domBundle.flagLines))
                 }
             }.trim().take(2600)
 
@@ -955,6 +958,106 @@ object GroqClient {
                     quota = lastQuota ?: getLatestQuota(cleanKey)
                 )
             )
+        } catch (ce: CancellationException) {
+            throw ce
+        } catch (t: Throwable) {
+            Result.failure(t)
+        }
+    }
+
+    /**
+     * Fix loop: patch -> re-capture -> compare issue counts -> keep only if better, else revert.
+     * Up to [maxRounds] rounds. [recapture] must return fresh samples for the candidate HTML.
+     */
+    suspend fun autoFixLoop(
+        apiKey: String,
+        samples: List<KeyframeSample>,
+        htmlCode: String,
+        durationSec: Double,
+        modelPref: String = GroqCodec.PREF_AUTO,
+        lastReview: GroqReviewResult? = null,
+        maxRounds: Int = 3,
+        validator: suspend (String) -> CodeValidationResult,
+        recapture: suspend (String) -> List<KeyframeSample>,
+        onRound: (round: Int, issuesNow: Int) -> Unit = { _, _ -> }
+    ): Result<GroqAutoFixOutcome> = withContext(Dispatchers.IO) {
+        try {
+            val startIssues = KeyframeSheetGenerator.countIssues(samples)
+            var curHtml = htmlCode
+            var curSamples = samples
+            var curIssues = startIssues
+            var bestOutcome: GroqAutoFixOutcome? = null
+            var editsTotal = 0
+            var rounds = 0
+            var lastFailure = ""
+            var lastStatus = GroqAutoFixStatus.NOTHING_MATCHED
+            var review = lastReview
+
+            while (rounds < maxRounds) {
+                val res = autoFixHtmlTwoStage(
+                    apiKey = apiKey,
+                    samples = curSamples,
+                    htmlCode = curHtml,
+                    durationSec = durationSec,
+                    modelPref = modelPref,
+                    lastReview = review,
+                    validator = validator
+                )
+                val outcome = res.getOrNull()
+                if (outcome == null) {
+                    if (bestOutcome == null) {
+                        throw (res.exceptionOrNull() ?: IllegalStateException("Auto-fix failed"))
+                    }
+                    break
+                }
+                lastStatus = outcome.status
+                lastFailure = outcome.failureSummary
+                val validated = outcome.validation
+                if (outcome.status != GroqAutoFixStatus.APPLIED || validated == null) break
+                rounds++
+                review = null
+
+                val candidateHtml = validated.cleanedHtml
+                val newSamples = recapture(candidateHtml)
+                val after = KeyframeSheetGenerator.countIssues(newSamples)
+                onRound(rounds, after)
+                if (after < curIssues) {
+                    curHtml = candidateHtml
+                    curSamples = newSamples
+                    curIssues = after
+                    editsTotal += outcome.editsApplied
+                    bestOutcome = outcome
+                    if (after == 0) break
+                } else {
+                    lastFailure = "Round $rounds made no improvement ($curIssues -> $after issues); reverted."
+                    break
+                }
+            }
+
+            val best = bestOutcome
+            if (best != null) {
+                Result.success(
+                    best.copy(
+                        fixedHtml = curHtml,
+                        editsApplied = editsTotal,
+                        issuesBefore = startIssues,
+                        issuesAfter = curIssues,
+                        roundsRun = rounds
+                    )
+                )
+            } else {
+                Result.success(
+                    GroqAutoFixOutcome(
+                        status = if (lastStatus == GroqAutoFixStatus.APPLIED) GroqAutoFixStatus.NOTHING_MATCHED else lastStatus,
+                        fixedHtml = htmlCode,
+                        validation = null,
+                        failureSummary = lastFailure,
+                        issuesBefore = startIssues,
+                        issuesAfter = startIssues,
+                        roundsRun = rounds
+                    )
+                )
+            }
         } catch (ce: CancellationException) {
             throw ce
         } catch (t: Throwable) {
@@ -1288,7 +1391,8 @@ Edit rules:
 - `find` = ONE line fragment (no newline), 12-160 chars, copied EXACTLY from the excerpt, distinctive enough to appear once (include the selector or property name).
 - `replace` keeps the surrounding syntax valid. Change numbers, widths, positions or comparison operators. Fix a shared class once instead of many scenes.
 - Use real numbers from the rects, never guesses. Max 8 edits.
-- If the defect needs new elements, a new renderer, or seek() rewrites: "structural":true and no edits for it."""
+- If the defect needs new elements, a new renderer, or seek() rewrites: "structural":true and no edits for it.
+Finding types (selector|x,y,wxh|issue|times): overlap = two text blocks collide, move one (top/left) or shrink its font so rects no longer intersect; text-clip = text wider/taller than its box, widen the box or reduce font-size; contrast = ratio under 3:1, change the color to a hex with >=4.5:1 against the stated bg; edge-clip = outside x40..1880, shift or narrow; above-bar = content past y930; broken-img = cannot be fixed in code, put it in skipped. Fix the root cause once (shared class) when several selectors share it."""
 
     private const val PROMPT_C2_SYSTEM = """You fix failed patches for a deterministic 1920x1080 reel. Reply with ONE JSON object only: {"edits":[{"i":1,"find":"...","replace":"..."}]}.
 Each failed edit has a reason: not_found (text differs from the file), ambiguous(n) (matches n places), forbidden, breaks_validation.
