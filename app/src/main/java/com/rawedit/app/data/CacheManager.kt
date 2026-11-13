@@ -830,6 +830,51 @@ class CacheManager(private val context: Context) {
         return sample
     }
 
+    val customFontsDir: File
+        get() = File(context.filesDir, "custom_fonts").apply { mkdirs() }
+
+    fun listCustomFonts(): List<File> {
+        return customFontsDir.listFiles { f ->
+            val ext = f.extension.lowercase(Locale.US)
+            (ext == "ttf" || ext == "otf") && f.length() > 0L
+        }?.sortedBy { it.name } ?: emptyList()
+    }
+
+    fun getCustomFontFile(name: String): File? {
+        val clean = name.substringAfterLast('/')
+        val f = File(customFontsDir, clean)
+        return if (f.exists() && f.isFile) f else null
+    }
+
+    fun importCustomFont(uri: Uri): Result<File> = runCatching {
+        val (displayName, _) = queryDisplayNameAndSize(uri)
+        val rawName = displayName.ifBlank { "CustomFont_${System.currentTimeMillis()}.ttf" }
+        val ext = rawName.substringAfterLast('.', "ttf").lowercase(Locale.US)
+        if (ext != "ttf" && ext != "otf") {
+            throw IllegalArgumentException("Only .ttf and .otf font files are supported.")
+        }
+        val base = rawName.substringBeforeLast('.').replace(Regex("[^A-Za-z0-9_-]"), "_").trim('_')
+        val cleanName = "${base.ifBlank { "font" }}.$ext"
+        var dest = File(customFontsDir, cleanName)
+        var counter = 1
+        while (dest.exists()) {
+            dest = File(customFontsDir, "${base}_$counter.$ext")
+            counter++
+        }
+        context.contentResolver.openInputStream(uri)?.use { input ->
+            dest.outputStream().use { output ->
+                input.copyTo(output)
+            }
+        } ?: throw IllegalStateException("Could not read font stream.")
+        dest
+    }
+
+    fun deleteCustomFont(fileName: String): Boolean {
+        val clean = fileName.substringAfterLast('/')
+        val f = File(customFontsDir, clean)
+        return if (f.exists()) f.delete() else false
+    }
+
     companion object {
         val ASSET_FILENAME_REGEX = Regex("^[A-Za-z0-9._-]{1,80}\\.(png|jpg|jpeg|webp|mp4|mov|webm)$")
         private val ALLOWED_AUDIO_EXT = setOf("mp3", "m4a", "wav", "aac", "ogg")

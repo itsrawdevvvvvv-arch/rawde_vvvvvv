@@ -881,7 +881,6 @@ fun KeyframeSheetScreen(
                                                             }
                                                             is GroqHardLimitException -> {
                                                                 aiError = err.message
-                                                                toastMsg = "Groq limit reached"
                                                             }
                                                             is GroqPromptTooLargeException -> {
                                                                 aiError = "Too many flags to send; fix the top ones first."
@@ -975,7 +974,6 @@ fun KeyframeSheetScreen(
                                                             }
                                                             is GroqHardLimitException -> {
                                                                 aiError = err.message
-                                                                toastMsg = "Groq limit reached"
                                                             }
                                                             is GroqPromptTooLargeException -> {
                                                                 aiError = "Too many flags to send; fix the top ones first."

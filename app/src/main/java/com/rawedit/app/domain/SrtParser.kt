@@ -7,6 +7,12 @@ data class SrtCue(
     val text: String
 )
 
+data class GroqWordTimestamp(
+    val word: String,
+    val startSec: Double,
+    val endSec: Double
+)
+
 data class SrtParseResult(
     val valid: Boolean,
     val cueCount: Int,
@@ -128,13 +134,41 @@ object SrtParser {
         return h.toInt() * 3600.0 + m.toInt() * 60.0 + s.toInt() + ms.toInt() / 1000.0
     }
 
-    private fun formatTimestamp(seconds: Double): String {
+    fun formatTimestamp(seconds: Double): String {
         val totalMs = (seconds * 1000.0).toLong().coerceAtLeast(0L)
         val h = totalMs / 3_600_000L
         val m = (totalMs % 3_600_000L) / 60_000L
         val s = (totalMs % 60_000L) / 1_000L
         val ms = totalMs % 1_000L
         return "%02d:%02d:%02d,%03d".format(h, m, s, ms)
+    }
+
+    fun buildSrtFromWords(words: List<GroqWordTimestamp>): SrtParseResult {
+        if (words.isEmpty()) {
+            return SrtParseResult(
+                valid = false,
+                cueCount = 0,
+                cleanedSrt = "",
+                promptSnippet = "",
+                error = "No words were transcribed from audio."
+            )
+        }
+        val rebuilt = buildString {
+            words.forEachIndexed { idx, w ->
+                val start = w.startSec.coerceAtLeast(0.0)
+                val end = if (w.endSec > start) w.endSec else (start + 0.25)
+                append(idx + 1).append('\n')
+                append(formatTimestamp(start)).append(" --> ").append(formatTimestamp(end)).append('\n')
+                append(w.word.trim()).append("\n\n")
+            }
+        }.trim()
+        return SrtParseResult(
+            valid = true,
+            cueCount = words.size,
+            cleanedSrt = rebuilt,
+            promptSnippet = truncateUtf8(rebuilt, MAX_PROMPT_BYTES),
+            error = null
+        )
     }
 
     private fun truncateUtf8(str: String, maxBytes: Int): String {

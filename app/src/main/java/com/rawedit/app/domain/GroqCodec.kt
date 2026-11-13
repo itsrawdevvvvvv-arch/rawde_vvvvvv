@@ -3,14 +3,8 @@ package com.rawedit.app.domain
 import android.content.Context
 import android.content.Intent
 import android.net.Uri
-import kotlinx.serialization.json.Json
-import kotlinx.serialization.json.JsonArray
-import kotlinx.serialization.json.JsonNull
-import kotlinx.serialization.json.JsonObject
-import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.buildJsonArray
 import kotlinx.serialization.json.buildJsonObject
-import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.put
 import org.json.JSONArray
 import org.json.JSONObject
@@ -279,21 +273,28 @@ object GroqCodec {
     const val MAX_IMAGES_PER_REQUEST = 5
 
     const val PREF_AUTO = "auto"
+    const val MODEL_LLAMA33_70B = "llama-3.3-70b-versatile"
+    const val MODEL_LLAMA31_8B = "llama-3.1-8b-instant"
+    const val MODEL_LLAMA32_11B_VISION = "llama-3.2-11b-vision-preview"
+    const val MODEL_LLAMA32_90B_VISION = "llama-3.2-90b-vision-preview"
+    const val MODEL_MIXTRAL_8X7B = "mixtral-8x7b-32768"
+    const val MODEL_WHISPER_LARGE_V3 = "whisper-large-v3"
+    const val MODEL_WHISPER_LARGE_V3_TURBO = "whisper-large-v3-turbo"
+
+    // Model identifier constants
     const val MODEL_GPT_OSS_120B = "openai/gpt-oss-120b"
     const val MODEL_GPT_OSS_20B = "openai/gpt-oss-20b"
     const val MODEL_QWEN38_27B = "qwen/qwen3.8-27b"
     const val MODEL_MUSE_SPARK = "meta-models/muse-spark-open"
     const val MODEL_LLAMA4_SCOUT = "meta-llama/llama-4-scout-17b-16e-instruct"
     const val MODEL_LLAMA4_MAVERICK = "meta-llama/llama-4-maverick-17b-128e-instruct"
-    const val MODEL_LLAMA33_70B = "llama-3.3-70b-versatile"
     const val MODEL_QWEN3_32B = "qwen/qwen3-32b"
-    const val MODEL_LLAMA31_8B = "llama-3.1-8b-instant"
+
+    const val TRANSCRIPTIONS_URL = "$API_ORIGIN/openai/v1/audio/transcriptions"
 
     private val VISION_MODELS = setOf(
-        MODEL_QWEN38_27B,
-        MODEL_MUSE_SPARK,
-        MODEL_LLAMA4_SCOUT,
-        MODEL_LLAMA4_MAVERICK
+        MODEL_LLAMA32_11B_VISION,
+        MODEL_LLAMA32_90B_VISION
     )
 
     val MODEL_OPTIONS: List<GroqModelOption> = listOf(
@@ -301,51 +302,35 @@ object GroqCodec {
             prefId = PREF_AUTO,
             shortLabel = "Auto",
             badgeLabel = "GROQ AUTO ROUTE",
-            detail = "Matches live models from /v1/models: Qwen 3.8 Vision (up to 3 frames) for vision, and GPT-OSS 120B / 20B for palettes & HTML patches."
-        ),
-        GroqModelOption(
-            prefId = MODEL_GPT_OSS_120B,
-            shortLabel = "GPT-OSS 120B",
-            badgeLabel = "GROQ GPT-OSS 120B",
-            detail = "OpenAI flagship 120B reasoning & coding route on Groq (~500 t/s) for Studio Palettes and Stage 2 HTML patch repair."
-        ),
-        GroqModelOption(
-            prefId = MODEL_GPT_OSS_20B,
-            shortLabel = "GPT-OSS 20B",
-            badgeLabel = "GROQ GPT-OSS 20B",
-            detail = "Ultra-fast 1,000 t/s compact OpenAI MoE route to save quota on quick checks, palettes, and JSON tasks."
-        ),
-        GroqModelOption(
-            prefId = MODEL_QWEN38_27B,
-            shortLabel = "Qwen 3.8 27B",
-            badgeLabel = "GROQ QWEN 3.8 VISION",
-            detail = "Multimodal Vision + Text model (max 3 images/call) for Cutout Audit, Asset Notes, and Frame Inspection."
+            detail = "Directs vision tasks to Llama 3.2 Vision, text/palettes/code to Llama 3.3 70B & 3.1 8B."
         ),
         GroqModelOption(
             prefId = MODEL_LLAMA33_70B,
             shortLabel = "Llama 3.3 70B",
             badgeLabel = "GROQ LLAMA 3.3 70B",
-            detail = "Legacy Llama 3.3 70B text route (enterprise / custom tiers where still active)."
+            detail = "Meta Llama 3.3 70B Versatile (~300 t/s) for Studio Palettes, code analysis, and HTML repairs."
         ),
         GroqModelOption(
-            prefId = MODEL_LLAMA4_SCOUT,
-            shortLabel = "Llama 4 Scout",
-            badgeLabel = "GROQ LLAMA 4 SCOUT",
-            detail = "Legacy Llama 4 Scout multimodal route (max 5 images where still active)."
+            prefId = MODEL_LLAMA31_8B,
+            shortLabel = "Llama 3.1 8B",
+            badgeLabel = "GROQ LLAMA 3.1 8B",
+            detail = "Ultra-fast ~1,000 t/s Meta Llama 3.1 8B Instant for rapid checks, palettes, and low-latency responses."
+        ),
+        GroqModelOption(
+            prefId = MODEL_LLAMA32_11B_VISION,
+            shortLabel = "Llama 3.2 Vision",
+            badgeLabel = "GROQ LLAMA 3.2 VISION",
+            detail = "Official Groq multimodal vision model for Cutout Studio audit, asset notes, and keyframe inspection."
         )
     )
 
     private val SUPPORTED_MODELS = setOf(
         PREF_AUTO,
-        MODEL_GPT_OSS_120B,
-        MODEL_GPT_OSS_20B,
-        MODEL_QWEN38_27B,
-        MODEL_MUSE_SPARK,
-        MODEL_LLAMA4_SCOUT,
-        MODEL_LLAMA4_MAVERICK,
         MODEL_LLAMA33_70B,
-        MODEL_QWEN3_32B,
-        MODEL_LLAMA31_8B
+        MODEL_LLAMA31_8B,
+        MODEL_LLAMA32_11B_VISION,
+        MODEL_LLAMA32_90B_VISION,
+        MODEL_MIXTRAL_8X7B
     )
 
     const val IMAGE_TOKENS = 2048
@@ -362,11 +347,6 @@ object GroqCodec {
         "transition\\s*:|@keyframes|animation\\s*:|requestAnimationFrame|setTimeout|setInterval|Date\\.now|performance\\.now|Math\\.random|\\.play\\(\\)|<script[^>]*\\ssrc=|<link\\b|@import|fetch\\(|XMLHttpRequest|WebSocket|import\\(|window\\.open|https?://(?!www\\.w3\\.org/2000/svg)",
         RegexOption.IGNORE_CASE
     )
-
-    private val jsonParser = Json {
-        ignoreUnknownKeys = true
-        isLenient = true
-    }
 
     fun estTokens(text: String): Int = (text.length / 3.2).toInt() + 8
 
@@ -489,26 +469,14 @@ object GroqCodec {
     fun isVisionModel(modelId: String): Boolean {
         if (modelId in VISION_MODELS) return true
         val lower = modelId.lowercase(Locale.US)
-        return lower.contains("vision") ||
-            lower.contains("qwen3.8") ||
-            lower.contains("qwen3.6") ||
-            lower.contains("muse-spark") ||
-            lower.contains("llama-4")
+        return lower.contains("vision")
     }
 
-    fun maxImagesForModel(modelId: String): Int {
-        val lower = modelId.lowercase(Locale.US)
-        return when {
-            lower.contains("qwen") -> 3
-            else -> MAX_IMAGES_PER_REQUEST
-        }
-    }
+    fun maxImagesForModel(modelId: String): Int = MAX_IMAGES_PER_REQUEST
 
-    fun isGptOssModel(modelId: String): Boolean =
-        modelId.lowercase(Locale.US).startsWith("openai/gpt-oss")
+    fun isGptOssModel(modelId: String): Boolean = false
 
-    fun isQwen3Model(modelId: String): Boolean =
-        modelId.lowercase(Locale.US).startsWith("qwen/qwen3")
+    fun isQwen3Model(modelId: String): Boolean = false
 
     fun parseAvailableChatModelIds(rawBody: String): Set<String> {
         val obj = runCatching { JSONObject(rawBody) }.getOrNull() ?: return emptySet()
@@ -601,101 +569,36 @@ object GroqCodec {
         val pref = normalizeModelPref(modelPref)
         val defaults = if (requiresVision) {
             when (pref) {
-                MODEL_MUSE_SPARK -> listOf(
-                    MODEL_MUSE_SPARK,
-                    MODEL_QWEN38_27B,
-                    MODEL_LLAMA4_SCOUT,
-                    MODEL_LLAMA4_MAVERICK
+                MODEL_LLAMA32_90B_VISION -> listOf(
+                    MODEL_LLAMA32_90B_VISION,
+                    MODEL_LLAMA32_11B_VISION
                 )
-                MODEL_LLAMA4_SCOUT -> listOf(
-                    MODEL_LLAMA4_SCOUT,
-                    MODEL_QWEN38_27B,
-                    MODEL_LLAMA4_MAVERICK,
-                    MODEL_MUSE_SPARK
-                )
-                MODEL_LLAMA4_MAVERICK -> listOf(
-                    MODEL_LLAMA4_MAVERICK,
-                    MODEL_QWEN38_27B,
-                    MODEL_LLAMA4_SCOUT,
-                    MODEL_MUSE_SPARK
+                MODEL_LLAMA32_11B_VISION -> listOf(
+                    MODEL_LLAMA32_11B_VISION,
+                    MODEL_LLAMA32_90B_VISION
                 )
                 else -> listOf(
-                    MODEL_QWEN38_27B,
-                    MODEL_MUSE_SPARK,
-                    MODEL_LLAMA4_SCOUT,
-                    MODEL_LLAMA4_MAVERICK
+                    MODEL_LLAMA32_11B_VISION,
+                    MODEL_LLAMA32_90B_VISION
                 )
             }
         } else {
             when (pref) {
-                MODEL_GPT_OSS_120B -> listOf(
-                    MODEL_GPT_OSS_120B,
-                    MODEL_GPT_OSS_20B,
-                    MODEL_QWEN38_27B,
-                    MODEL_LLAMA33_70B,
-                    MODEL_LLAMA31_8B
-                )
-                MODEL_GPT_OSS_20B -> listOf(
-                    MODEL_GPT_OSS_20B,
-                    MODEL_GPT_OSS_120B,
-                    MODEL_QWEN38_27B,
+                MODEL_LLAMA31_8B -> listOf(
                     MODEL_LLAMA31_8B,
-                    MODEL_LLAMA33_70B
-                )
-                MODEL_QWEN38_27B -> listOf(
-                    MODEL_QWEN38_27B,
-                    MODEL_GPT_OSS_120B,
-                    MODEL_GPT_OSS_20B,
-                    MODEL_LLAMA33_70B
+                    MODEL_LLAMA33_70B,
+                    MODEL_MIXTRAL_8X7B
                 )
                 MODEL_LLAMA33_70B -> listOf(
                     MODEL_LLAMA33_70B,
-                    MODEL_GPT_OSS_120B,
-                    MODEL_GPT_OSS_20B,
-                    MODEL_QWEN38_27B,
-                    MODEL_LLAMA31_8B
-                )
-                MODEL_LLAMA4_SCOUT -> listOf(
-                    MODEL_LLAMA4_SCOUT,
-                    MODEL_QWEN38_27B,
-                    MODEL_GPT_OSS_120B,
-                    MODEL_GPT_OSS_20B
-                )
-                MODEL_LLAMA4_MAVERICK -> listOf(
-                    MODEL_LLAMA4_MAVERICK,
-                    MODEL_QWEN38_27B,
-                    MODEL_GPT_OSS_120B,
-                    MODEL_GPT_OSS_20B
-                )
-                MODEL_QWEN3_32B -> listOf(
-                    MODEL_QWEN3_32B,
-                    MODEL_QWEN38_27B,
-                    MODEL_GPT_OSS_120B,
-                    MODEL_GPT_OSS_20B
-                )
-                MODEL_LLAMA31_8B -> listOf(
                     MODEL_LLAMA31_8B,
-                    MODEL_GPT_OSS_20B,
-                    MODEL_GPT_OSS_120B,
-                    MODEL_QWEN38_27B
+                    MODEL_MIXTRAL_8X7B
                 )
-                else -> if (heavyTask) {
-                    listOf(
-                        MODEL_GPT_OSS_120B,
-                        MODEL_QWEN38_27B,
-                        MODEL_GPT_OSS_20B,
-                        MODEL_LLAMA33_70B,
-                        MODEL_LLAMA31_8B
-                    )
-                } else {
-                    listOf(
-                        MODEL_GPT_OSS_20B,
-                        MODEL_GPT_OSS_120B,
-                        MODEL_QWEN38_27B,
-                        MODEL_LLAMA31_8B,
-                        MODEL_LLAMA33_70B
-                    )
-                }
+                else -> listOf(
+                    MODEL_LLAMA33_70B,
+                    MODEL_LLAMA31_8B,
+                    MODEL_MIXTRAL_8X7B
+                )
             }
         }
 
@@ -704,7 +607,7 @@ object GroqCodec {
         } else if (requiresVision) {
             availableModels.filter { it !in defaults && isVisionModel(it) }
         } else {
-            availableModels.filter { it !in defaults && !it.contains("compound", ignoreCase = true) }
+            availableModels.filter { it !in defaults && !isVisionModel(it) && !it.contains("compound", ignoreCase = true) && !it.contains("whisper", ignoreCase = true) }
         }
 
         val combined = if (availableModels.isEmpty()) {
@@ -713,14 +616,14 @@ object GroqCodec {
             val activeDefaults = defaults.filter { it in availableModels }
             val inactiveDefaults = defaults.filter { it !in availableModels }
             val merged = (activeDefaults + discoveredExtras).distinct()
-            if (merged.isNotEmpty()) merged else inactiveDefaults
+            if (merged.isNotEmpty()) merged else (activeDefaults + inactiveDefaults).distinct()
         }
 
         if (cooledDownModels.isEmpty()) return combined
         return if (pref == PREF_AUTO) {
             combined.filter { it !in cooledDownModels } + combined.filter { it in cooledDownModels }
         } else {
-            val primary = combined.first()
+            val primary = combined.firstOrNull() ?: MODEL_LLAMA33_70B
             val rest = combined.drop(1)
             listOf(primary) + rest.filter { it !in cooledDownModels } + rest.filter { it in cooledDownModels }
         }
@@ -820,25 +723,6 @@ object GroqCodec {
                     }
                 )
             }
-            if (isOss) {
-                val eff = reasoningEffortOverride?.takeIf { it in setOf("low", "medium", "high") }
-                    ?: if (heavyTask) "medium" else "low"
-                put("reasoning_effort", eff)
-            } else if (isQwen) {
-                if (model == MODEL_QWEN3_32B) {
-                    val eff = reasoningEffortOverride?.takeIf { it in setOf("none", "default") }
-                        ?: if (heavyTask) "default" else "none"
-                    put("reasoning_effort", eff)
-                    if (!jsonObjectMode) {
-                        put("reasoning_format", "hidden")
-                    }
-                } else {
-                    // Qwen 3.8 27B supports "none", "low", "medium", "high"
-                    val eff = reasoningEffortOverride?.takeIf { it in setOf("none", "low", "medium", "high") }
-                        ?: if (heavyTask) "low" else "none"
-                    put("reasoning_effort", eff)
-                }
-            }
         }
         return root.toString()
     }
@@ -922,71 +806,175 @@ object GroqCodec {
     }
 
     fun extractResponseText(rawBody: String, quota: GroqQuotaReport? = null, modelId: String = ""): String {
-        val root = runCatching { jsonParser.parseToJsonElement(rawBody) as? JsonObject }.getOrNull()
-            ?: throw GroqApiException(null, "Groq API returned an unreadable response.", quota = quota)
+        val trimmed = rawBody.trim()
+        if (trimmed.isEmpty()) {
+            throw GroqApiException(200, "Groq returned an empty HTTP response body.", quota = quota)
+        }
+        val root = runCatching { JSONObject(trimmed) }.getOrNull()
+            ?: throw GroqApiException(null, "Groq API returned an unreadable response: ${trimmed.take(120)}", quota = quota)
 
-        val rootErrEl = root["error"]
-        if (rootErrEl != null && rootErrEl !is JsonNull) {
-            val detail = extractErrorFromJsonObject(root)
+        val errObj = root.optJSONObject("error")
+        if (errObj != null) {
+            val msg = errObj.optString("message", "").trim()
+            val code = errObj.optString("code", "").trim().ifBlank { null }
+            val type = errObj.optString("type", "").trim().ifBlank { null }
             throw GroqApiException(
                 httpCode = null,
-                message = detail.message.ifBlank { "Groq API request failed." },
-                errorCode = detail.code,
-                errorType = detail.type,
+                message = msg.ifBlank { "Groq API request failed." },
+                errorCode = code,
+                errorType = type,
                 quota = quota
             )
         }
 
-        val collected = StringBuilder()
-        val choices = root["choices"] as? JsonArray
-        val firstChoice = choices?.firstOrNull() as? JsonObject
-        val finishReason = (firstChoice?.get("finish_reason") as? JsonPrimitive)?.contentOrNull.orEmpty()
-        val choiceMsg = firstChoice?.get("message") as? JsonObject
-        val contentEl = choiceMsg?.get("content")
-        when (contentEl) {
-            is JsonPrimitive -> collected.append(contentEl.contentOrNull.orEmpty())
-            is JsonArray -> {
-                for (item in contentEl) {
-                    val obj = item as? JsonObject ?: continue
-                    val t = (obj["text"] as? JsonPrimitive)?.contentOrNull
-                        ?: (obj["content"] as? JsonPrimitive)?.contentOrNull
-                    collected.append(t.orEmpty())
-                }
-            }
-            else -> Unit
+        val choices = root.optJSONArray("choices")
+        if (choices == null || choices.length() == 0) {
+            val keys = root.keys().asSequence().toList().joinToString(",")
+            throw GroqApiException(
+                httpCode = 200,
+                message = "Groq response contained no choices (keys: $keys).",
+                quota = quota
+            )
         }
 
-        val textOut = THINK_BLOCK_REGEX.replace(collected.toString(), "").trim()
+        val firstChoice = choices.optJSONObject(0)
+        val finishReason = firstChoice?.optString("finish_reason", "")?.trim().orEmpty()
+        val msgObj = firstChoice?.optJSONObject("message")
+
+        val rawContent = when {
+            msgObj == null -> ""
+            msgObj.has("content") && !msgObj.isNull("content") -> {
+                val c = msgObj.opt("content")
+                when (c) {
+                    is String -> c
+                    is JSONArray -> {
+                        val sb = StringBuilder()
+                        for (i in 0 until c.length()) {
+                            val item = c.optJSONObject(i)
+                            val t = item?.optString("text")?.takeIf { it.isNotEmpty() }
+                                ?: item?.optString("content")
+                            if (!t.isNullOrEmpty()) sb.append(t)
+                        }
+                        sb.toString()
+                    }
+                    else -> c?.toString().orEmpty()
+                }
+            }
+            msgObj.has("reasoning") && !msgObj.isNull("reasoning") -> msgObj.optString("reasoning", "")
+            msgObj.has("reasoning_content") && !msgObj.isNull("reasoning_content") -> msgObj.optString("reasoning_content", "")
+            else -> ""
+        }
+
+        val textOut = THINK_BLOCK_REGEX.replace(rawContent, "").trim()
         if (textOut.isEmpty()) {
-            val detail = extractErrorFromJsonObject(root)
             val fallbackMsg = when {
-                detail.message.isNotBlank() -> detail.message
                 finishReason.equals("length", ignoreCase = true) -> {
-                    val m = modelId.ifBlank { "model" }
+                    val m = modelId.ifBlank { "Groq model" }
                     "$m hit max_completion_tokens before answering (finish_reason=length)."
                 }
                 finishReason.isNotBlank() -> {
-                    val m = modelId.ifBlank { "model" }
+                    val m = modelId.ifBlank { "Groq model" }
                     "$m returned empty content (finish_reason=$finishReason)."
                 }
-                else -> "Groq API returned empty output."
+                else -> {
+                    val m = modelId.ifBlank { "Groq model" }
+                    val msgKeys = msgObj?.keys()?.asSequence()?.toList()?.joinToString(",") ?: "null"
+                    "$m returned empty output (message keys: $msgKeys)."
+                }
             }
             throw GroqApiException(
                 httpCode = 200,
                 message = fallbackMsg,
-                errorCode = detail.code ?: if (finishReason == "length") "length_truncated" else null,
-                errorType = detail.type,
+                errorCode = if (finishReason == "length") "length_truncated" else null,
                 quota = quota
             )
         }
         return textOut
     }
 
+    fun buildSrtFromGroqVerboseJson(rawJson: String): SrtParseResult {
+        val root = runCatching { JSONObject(rawJson) }.getOrNull()
+            ?: return SrtParseResult(
+                valid = false,
+                cueCount = 0,
+                cleanedSrt = "",
+                promptSnippet = "",
+                error = "Unreadable audio transcription response from Groq."
+            )
+
+        val wordsArr = root.optJSONArray("words")
+        val wordList = mutableListOf<GroqWordTimestamp>()
+        if (wordsArr != null && wordsArr.length() > 0) {
+            for (i in 0 until wordsArr.length()) {
+                val wObj = wordsArr.optJSONObject(i) ?: continue
+                val word = wObj.optString("word", "").trim()
+                if (word.isEmpty()) continue
+                val start = wObj.optDouble("start", 0.0)
+                val end = wObj.optDouble("end", start + 0.25)
+                wordList.add(GroqWordTimestamp(word = word, startSec = start, endSec = end))
+            }
+        }
+
+        if (wordList.isNotEmpty()) {
+            return SrtParser.buildSrtFromWords(wordList)
+        }
+
+        val segmentsArr = root.optJSONArray("segments")
+        if (segmentsArr != null && segmentsArr.length() > 0) {
+            val cues = mutableListOf<SrtCue>()
+            for (i in 0 until segmentsArr.length()) {
+                val sObj = segmentsArr.optJSONObject(i) ?: continue
+                val text = sObj.optString("text", "").trim()
+                if (text.isEmpty()) continue
+                val start = sObj.optDouble("start", 0.0)
+                val end = sObj.optDouble("end", start + 1.0)
+                cues.add(SrtCue(index = i + 1, startSec = start, endSec = end, text = text))
+            }
+            if (cues.isNotEmpty()) {
+                val rebuilt = buildString {
+                    cues.forEachIndexed { idx, c ->
+                        append(idx + 1).append('\n')
+                        append(SrtParser.formatTimestamp(c.startSec)).append(" --> ")
+                            .append(SrtParser.formatTimestamp(c.endSec)).append('\n')
+                        append(c.text).append("\n\n")
+                    }
+                }.trim()
+                return SrtParseResult(
+                    valid = true,
+                    cueCount = cues.size,
+                    cleanedSrt = rebuilt,
+                    promptSnippet = rebuilt,
+                    error = null
+                )
+            }
+        }
+
+        val fullText = root.optString("text", "").trim()
+        if (fullText.isNotEmpty()) {
+            val singleCue = "1\n00:00:00,000 --> 00:00:10,000\n$fullText"
+            return SrtParseResult(
+                valid = true,
+                cueCount = 1,
+                cleanedSrt = singleCue,
+                promptSnippet = singleCue,
+                error = null
+            )
+        }
+
+        return SrtParseResult(
+            valid = false,
+            cueCount = 0,
+            cleanedSrt = "",
+            promptSnippet = "",
+            error = "Groq Whisper returned empty transcript."
+        )
+    }
+
     fun extractErrorDetail(rawBody: String, httpCode: Int): GroqParsedError {
         val trimmed = rawBody.trim()
         if (trimmed.isNotEmpty()) {
-            val parsed = runCatching { jsonParser.parseToJsonElement(trimmed) }.getOrNull()
-            if (parsed is JsonObject) {
+            val parsed = runCatching { JSONObject(trimmed) }.getOrNull()
+            if (parsed != null) {
                 val detail = extractErrorFromJsonObject(parsed)
                 if (detail.message.isNotBlank() || !detail.code.isNullOrBlank() || !detail.type.isNullOrBlank()) {
                     return GroqParsedError(
@@ -1004,18 +992,14 @@ object GroqCodec {
         )
     }
 
-    private fun extractErrorFromJsonObject(obj: JsonObject): GroqParsedError {
-        val errEl = obj["error"]
-        val errObj = errEl as? JsonObject
-        val code = (errObj?.get("code") as? JsonPrimitive)?.contentOrNull
-            ?: (obj["code"] as? JsonPrimitive)?.contentOrNull
-        val type = (errObj?.get("type") as? JsonPrimitive)?.contentOrNull
-            ?: (obj["type"] as? JsonPrimitive)?.contentOrNull
-        val msg = when (errEl) {
-            is JsonObject -> (errEl["message"] as? JsonPrimitive)?.contentOrNull
-            is JsonPrimitive -> errEl.contentOrNull
-            else -> null
-        } ?: (obj["message"] as? JsonPrimitive)?.contentOrNull ?: ""
+    private fun extractErrorFromJsonObject(obj: JSONObject): GroqParsedError {
+        val errObj = obj.optJSONObject("error")
+        val code = errObj?.optString("code")?.takeIf { it.isNotBlank() }
+            ?: obj.optString("code").takeIf { it.isNotBlank() }
+        val type = errObj?.optString("type")?.takeIf { it.isNotBlank() }
+            ?: obj.optString("type").takeIf { it.isNotBlank() }
+        val msg = errObj?.optString("message")?.takeIf { it.isNotBlank() }
+            ?: obj.optString("message", "")
         return GroqParsedError(
             message = msg.trim(),
             type = type?.trim()?.ifBlank { null },

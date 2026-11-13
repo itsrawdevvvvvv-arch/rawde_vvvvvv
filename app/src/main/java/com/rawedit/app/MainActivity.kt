@@ -208,19 +208,9 @@ private fun MainAuthenticatedHost(
             val res = GroqClient.refreshQuota(key, userProfile.groqModelPref)
             res.onSuccess { report ->
                 container.userPreferences.saveGroqQuota(report)
-                if (!silent) {
-                    hostToastMsg = if (report.isExhausted) {
-                        "Groq quota exhausted \u2014 switch API key"
-                    } else {
-                        "Groq quota left: ${report.bannerLabel()}"
-                    }
-                }
             }.onFailure { err ->
                 if (err is GroqHardLimitException && err.quota != null) {
                     container.userPreferences.saveGroqQuota(err.quota)
-                }
-                if (!silent) {
-                    hostToastMsg = err.message ?: "Could not refresh Groq quota"
                 }
             }
         }
@@ -294,10 +284,8 @@ private fun MainAuthenticatedHost(
                         }.onFailure { err ->
                             if (err is GroqHardLimitException) {
                                 err.quota?.let { container.userPreferences.saveGroqQuota(it) }
-                                hostToastMsg = "Saved ${imp.relativePath} (Groq limit reached)"
-                            } else {
-                                hostToastMsg = "Saved ${imp.relativePath}"
                             }
+                            hostToastMsg = "Saved ${imp.relativePath}"
                         }
                     } else {
                         hostToastMsg = "Saved ${imp.relativePath}"
@@ -477,6 +465,8 @@ private fun MainAuthenticatedHost(
                         AddVoiceScreen(
                             project = proj,
                             cacheManager = container.cacheManager,
+                            groqApiKey = groqApiKey,
+                            onOpenGroqKey = { showGroqKeyDialog = true },
                             onBack = ::popRoute,
                             onSave = { updated ->
                                 scope.launch {
@@ -540,10 +530,8 @@ private fun MainAuthenticatedHost(
                                                 }.onFailure { err ->
                                                     if (err is GroqHardLimitException) {
                                                         err.quota?.let { container.userPreferences.saveGroqQuota(it) }
-                                                        hostToastMsg = "Added ${imp.relativePath} (Groq limit reached)"
-                                                    } else {
-                                                        hostToastMsg = "Added ${imp.relativePath} (Groq note skipped)"
                                                     }
+                                                    hostToastMsg = "Added ${imp.relativePath}"
                                                 }
                                             } else {
                                                 hostToastMsg = "Added ${imp.relativePath}"

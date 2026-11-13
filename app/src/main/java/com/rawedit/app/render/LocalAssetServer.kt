@@ -11,6 +11,7 @@ import android.webkit.WebViewClient
 import com.rawedit.app.data.CacheManager
 import java.io.ByteArrayInputStream
 import java.io.File
+import java.io.FileInputStream
 import java.io.InputStream
 import java.io.RandomAccessFile
 import java.util.Locale
@@ -204,17 +205,37 @@ class LocalAssetServer(
         val cleanName = requestedFile.substringAfterLast('/')
         val resolvedName = FONT_ALIASES[cleanName] ?: cleanName
         if (!FONT_FILENAME_REGEX.matches(resolvedName)) return forbidden()
-        return runCatching {
-            val stream = context.assets.open("fonts/$resolvedName")
-            WebResourceResponse(
-                "font/ttf",
+        val isOtf = resolvedName.endsWith(".otf", ignoreCase = true)
+        val mime = if (isOtf) "font/otf" else "font/ttf"
+
+        val assetStream = runCatching { context.assets.open("fonts/$resolvedName") }.getOrNull()
+        if (assetStream != null) {
+            return WebResourceResponse(
+                mime,
                 null,
                 200,
                 "OK",
                 CORS_HEADERS,
-                stream
+                assetStream
             )
-        }.getOrElse { forbidden() }
+        }
+
+        val customFile = cacheManager.getCustomFontFile(resolvedName)
+        if (customFile != null && customFile.exists()) {
+            return runCatching {
+                val stream = FileInputStream(customFile)
+                WebResourceResponse(
+                    mime,
+                    null,
+                    200,
+                    "OK",
+                    CORS_HEADERS,
+                    stream
+                )
+            }.getOrElse { forbidden() }
+        }
+
+        return forbidden()
     }
 
     private fun forbidden(): WebResourceResponse {
@@ -229,7 +250,7 @@ class LocalAssetServer(
     }
 
     private fun buildFontFaceCss(): String {
-        val rules = listOf(
+        val bundledRules = listOf(
             Triple("Montserrat", 600, "Montserrat-Bold.ttf"),
             Triple("Montserrat", 700, "Montserrat-Bold.ttf"),
             Triple("Montserrat", 800, "Montserrat-ExtraBold.ttf"),
@@ -268,7 +289,54 @@ class LocalAssetServer(
             """.trimIndent()
         }
 
-        return "<style id=\"raw-edit-fonts\">\n$rules\n</style>"
+        val customFonts = runCatching { cacheManager.listCustomFonts() }.getOrDefault(emptyList())
+        val customRules = if (customFonts.isEmpty()) {
+            ""
+        } else {
+            customFonts.joinToString("\n") { fontFile ->
+                val fileName = fontFile.name
+                val ext = fontFile.extension.lowercase(Locale.US)
+                val format = if (ext == "otf") "opentype" else "truetype"
+                val base = fontFile.nameWithoutExtension
+                val cleanFamily = base.replace(
+                    Regex("[-_](Bold|Regular|Medium|SemiBold|Light|Black|ExtraBold)", RegexOption.IGNORE_CASE),
+                    ""
+                ).replace('-', ' ').replace('_', ' ').trim()
+                """
+                @font-face {
+                  font-family: '$cleanFamily';
+                  font-style: normal;
+                  font-weight: 400;
+                  font-display: block;
+                  src: url('https://$ASSETS_HOST/fonts/$fileName') format('$format');
+                }
+                @font-face {
+                  font-family: '$cleanFamily';
+                  font-style: normal;
+                  font-weight: 700;
+                  font-display: block;
+                  src: url('https://$ASSETS_HOST/fonts/$fileName') format('$format');
+                }
+                @font-face {
+                  font-family: '$base';
+                  font-style: normal;
+                  font-weight: 400;
+                  font-display: block;
+                  src: url('https://$ASSETS_HOST/fonts/$fileName') format('$format');
+                }
+                @font-face {
+                  font-family: '$base';
+                  font-style: normal;
+                  font-weight: 700;
+                  font-display: block;
+                  src: url('https://$ASSETS_HOST/fonts/$fileName') format('$format');
+                }
+                """.trimIndent()
+            }
+        }
+
+        val allRules = if (customRules.isNotBlank()) "$bundledRules\n$customRules" else bundledRules
+        return "<style id=\"raw-edit-fonts\">\n$allRules\n</style>"
     }
 
     private fun buildRuntimeHelperScript(): String {
@@ -695,7 +763,7 @@ class LocalAssetServer(
         const val RAW_HOST = "raw.local"
         const val ASSETS_HOST = "assets.local"
         const val ENTRY_URL = "https://raw.local/index.html"
-        private val FONT_FILENAME_REGEX = Regex("^[A-Za-z0-9_-]+\\.ttf$")
+        private val FONT_FILENAME_REGEX = Regex("^[A-Za-z0-9_.-]+\\.(ttf|otf)$", RegexOption.IGNORE_CASE)
         private val CORS_HEADERS = mapOf("Access-Control-Allow-Origin" to "*")
         private val FONT_ALIASES = mapOf(
             "Poppins-Black.ttf" to "Poppins-ExtraBold.ttf",

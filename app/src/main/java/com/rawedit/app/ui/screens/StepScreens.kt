@@ -82,6 +82,7 @@ import com.rawedit.app.data.local.LocalAssetEntity
 import com.rawedit.app.data.local.ProjectEntity
 import com.rawedit.app.domain.CodeValidationResult
 import com.rawedit.app.domain.CodeValidator
+import com.rawedit.app.domain.GroqClient
 import com.rawedit.app.domain.PaletteColorMath
 import com.rawedit.app.domain.PaletteState
 import com.rawedit.app.domain.PromptGenerator
@@ -162,6 +163,8 @@ private suspend fun readRawHelperFromStylePack(context: Context): String = withC
 fun AddVoiceScreen(
     project: ProjectEntity,
     cacheManager: CacheManager,
+    groqApiKey: String = "",
+    onOpenGroqKey: () -> Unit = {},
     onBack: () -> Unit,
     onSave: (ProjectEntity) -> Unit
 ) {
@@ -182,6 +185,7 @@ fun AddVoiceScreen(
     }
     var srtCueCount by remember(project.id) { mutableStateOf(project.srtCueCount) }
     var srtError by remember { mutableStateOf<String?>(null) }
+    var transcribingAudio by remember { mutableStateOf(false) }
 
     var topic by remember(project.id) {
         mutableStateOf(if (project.topic.startsWith(CacheManager.TOPIC_FILE_PREFIX)) "" else project.topic)
@@ -497,6 +501,83 @@ fun AddVoiceScreen(
                 Text(text = msg, style = RawTypography.bodyMedium, color = RawColors.ErrorCoral)
             }
 
+            if (audioPath.isNotBlank()) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(24.dp))
+                        .background(RawColors.RaisedCard)
+                        .padding(horizontal = 16.dp, vertical = 14.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .size(40.dp)
+                            .clip(CircleShape)
+                            .background(RawColors.AccentSoft),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        RawIcon(type = RawIconType.SPARK, size = 18.dp, tint = RawColors.Tan)
+                    }
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            text = "Word-by-word transcription",
+                            fontFamily = BricolageFamily,
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 15.sp,
+                            color = RawColors.TextPrimary
+                        )
+                        Text(
+                            text = if (transcribingAudio) "Transcribing with Groq Whisper..." else "Generate precise word timestamps via Groq AI",
+                            fontFamily = BricolageFamily,
+                            fontSize = 12.5.sp,
+                            lineHeight = 16.5.sp,
+                            color = RawColors.TextMuted
+                        )
+                    }
+                    if (transcribingAudio) {
+                        CircularProgressIndicator(
+                            color = RawColors.Tan,
+                            strokeWidth = 2.dp,
+                            modifier = Modifier.size(24.dp)
+                        )
+                    } else {
+                        RawSecondaryButton(
+                            text = if (srtCueCount > 0) "Regenerate" else "Transcribe",
+                            height = 38.dp,
+                            fillWidth = false,
+                            onClick = {
+                                if (groqApiKey.isBlank()) {
+                                    onOpenGroqKey()
+                                } else {
+                                    transcribingAudio = true
+                                    srtError = null
+                                    scope.launch {
+                                        val f = File(audioPath)
+                                        val res = GroqClient.transcribeAudioWordByWord(groqApiKey, f)
+                                        transcribingAudio = false
+                                        res.onSuccess { parsed ->
+                                            srtText = parsed.cleanedSrt
+                                            srtCueCount = parsed.cueCount
+                                            if (topic.isBlank()) {
+                                                topic = parsed.cleanedSrt.lines()
+                                                    .filter { it.isNotBlank() && !it.contains("-->") && it.toIntOrNull() == null }
+                                                    .joinToString(" ")
+                                                    .take(200)
+                                            }
+                                            toastMsg = "Generated ${parsed.cueCount} word cues"
+                                        }.onFailure { err ->
+                                            srtError = err.message ?: "Transcription failed."
+                                        }
+                                    }
+                                }
+                            }
+                        )
+                    }
+                }
+            }
+
             // Script / topic notes (.lbl + #nl + #nt)
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 Text(
@@ -711,14 +792,19 @@ fun CopyPromptScreen(
         }
     }
 
-    val promptText = remember(project.audioName, project.audioDurationSec, resolvedTopic, resolvedSrt, attachedAssets, palette) {
+    val customFontNames = remember {
+        cacheManager.listCustomFonts().map { it.nameWithoutExtension }
+    }
+
+    val promptText = remember(project.audioName, project.audioDurationSec, resolvedTopic, resolvedSrt, attachedAssets, palette, customFontNames) {
         PromptGenerator.buildPrompt(
             fileName = project.audioName,
             durationSeconds = project.audioDurationSec.coerceAtLeast(1.0),
             topic = resolvedTopic,
             srtText = resolvedSrt,
             assets = attachedAssets,
-            palette = palette
+            palette = palette,
+            customFonts = customFontNames
         )
     }
     val displayPrompt = remember(promptText) {

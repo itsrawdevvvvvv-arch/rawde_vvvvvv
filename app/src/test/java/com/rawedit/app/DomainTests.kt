@@ -386,50 +386,35 @@ Enjoy!
         assertEquals("gsk_...c123", GroqCodec.maskApiKey("gsk_abcc123"))
 
         val sevenImages = (1..7).map { GroqImageInput(base64Data = "AQID$it", mimeType = "image/jpeg") }
-        val qwenVisionPayload = GroqCodec.buildChatCompletionJson(
+        val visionPayload = GroqCodec.buildChatCompletionJson(
             prompt = "Inspect frames",
             images = sevenImages,
             systemInstruction = "Return valid JSON",
-            model = GroqCodec.MODEL_QWEN38_27B,
+            model = GroqCodec.MODEL_LLAMA32_11B_VISION,
             jsonObjectMode = true,
             maxCompletionTokens = 1024,
             temperature = 0.15
         )
-        assertTrue(qwenVisionPayload.contains("\"model\":\"qwen/qwen3.8-27b\""))
-        assertTrue(qwenVisionPayload.contains("\"type\":\"json_object\""))
-        assertTrue(qwenVisionPayload.contains("\"reasoning_effort\":\"none\""))
-        assertTrue(qwenVisionPayload.contains("data:image/jpeg;base64,AQID3"))
-        assertFalse(qwenVisionPayload.contains("AQID4"))
+        assertTrue(visionPayload.contains("\"model\":\"llama-3.2-11b-vision-preview\""))
+        assertTrue(visionPayload.contains("\"type\":\"json_object\""))
+        assertTrue(visionPayload.contains("data:image/jpeg;base64,AQID5"))
+        assertFalse(visionPayload.contains("AQID6"))
 
-        val scoutPayload = GroqCodec.buildChatCompletionJson(
-            prompt = "Inspect frames",
-            images = sevenImages,
-            model = GroqCodec.MODEL_LLAMA4_SCOUT
-        )
-        assertTrue(scoutPayload.contains("data:image/jpeg;base64,AQID5"))
-        assertFalse(scoutPayload.contains("AQID6"))
-
-        val ossProbePayload = GroqCodec.buildChatCompletionJson(
+        val textProbePayload = GroqCodec.buildChatCompletionJson(
             prompt = "Reply READY",
-            model = GroqCodec.MODEL_GPT_OSS_120B,
-            maxCompletionTokens = 4,
+            model = GroqCodec.MODEL_LLAMA33_70B,
+            maxCompletionTokens = 256,
             heavyTask = false
         )
-        assertTrue(ossProbePayload.contains("\"max_completion_tokens\":256"))
-        assertTrue(ossProbePayload.contains("\"reasoning_effort\":\"low\""))
-
-        val qwenLegacyPayload = GroqCodec.buildChatCompletionJson(
-            prompt = "Patch HTML",
-            model = GroqCodec.MODEL_QWEN3_32B
-        )
-        assertTrue(qwenLegacyPayload.contains("\"reasoning_format\":\"hidden\""))
+        assertTrue(textProbePayload.contains("\"max_completion_tokens\":256"))
+        assertTrue(textProbePayload.contains("\"model\":\"llama-3.3-70b-versatile\""))
 
         val thinkingResp = """{"choices":[{"message":{"role":"assistant","content":"<think>check margin</think>{\"status\":\"OK\"}"},"finish_reason":"stop"}],"error":null}"""
-        assertEquals("{\"status\":\"OK\"}", GroqCodec.extractResponseText(thinkingResp, modelId = GroqCodec.MODEL_QWEN38_27B))
+        assertEquals("{\"status\":\"OK\"}", GroqCodec.extractResponseText(thinkingResp, modelId = GroqCodec.MODEL_LLAMA33_70B))
 
         val lengthTruncatedResp = """{"choices":[{"message":{"role":"assistant","content":""},"finish_reason":"length"}]}"""
         try {
-            GroqCodec.extractResponseText(lengthTruncatedResp, modelId = GroqCodec.MODEL_GPT_OSS_120B)
+            GroqCodec.extractResponseText(lengthTruncatedResp, modelId = GroqCodec.MODEL_LLAMA33_70B)
             fail("Expected GroqApiException on finish_reason=length")
         } catch (ex: GroqApiException) {
             assertEquals("length_truncated", ex.errorCode)
@@ -444,10 +429,10 @@ Enjoy!
             assertEquals("invalid_api_key", ex.errorCode)
         }
 
-        val modelsJson = """{"data":[{"id":"whisper-large-v3"},{"id":"canopylabs/orpheus-v1-english"},{"id":"openai/gpt-oss-120b"},{"id":"openai/gpt-oss-20b"},{"id":"qwen/qwen3.8-27b"}]}"""
+        val modelsJson = """{"data":[{"id":"whisper-large-v3"},{"id":"canopylabs/orpheus-v1-english"},{"id":"llama-3.3-70b-versatile"},{"id":"llama-3.1-8b-instant"},{"id":"llama-3.2-11b-vision-preview"}]}"""
         val parsedIds = GroqCodec.parseAvailableChatModelIds(modelsJson)
         assertEquals(
-            setOf(GroqCodec.MODEL_GPT_OSS_120B, GroqCodec.MODEL_GPT_OSS_20B, GroqCodec.MODEL_QWEN38_27B),
+            setOf(GroqCodec.MODEL_LLAMA33_70B, GroqCodec.MODEL_LLAMA31_8B, GroqCodec.MODEL_LLAMA32_11B_VISION),
             parsedIds
         )
 
@@ -457,7 +442,7 @@ Enjoy!
             heavyTask = true,
             availableModels = parsedIds
         )
-        assertEquals(listOf(GroqCodec.MODEL_GPT_OSS_120B, GroqCodec.MODEL_QWEN38_27B, GroqCodec.MODEL_GPT_OSS_20B), filteredHeavy)
+        assertEquals(listOf(GroqCodec.MODEL_LLAMA33_70B, GroqCodec.MODEL_LLAMA31_8B), filteredHeavy)
 
         val headers = mapOf<String?, List<String>>(
             "x-ratelimit-remaining-requests" to listOf("0"),
@@ -475,12 +460,19 @@ Enjoy!
 
         val visionModels = GroqCodec.buildCandidateModels(GroqCodec.PREF_AUTO, requiresVision = true, heavyTask = false)
         assertEquals(
-            listOf(GroqCodec.MODEL_QWEN38_27B, GroqCodec.MODEL_MUSE_SPARK, GroqCodec.MODEL_LLAMA4_SCOUT, GroqCodec.MODEL_LLAMA4_MAVERICK),
+            listOf(GroqCodec.MODEL_LLAMA32_11B_VISION, GroqCodec.MODEL_LLAMA32_90B_VISION),
             visionModels
         )
 
         val heavyTextModels = GroqCodec.buildCandidateModels(GroqCodec.PREF_AUTO, requiresVision = false, heavyTask = true)
-        assertEquals(GroqCodec.MODEL_GPT_OSS_120B, heavyTextModels.first())
+        assertEquals(GroqCodec.MODEL_LLAMA33_70B, heavyTextModels.first())
+
+        val verboseJson = """{"text":"Hello world","words":[{"word":"Hello","start":0.1,"end":0.5},{"word":"world","start":0.52,"end":0.95}]}"""
+        val srtParsed = GroqCodec.buildSrtFromGroqVerboseJson(verboseJson)
+        assertTrue(srtParsed.valid)
+        assertEquals(2, srtParsed.cueCount)
+        assertTrue(srtParsed.cleanedSrt.contains("Hello"))
+        assertTrue(srtParsed.cleanedSrt.contains("world"))
 
         assertEquals(
             GroqFailureCategory.FATAL_AUTH,

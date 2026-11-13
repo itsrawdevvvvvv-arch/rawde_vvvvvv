@@ -1,5 +1,8 @@
 package com.rawedit.app.ui.screens
 
+import android.content.ClipData
+import android.content.ClipboardManager
+import android.content.Context
 import android.graphics.Bitmap
 import android.net.Uri
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -148,6 +151,24 @@ fun AssetLockerScreen(
         }
     }
 
+    var customFontsList by remember {
+        mutableStateOf(cacheManager.listCustomFonts())
+    }
+
+    val fontPicker = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.OpenDocument()
+    ) { uri ->
+        if (uri != null) {
+            val res = cacheManager.importCustomFont(uri)
+            res.onSuccess { f ->
+                customFontsList = cacheManager.listCustomFonts()
+                toastMsg = "Imported font ${f.name}"
+            }.onFailure { err ->
+                toastMsg = err.message ?: "Could not import font."
+            }
+        }
+    }
+
     Box(
         modifier = Modifier
             .fillMaxSize()
@@ -273,6 +294,101 @@ fun AssetLockerScreen(
                                 leadingIcon = RawIconType.GLOBE,
                                 onClick = onOpenWebBrowser
                             )
+                            RawSecondaryButton(
+                                text = "Import Custom Font (.ttf / .otf)",
+                                height = 50.dp,
+                                leadingIcon = RawIconType.CODE,
+                                onClick = { fontPicker.launch(arrayOf("*/*")) }
+                            )
+                        }
+                    }
+
+                    if (customFontsList.isNotEmpty()) {
+                        item {
+                            Column(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clip(RoundedCornerShape(24.dp))
+                                    .background(RawColors.CardSurface)
+                                    .padding(16.dp),
+                                verticalArrangement = Arrangement.spacedBy(10.dp)
+                            ) {
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Text(
+                                        text = "CUSTOM FONTS (${customFontsList.size})",
+                                        fontFamily = JetBrainsMonoFamily,
+                                        fontWeight = FontWeight.Bold,
+                                        fontSize = 11.5.sp,
+                                        color = RawColors.Tan
+                                    )
+                                    Text(
+                                        text = "Ready in HTML render",
+                                        fontFamily = JetBrainsMonoFamily,
+                                        fontSize = 11.sp,
+                                        color = RawColors.TextMuted
+                                    )
+                                }
+                                customFontsList.forEach { fontFile ->
+                                    val fontName = fontFile.nameWithoutExtension
+                                    val family = fontName.replace(
+                                        Regex("[-_](Bold|Regular|Medium|SemiBold|Light|Black|ExtraBold)", RegexOption.IGNORE_CASE),
+                                        ""
+                                    ).replace('-', ' ').replace('_', ' ').trim()
+                                    Row(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .clip(RoundedCornerShape(16.dp))
+                                            .background(RawColors.RaisedCard)
+                                            .padding(horizontal = 14.dp, vertical = 10.dp),
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.SpaceBetween
+                                    ) {
+                                        Column(modifier = Modifier.weight(1f)) {
+                                            Text(
+                                                text = fontFile.name,
+                                                fontFamily = BricolageFamily,
+                                                fontWeight = FontWeight.Bold,
+                                                fontSize = 14.5.sp,
+                                                color = RawColors.TextPrimary
+                                            )
+                                            Text(
+                                                text = "CSS: font-family: '$family'",
+                                                fontFamily = JetBrainsMonoFamily,
+                                                fontSize = 11.sp,
+                                                color = RawColors.TextMuted
+                                            )
+                                        }
+                                        Row(
+                                            verticalAlignment = Alignment.CenterVertically,
+                                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                        ) {
+                                            CircleActionButton(
+                                                icon = RawIconType.COPY,
+                                                size = 36.dp,
+                                                onClick = {
+                                                    val cb = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+                                                    cb.setPrimaryClip(ClipData.newPlainText("font family", family))
+                                                    toastMsg = "Copied font-family: '$family'"
+                                                }
+                                            )
+                                            CircleActionButton(
+                                                icon = RawIconType.TRASH,
+                                                size = 36.dp,
+                                                isDanger = true,
+                                                onClick = {
+                                                    cacheManager.deleteCustomFont(fontFile.name)
+                                                    customFontsList = cacheManager.listCustomFonts()
+                                                    toastMsg = "Removed ${fontFile.name}"
+                                                }
+                                            )
+                                        }
+                                    }
+                                }
+                            }
                         }
                     }
 

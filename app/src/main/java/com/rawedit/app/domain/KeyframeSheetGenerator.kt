@@ -256,6 +256,7 @@ object KeyframeSheetGenerator {
 
         return """
 Fix the attached raw_edit reel. Spend tokens on fixing, not talking: no greeting, no progress notes, no recap. Do not rewrite code that works.
+Go through the visuals in detail and give the final downloadable fixed html , fixing all the errors. There are more other errors than the listed find all and fix.
 
 TITLE: $cleanTitle   DURATION: $durStr s (1920x1080, 30 fps)
 VALIDATION / RUNTIME ERROR: $errLine

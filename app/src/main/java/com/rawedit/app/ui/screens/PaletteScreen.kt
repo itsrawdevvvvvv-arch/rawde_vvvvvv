@@ -622,6 +622,30 @@ fun PaletteScreen(
                     style = RawTypography.bodyMedium.copy(fontSize = 14.5.sp, lineHeight = 20.5.sp),
                     color = RawColors.TextMuted
                 )
+
+                Spacer(modifier = Modifier.height(4.dp))
+
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.End
+                ) {
+                    RawSecondaryButton(
+                        text = "Copy palette prompt",
+                        height = 38.dp,
+                        leadingIcon = RawIconType.COPY,
+                        fillWidth = false,
+                        onClick = {
+                            val colorsSummary = currentPalette.colors.mapIndexed { idx, s ->
+                                "0${idx + 1} (${s.name}): ${s.hex}"
+                            }.joinToString(", ")
+                            val promptSnippet = "COLOR PALETTE (#${currentPalette.numFormatted} - ${currentPalette.mood}):\n${currentPalette.pairing}\nColors: $colorsSummary"
+                            val cb = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+                            cb.setPrimaryClip(ClipData.newPlainText("palette prompt", promptSnippet))
+                            haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                            toastMsg = "Copied palette prompt"
+                        }
+                    )
+                }
             }
 
             // Action row: Regenerate + Download PNG

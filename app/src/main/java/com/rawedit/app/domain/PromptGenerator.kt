@@ -11,7 +11,8 @@ object PromptGenerator {
         topic: String,
         srtText: String,
         assets: List<LocalAssetEntity> = emptyList(),
-        palette: PaletteState? = null
+        palette: PaletteState? = null,
+        customFonts: List<String> = emptyList()
     ): String {
         val cleanFile = fileName.trim().ifEmpty { "voiceover.mp3" }
         val durationFormatted = String.format(Locale.US, "%.2f", durationSeconds)
@@ -62,6 +63,12 @@ object PromptGenerator {
             "A) Use Studio Palette #${activePalette.numFormatted} (${activePalette.mood}) listed below"
         } else {
             "A) Use Kinetic Cream & Crimson from ZIP / attached Palette PNG"
+        }
+
+        val fontList = if (customFonts.isNotEmpty()) {
+            "Poppins, Montserrat, Open Sans, Inter, Bebas Neue, Anton, Oswald, Playfair Display, Space Grotesk, JetBrains Mono, plus user-imported fonts: ${customFonts.joinToString(", ")}"
+        } else {
+            "Poppins, Montserrat, Open Sans, Inter, Bebas Neue, Anton, Oswald, Playfair Display, Space Grotesk, JetBrains Mono"
         }
 
         return """
@@ -115,7 +122,7 @@ Frames are captured one at a time, out of order, so the page must be a pure func
 - Build all DOM ONCE at load. `seek(t)` may only set `style`, `transform`, `opacity`, attributes or `textContent` computed from `t`. Never append, remove, or set `innerHTML` inside `seek`. Never keep counters or state between calls. Calling `seek(t)` twice must leave `stage.innerHTML` identical.
 - Randomness: use a seeded hash of an index. Never `Math.random`.
 - FORBIDDEN: CSS `@keyframes`, `transition`, `animation`; `requestAnimationFrame`; `setTimeout`; `setInterval`; `Date.now`; `performance.now`; `video.play()`; `<script src>`; `<link>`; `@import`; `fetch`; `XMLHttpRequest`; `WebSocket`; `import()`; `window.open()`; any `http://` or `https://` URL (the only exception is the SVG namespace `http://www.w3.org/2000/svg`).
-- Fonts: use only these bundled names, with no `@font-face`: Poppins, Montserrat, Open Sans, Inter, Bebas Neue, Anton, Oswald, Playfair Display, Space Grotesk, JetBrains Mono. Always add a `sans-serif` fallback.
+- Fonts: use only these names, with no `@font-face`: $fontList. Always add a `sans-serif` fallback.
 - JS strings: escape quotes and backslashes, no raw newlines inside quotes, never write the closing `</script>` tag inside a JS string.
 - Time: `seek` clamps `t` to `[0, duration]`. Scenes are contiguous from `0` to `duration`. Use `t >= start && t < end` for every scene except the last, which uses `t <= end`, so `t === duration` is never blank. No scene is empty for more than `0.3 s`. Eases must clamp progress to `0..1`.
 

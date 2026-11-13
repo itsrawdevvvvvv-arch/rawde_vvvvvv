@@ -286,18 +286,8 @@ object GroqClient {
             if (clean.isEmpty()) {
                 return@withContext Result.failure(IllegalStateException("Groq API key is missing."))
             }
-            val res = callChatWithFallback(
-                apiKey = clean,
-                modelPref = modelPref,
-                prompt = "Reply with only the word OK.",
-                requiresVision = false,
-                heavyTask = false,
-                systemInstruction = "Reply with only OK.",
-                jsonObjectMode = false,
-                maxCompletionTokens = 256,
-                temperature = 0.0
-            )
-            val quota = res.quota ?: getLatestQuota(clean) ?: GroqQuotaReport(updatedAtMs = System.currentTimeMillis())
+            verifyModelsEndpoint(clean)
+            val quota = getLatestQuota(clean) ?: GroqQuotaReport(updatedAtMs = System.currentTimeMillis())
             Result.success(quota)
         } catch (ce: CancellationException) {
             throw ce
@@ -322,36 +312,138 @@ object GroqClient {
                 throw err
             }
             val liveModels = availableModelsByKey[cleanKey]?.ids ?: emptySet()
+            val latestQuota = getLatestQuota(cleanKey)
 
             val expectedPrimary = GroqCodec.buildCandidateModels(
                 modelPref = modelPref,
                 requiresVision = false,
                 heavyTask = false,
                 availableModels = liveModels
-            ).first()
+            ).firstOrNull() ?: GroqCodec.MODEL_LLAMA33_70B
 
-            val probeRes = callChatWithFallback(
-                apiKey = cleanKey,
-                modelPref = modelPref,
-                prompt = "Reply with only the word READY.",
-                requiresVision = false,
-                heavyTask = false,
-                systemInstruction = "Output only the word READY.",
-                jsonObjectMode = false,
-                maxCompletionTokens = 256,
-                temperature = 0.0
-            )
+            val probeOutcome = runCatching {
+                callChatWithFallback(
+                    apiKey = cleanKey,
+                    modelPref = modelPref,
+                    prompt = "Say OK",
+                    requiresVision = false,
+                    heavyTask = false,
+                    systemInstruction = null,
+                    jsonObjectMode = false,
+                    maxCompletionTokens = 64,
+                    temperature = 0.7
+                )
+            }
 
             val totalMs = (System.currentTimeMillis() - t0).coerceAtLeast(1L)
+            val modelUsed = probeOutcome.map { it.modelUsed }.getOrDefault(expectedPrimary)
+            val finalQuota = probeOutcome.getOrNull()?.quota ?: latestQuota
+
             Result.success(
                 GroqConnectionInfo(
                     latencyMs = totalMs,
                     availableModelsCount = modelsCount,
-                    modelUsed = probeRes.modelUsed,
-                    usedFallback = probeRes.modelUsed != expectedPrimary,
-                    quota = probeRes.quota ?: getLatestQuota(cleanKey)
+                    modelUsed = modelUsed,
+                    usedFallback = modelUsed != expectedPrimary,
+                    quota = finalQuota
                 )
             )
+        } catch (ce: CancellationException) {
+            throw ce
+        } catch (t: Throwable) {
+            Result.failure(t)
+        }
+    }
+
+    suspend fun transcribeAudioWordByWord(
+        apiKey: String,
+        audioFile: File
+    ): Result<SrtParseResult> = withContext(Dispatchers.IO) {
+        try {
+            val cleanKey = GroqCodec.normalizeApiKey(apiKey)
+            if (cleanKey.isEmpty()) {
+                return@withContext Result.failure(IllegalStateException("Add your Groq API key first."))
+            }
+            if (!audioFile.exists() || audioFile.length() == 0L) {
+                return@withContext Result.failure(IllegalStateException("Audio file not found or empty: ${audioFile.name}"))
+            }
+
+            val boundary = "----GroqBoundary" + System.currentTimeMillis()
+            val lineEnd = "\r\n"
+            val twoHyphens = "--"
+
+            val url = URL(GroqCodec.TRANSCRIPTIONS_URL)
+            val conn = (url.openConnection() as HttpURLConnection).apply {
+                requestMethod = "POST"
+                connectTimeout = 15_000
+                readTimeout = 60_000
+                doOutput = true
+                setRequestProperty("Content-Type", "multipart/form-data; boundary=$boundary")
+                setRequestProperty("Authorization", "Bearer $cleanKey")
+                setRequestProperty("Accept", "application/json")
+            }
+
+            try {
+                conn.outputStream.use { os ->
+                    fun writeField(name: String, value: String) {
+                        os.write((twoHyphens + boundary + lineEnd).toByteArray(Charsets.UTF_8))
+                        os.write(("Content-Disposition: form-data; name=\"$name\"$lineEnd$lineEnd").toByteArray(Charsets.UTF_8))
+                        os.write((value + lineEnd).toByteArray(Charsets.UTF_8))
+                    }
+
+                    writeField("model", GroqCodec.MODEL_WHISPER_LARGE_V3)
+                    writeField("response_format", "verbose_json")
+                    writeField("timestamp_granularities[]", "word")
+
+                    val ext = audioFile.extension.lowercase(Locale.US)
+                    val mime = when (ext) {
+                        "wav" -> "audio/wav"
+                        "m4a" -> "audio/m4a"
+                        "ogg" -> "audio/ogg"
+                        "aac" -> "audio/aac"
+                        "flac" -> "audio/flac"
+                        else -> "audio/mpeg"
+                    }
+                    val fileName = audioFile.name.ifBlank { "audio.mp3" }
+
+                    os.write((twoHyphens + boundary + lineEnd).toByteArray(Charsets.UTF_8))
+                    os.write(("Content-Disposition: form-data; name=\"file\"; filename=\"$fileName\"$lineEnd").toByteArray(Charsets.UTF_8))
+                    os.write(("Content-Type: $mime$lineEnd$lineEnd").toByteArray(Charsets.UTF_8))
+
+                    audioFile.inputStream().use { input ->
+                        input.copyTo(os)
+                    }
+                    os.write(lineEnd.toByteArray(Charsets.UTF_8))
+
+                    os.write((twoHyphens + boundary + twoHyphens + lineEnd).toByteArray(Charsets.UTF_8))
+                    os.flush()
+                }
+
+                val code = conn.responseCode
+                val rawHeaders = conn.headerFields
+                val quota = GroqCodec.parseQuotaHeaders(rawHeaders, code)
+                recordQuota(cleanKey, quota)
+                GroqLimiter.record(GroqCodec.MODEL_WHISPER_LARGE_V3, rawHeaders)
+
+                val stream = if (code in 200..299) conn.inputStream else conn.errorStream
+                val body = stream?.bufferedReader(Charsets.UTF_8)?.use { it.readText() }.orEmpty()
+
+                if (code !in 200..299) {
+                    val parsed = GroqCodec.extractErrorDetail(body, code)
+                    throw GroqApiException(
+                        httpCode = code,
+                        message = parsed.message,
+                        errorCode = parsed.code,
+                        errorType = parsed.type,
+                        quota = quota
+                    )
+                }
+
+                val parsedResult = GroqCodec.buildSrtFromGroqVerboseJson(body)
+                Result.success(parsedResult)
+            } finally {
+                conn.disconnect()
+            }
         } catch (ce: CancellationException) {
             throw ce
         } catch (t: Throwable) {
