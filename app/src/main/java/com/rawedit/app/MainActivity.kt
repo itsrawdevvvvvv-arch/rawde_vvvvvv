@@ -465,7 +465,7 @@ private fun MainAuthenticatedHost(
                         AddVoiceScreen(
                             project = proj,
                             cacheManager = container.cacheManager,
-                            groqApiKey = groqApiKey,
+                            groqApiKey = userProfile.groqApiKey,
                             onOpenGroqKey = { showGroqKeyDialog = true },
                             onBack = ::popRoute,
                             onSave = { updated ->

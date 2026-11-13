@@ -112,6 +112,7 @@ fun AssetLockerScreen(
     onSwitchGroqKey: () -> Unit,
     onRefreshGroqQuota: () -> Unit
 ) {
+    val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val listState = rememberLazyListState()
 
