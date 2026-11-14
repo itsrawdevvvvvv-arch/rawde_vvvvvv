@@ -570,7 +570,7 @@ fun AddVoiceScreen(
                                     srtError = null
                                     scope.launch {
                                         val f = File(audioPath)
-                                        val res = router.transcribeAudioWordByWord(key, f)
+                                        val res = router.transcribeAudioWordByWord(key, f, knownDurationSec = audioDuration, scriptHint = topic)
                                         transcribingAudio = false
                                         res.onSuccess { parsed ->
                                             srtText = parsed.cleanedSrt
@@ -780,6 +780,9 @@ fun CopyPromptScreen(
     attachedAssets: List<LocalAssetEntity>,
     palette: PaletteState,
     cacheManager: CacheManager,
+    customPromptNotes: String = "",
+    githubSkills: List<String> = emptyList(),
+    onOpenChatbot: () -> Unit = {},
     onBack: () -> Unit
 ) {
     val context = LocalContext.current
@@ -813,7 +816,7 @@ fun CopyPromptScreen(
 
     var selectedStyle by remember { mutableStateOf(ReelEditingStyle.KINETIC_EXPLAINER) }
 
-    val promptText = remember(project.audioName, project.audioDurationSec, resolvedTopic, resolvedSrt, attachedAssets, palette, customFontNames, selectedStyle) {
+    val promptText = remember(project.audioName, project.audioDurationSec, resolvedTopic, resolvedSrt, attachedAssets, palette, customFontNames, selectedStyle, customPromptNotes, githubSkills) {
         PromptGenerator.buildPrompt(
             fileName = project.audioName,
             durationSeconds = project.audioDurationSec.coerceAtLeast(1.0),
@@ -822,7 +825,9 @@ fun CopyPromptScreen(
             assets = attachedAssets,
             palette = palette,
             customFonts = customFontNames,
-            style = selectedStyle
+            style = selectedStyle,
+            customPromptNotes = customPromptNotes,
+            githubSkills = githubSkills
         )
     }
     val displayPrompt = remember(promptText) {
@@ -1125,11 +1130,7 @@ fun CopyPromptScreen(
                             overflow = TextOverflow.Ellipsis
                         )
                         Text(
-                            text = if (selectedStyle == ReelEditingStyle.KINETIC_EXPLAINER) {
-                                "Includes engine/raw-helpers.js"
-                            } else {
-                                "Includes engine/engine.js (Swiss grid)"
-                            },
+                            text = "Includes engine/raw-helpers.js",
                             style = RawTypography.labelMedium
                         )
                     }
@@ -1140,7 +1141,7 @@ fun CopyPromptScreen(
                             .padding(horizontal = 11.dp, vertical = 6.dp)
                     ) {
                         Text(
-                            text = if (zipSaved) "Saved" else if (selectedStyle == ReelEditingStyle.KINETIC_EXPLAINER) "552 KB" else "356 KB",
+                            text = if (zipSaved) "Saved" else "552 KB",
                             fontFamily = JetBrainsMonoFamily,
                             fontWeight = FontWeight.SemiBold,
                             fontSize = 11.5.sp,
@@ -1155,13 +1156,8 @@ fun CopyPromptScreen(
                     onClick = {
                         showHelperDialog = true
                         scope.launch {
-                            helperCode = if (selectedStyle == ReelEditingStyle.KINETIC_EXPLAINER) {
-                                readRawHelperFromStylePack(context, CacheManager.STYLE_PACK_KINETIC, "kinetic-explainer-style/engine/raw-helpers.js")
-                                    .ifBlank { "// raw-helpers.js missing from bundle" }
-                            } else {
-                                readRawHelperFromStylePack(context, CacheManager.STYLE_PACK_SWISS, "swiss-grid-motion-style/engine/engine.js")
-                                    .ifBlank { "// engine.js missing from bundle" }
-                            }
+                            helperCode = readRawHelperFromStylePack(context, CacheManager.STYLE_PACK_KINETIC, "kinetic-explainer-style/engine/raw-helpers.js")
+                                .ifBlank { "// raw-helpers.js missing from bundle" }
                         }
                     }
                 ) {
@@ -1175,7 +1171,7 @@ fun CopyPromptScreen(
                     ) {
                         RawIcon(type = RawIconType.CODE, size = 14.dp, tint = RawColors.Tan)
                         Text(
-                            text = if (selectedStyle == ReelEditingStyle.KINETIC_EXPLAINER) "Inspect helper: RAW.syncVideo(...)" else "Inspect engine: Swiss Grid Engine",
+                            text = "Inspect helper: RAW.syncVideo(...)",
                             fontFamily = JetBrainsMonoFamily,
                             fontWeight = FontWeight.SemiBold,
                             fontSize = 12.sp,
@@ -1250,6 +1246,13 @@ fun CopyPromptScreen(
                         modifier = Modifier.weight(1f)
                     )
                 }
+
+                RawSecondaryButton(
+                    text = "Tweak Prompt & Style ZIP with AI Chatbot",
+                    height = 44.dp,
+                    leadingIcon = RawIconType.SPARK,
+                    onClick = onOpenChatbot
+                )
 
                 zipStatus?.let { msg ->
                     Text(text = msg, style = RawTypography.labelMedium, color = RawColors.Tan)

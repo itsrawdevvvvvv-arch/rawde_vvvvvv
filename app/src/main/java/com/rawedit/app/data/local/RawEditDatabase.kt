@@ -19,6 +19,9 @@ interface ProjectDao {
     @Query("SELECT * FROM projects ORDER BY updatedAt DESC")
     fun observeAll(): Flow<List<ProjectEntity>>
 
+    @Query("SELECT * FROM projects ORDER BY updatedAt DESC")
+    suspend fun getAllSync(): List<ProjectEntity>
+
     @Query("SELECT * FROM projects WHERE id = :id")
     fun observeById(id: Long): Flow<ProjectEntity?>
 
@@ -28,17 +31,26 @@ interface ProjectDao {
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insert(project: ProjectEntity): Long
 
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun insertAll(projects: List<ProjectEntity>)
+
     @Update
     suspend fun update(project: ProjectEntity)
 
     @Delete
     suspend fun delete(project: ProjectEntity)
+
+    @Query("DELETE FROM projects")
+    suspend fun deleteAll()
 }
 
 @Dao
 interface VideoDao {
     @Query("SELECT * FROM videos ORDER BY createdAt DESC")
     fun observeAll(): Flow<List<VideoEntity>>
+
+    @Query("SELECT * FROM videos ORDER BY createdAt DESC")
+    suspend fun getAllSync(): List<VideoEntity>
 
     @Query("SELECT * FROM videos WHERE id = :id")
     fun observeById(id: Long): Flow<VideoEntity?>
@@ -48,6 +60,9 @@ interface VideoDao {
 
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insert(video: VideoEntity): Long
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun insertAll(videos: List<VideoEntity>)
 
     @Update
     suspend fun update(video: VideoEntity)
@@ -60,6 +75,9 @@ interface VideoDao {
 
     @Delete
     suspend fun delete(video: VideoEntity)
+
+    @Query("DELETE FROM videos")
+    suspend fun deleteAll()
 }
 
 @Dao
@@ -67,17 +85,26 @@ interface LocalAssetDao {
     @Query("SELECT * FROM assets ORDER BY createdAt DESC")
     fun observeAll(): Flow<List<LocalAssetEntity>>
 
+    @Query("SELECT * FROM assets ORDER BY createdAt DESC")
+    suspend fun getAllSync(): List<LocalAssetEntity>
+
     @Query("SELECT * FROM assets WHERE id = :id")
     suspend fun getById(id: Long): LocalAssetEntity?
 
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insert(asset: LocalAssetEntity): Long
 
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun insertAll(assets: List<LocalAssetEntity>)
+
     @Query("UPDATE assets SET description = :description, safeZone = :safeZone WHERE id = :id")
     suspend fun updateDescription(id: Long, description: String, safeZone: String)
 
     @Delete
     suspend fun delete(asset: LocalAssetEntity)
+
+    @Query("DELETE FROM assets")
+    suspend fun deleteAll()
 }
 
 @Database(

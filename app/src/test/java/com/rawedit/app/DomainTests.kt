@@ -79,18 +79,28 @@ class DomainTests {
         assertTrue(withSrt.contains("SVG-Edit"))
         assertTrue(withSrt.contains("Emoji Kitchen"))
 
-        val swissPrompt = PromptGenerator.buildPrompt(
-            fileName = "swiss.mp3",
+        val customPrompt = PromptGenerator.buildPrompt(
+            fileName = "custom.mp3",
             durationSeconds = 18.0,
             topic = "Design studio showcase",
             srtText = "",
-            style = com.rawedit.app.domain.ReelEditingStyle.SWISS_GRID_MOTION
+            customPromptNotes = "Always use bold tan headlines",
+            githubSkills = listOf("motion-skill: smooth spring")
         )
-        assertTrue(swissPrompt.contains("Swiss Grid Motion Style"))
-        assertTrue(swissPrompt.contains("swiss-grid-motion-style.zip"))
-        assertTrue(swissPrompt.contains("The Grid is the Design"))
-        assertTrue(swissPrompt.contains("SVG-Edit"))
-        assertTrue(swissPrompt.contains("Emoji Kitchen"))
+        assertTrue(customPrompt.contains("Kinetic Explainer Style"))
+        assertTrue(customPrompt.contains("Always use bold tan headlines"))
+        assertTrue(customPrompt.contains("motion-skill: smooth spring"))
+
+        val fullSrt = SrtParser.generateFullScriptSrt(
+            scriptText = "This is a complete test script that should cover one hundred percent of the duration.",
+            totalDurationSec = 20.0
+        )
+        assertTrue(fullSrt.valid)
+        assertTrue(fullSrt.coveredDurationSec >= 19.5)
+        assertTrue(fullSrt.cleanedSrt.contains("percent"))
+
+        val ghParsed = com.rawedit.app.domain.GitHubToolFetcher.parseOwnerRepoAndPath("https://github.com/octocat/hello-world/blob/main/SKILL.md")
+        assertEquals(Triple("octocat", "hello-world", "SKILL.md"), ghParsed)
     }
 
     @Test
@@ -162,6 +172,7 @@ Enjoy!
         assertTrue(prompt.contains("t=2.50s"))
         assertTrue(prompt.contains("Edge clip"))
         assertTrue(prompt.contains("Resized"))
+        assertTrue(prompt.contains("FLAGGED"))
         assertFalse(prompt.contains("t=0.00s"))
         assertTrue(prompt.contains("STEP 1: SILENT AUDIT"))
         assertTrue(prompt.contains("<<<SEARCH"))

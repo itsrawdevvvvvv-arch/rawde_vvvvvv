@@ -118,6 +118,7 @@ private fun Modifier.vhRise(
 fun HomeScreen(
     userProfile: UserProfile,
     reelsCount: Int,
+    onOpenChatbot: () -> Unit = {},
     onStartNewReel: (Offset) -> Unit
 ) {
     val animEnabled = rememberAnimationsEnabled()
@@ -203,15 +204,40 @@ fun HomeScreen(
                     ),
                 horizontalAlignment = Alignment.Start
             ) {
-                // Meta line (.e-meta)
-                Text(
-                    text = "Studio  \u00B7  $displayName  \u00B7  $reelsCount $reelsWord  \u00B7  offline",
-                    fontFamily = BricolageFamily,
-                    fontWeight = FontWeight.SemiBold,
-                    fontSize = 14.sp,
-                    color = RawColors.TextMuted,
-                    modifier = Modifier.vhRise(entranceState, 0)
-                )
+                // Meta line (.e-meta) + AI Chatbot Pill
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .vhRise(entranceState, 0),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        text = "Studio  ·  $displayName  ·  $reelsCount $reelsWord",
+                        fontFamily = BricolageFamily,
+                        fontWeight = FontWeight.SemiBold,
+                        fontSize = 14.sp,
+                        color = RawColors.TextMuted
+                    )
+                    Row(
+                        modifier = Modifier
+                            .clip(CircleShape)
+                            .background(RawColors.AccentSoft)
+                            .clickable(onClick = onOpenChatbot)
+                            .padding(horizontal = 12.dp, vertical = 6.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(5.dp)
+                    ) {
+                        RawIcon(RawIconType.SPARK, size = 14.dp, tint = RawColors.Tan)
+                        Text(
+                            text = "AI Chatbot",
+                            fontFamily = BricolageFamily,
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 12.5.sp,
+                            color = RawColors.Tan
+                        )
+                    }
+                }
 
                 Spacer(modifier = Modifier.height(if (isCompact) 10.dp else 14.dp))
 

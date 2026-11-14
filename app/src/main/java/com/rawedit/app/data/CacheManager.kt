@@ -19,9 +19,13 @@ import com.rawedit.app.data.local.LocalAssetEntity
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import java.io.File
+import java.io.FileInputStream
 import java.io.FileOutputStream
 import java.util.Locale
 import java.util.UUID
+import java.util.zip.ZipEntry
+import java.util.zip.ZipInputStream
+import java.util.zip.ZipOutputStream
 
 data class AudioImportResult(
     val localPath: String,
@@ -44,7 +48,15 @@ data class LocalAssetImportResult(
     val defaultSafeZone: String
 )
 
-class CacheManager(private val context: Context) {
+data class ChatUploadedFile(
+    val fileName: String,
+    val localPath: String,
+    val mimeType: String,
+    val sizeBytes: Long,
+    val textPreview: String = ""
+)
+
+class CacheManager(val context: Context) {
 
     val projectAssetsDir: File
         get() = File(context.filesDir, "project_assets").apply { mkdirs() }
@@ -70,6 +82,21 @@ class CacheManager(private val context: Context) {
     val sharedPacksDir: File
         get() = File(context.filesDir, "shared_packs").apply { mkdirs() }
 
+    val customFontsDir: File
+        get() = File(context.filesDir, "custom_fonts").apply { mkdirs() }
+
+    val customStyleDir: File
+        get() = File(context.filesDir, "custom_style").apply { mkdirs() }
+
+    val chatUploadsDir: File
+        get() = File(context.filesDir, "chat_uploads").apply { mkdirs() }
+
+    val chatHistoryDir: File
+        get() = File(context.filesDir, "chat_history").apply { mkdirs() }
+
+    val githubSkillsDir: File
+        get() = File(context.filesDir, "github_skills").apply { mkdirs() }
+
     fun sheetTempDir(projectId: Long): File =
         File(context.cacheDir, "sheet_temp/project_${projectId}").apply { mkdirs() }
 
@@ -81,7 +108,6 @@ class CacheManager(private val context: Context) {
     }
 
     fun persistHtmlCode(projectId: Long, html: String): String {
-        // Keep Room rows safely under Android 9 CursorWindow limits even for multi-MB unlimited HTML
         if (html.length <= 120_000) return html
         val outFile = File(codeStoreDir, "project_${projectId}.html")
         outFile.writeText(html, Charsets.UTF_8)
@@ -179,20 +205,174 @@ class CacheManager(private val context: Context) {
         }
     }
 
-    suspend fun prepareStylePackShareFile(packName: String = STYLE_PACK_ASSET_NAME): File = withContext(Dispatchers.IO) {
+    /**
+     * Builds the active Style Pack ZIP, merging any Chatbot/user customizations from `customStyleDir`,
+     * user-imported custom fonts from `customFontsDir`, and downloaded GitHub skills from `githubSkillsDir`.
+     */
+    suspend fun buildCustomizedStylePackFile(packName: String = STYLE_PACK_ASSET_NAME): File = withContext(Dispatchers.IO) {
         val outFile = File(sharedPacksDir, packName)
-        context.assets.open(packName).use { input ->
-            FileOutputStream(outFile).use { output ->
-                input.copyTo(output)
+        val overrides = collectStylePackOverrides()
+        val customFonts = listCustomFonts()
+        val ghSkills = listGithubSkillFiles()
+
+        if (overrides.isEmpty() && customFonts.isEmpty() && ghSkills.isEmpty()) {
+            context.assets.open(STYLE_PACK_ASSET_NAME).use { input ->
+                FileOutputStream(outFile).use { output ->
+                    input.copyTo(output)
+                }
+            }
+            return@withContext outFile
+        }
+
+        val writtenEntries = HashSet<String>()
+        ZipOutputStream(FileOutputStream(outFile)).use { zos ->
+            context.assets.open(STYLE_PACK_ASSET_NAME).use { assetStream ->
+                ZipInputStream(assetStream).use { zis ->
+                    var entry = zis.nextEntry
+                    while (entry != null) {
+                        val name = entry.name
+                        if (!entry.isDirectory) {
+                            val overrideFile = overrides[name]
+                            zos.putNextEntry(ZipEntry(name))
+                            if (overrideFile != null && overrideFile.exists()) {
+                                overrideFile.inputStream().use { it.copyTo(zos) }
+                            } else {
+                                zis.copyTo(zos)
+                            }
+                            zos.closeEntry()
+                            writtenEntries.add(name)
+                        }
+                        zis.closeEntry()
+                        entry = zis.nextEntry
+                    }
+                }
+            }
+
+            // Write any new files added to customStyleDir that weren't in original zip
+            for ((entryPath, file) in overrides) {
+                if (entryPath !in writtenEntries && file.exists() && file.isFile) {
+                    zos.putNextEntry(ZipEntry(entryPath))
+                    file.inputStream().use { it.copyTo(zos) }
+                    zos.closeEntry()
+                    writtenEntries.add(entryPath)
+                }
+            }
+
+            // Bundle user custom fonts inside kinetic-explainer-style/fonts/
+            for (font in customFonts) {
+                val entryName = "kinetic-explainer-style/fonts/${font.name}"
+                if (entryName !in writtenEntries) {
+                    zos.putNextEntry(ZipEntry(entryName))
+                    font.inputStream().use { it.copyTo(zos) }
+                    zos.closeEntry()
+                    writtenEntries.add(entryName)
+                }
+            }
+
+            // Bundle downloaded GitHub skills inside kinetic-explainer-style/github_skills/
+            for (skillFile in ghSkills) {
+                val entryName = "kinetic-explainer-style/github_skills/${skillFile.name}"
+                if (entryName !in writtenEntries) {
+                    zos.putNextEntry(ZipEntry(entryName))
+                    skillFile.inputStream().use { it.copyTo(zos) }
+                    zos.closeEntry()
+                    writtenEntries.add(entryName)
+                }
             }
         }
         outFile
     }
 
+    private fun collectStylePackOverrides(): Map<String, File> {
+        val result = LinkedHashMap<String, File>()
+        fun walk(dir: File, prefix: String) {
+            dir.listFiles()?.forEach { f ->
+                val rel = if (prefix.isEmpty()) f.name else "$prefix/${f.name}"
+                if (f.isDirectory) {
+                    walk(f, rel)
+                } else if (f.isFile) {
+                    val zipPath = if (rel.startsWith("kinetic-explainer-style/")) rel else "kinetic-explainer-style/$rel"
+                    result[zipPath] = f
+                }
+            }
+        }
+        if (customStyleDir.exists()) {
+            walk(customStyleDir, "")
+        }
+        return result
+    }
+
+    fun saveStylePackOverride(entryPath: String, content: String): File {
+        val normalized = entryPath.trim()
+            .removePrefix("/")
+            .removePrefix("kinetic-explainer-style/")
+            .replace("..", "_")
+            .ifBlank { "docs/CUSTOM_RULES.md" }
+        val target = File(customStyleDir, normalized)
+        target.parentFile?.mkdirs()
+        target.writeText(content, Charsets.UTF_8)
+        return target
+    }
+
+    fun readStylePackEntryText(entryPath: String): String {
+        val normalized = entryPath.trim().removePrefix("/")
+        val fullPath = if (normalized.startsWith("kinetic-explainer-style/")) normalized else "kinetic-explainer-style/$normalized"
+        val relPath = fullPath.removePrefix("kinetic-explainer-style/")
+        val overrideFile = File(customStyleDir, relPath)
+        if (overrideFile.exists() && overrideFile.isFile) {
+            return runCatching { overrideFile.readText(Charsets.UTF_8) }.getOrDefault("")
+        }
+        return runCatching {
+            context.assets.open(STYLE_PACK_ASSET_NAME).use { input ->
+                ZipInputStream(input).use { zis ->
+                    var entry = zis.nextEntry
+                    while (entry != null) {
+                        if (entry.name.equals(fullPath, ignoreCase = true) || entry.name.endsWith("/$relPath", ignoreCase = true)) {
+                            return@use zis.bufferedReader(Charsets.UTF_8).readText()
+                        }
+                        zis.closeEntry()
+                        entry = zis.nextEntry
+                    }
+                    ""
+                }
+            }
+        }.getOrDefault("")
+    }
+
+    fun listStylePackEntries(): List<String> {
+        val entries = LinkedHashSet<String>()
+        runCatching {
+            context.assets.open(STYLE_PACK_ASSET_NAME).use { input ->
+                ZipInputStream(input).use { zis ->
+                    var entry = zis.nextEntry
+                    while (entry != null) {
+                        if (!entry.isDirectory) entries.add(entry.name)
+                        zis.closeEntry()
+                        entry = zis.nextEntry
+                    }
+                }
+            }
+        }
+        collectStylePackOverrides().keys.forEach { entries.add(it) }
+        return entries.toList()
+    }
+
+    fun resetStylePackOverrides() {
+        runCatching { customStyleDir.deleteRecursively() }
+        customStyleDir.mkdirs()
+    }
+
+    fun hasStylePackOverrides(): Boolean =
+        collectStylePackOverrides().isNotEmpty()
+
+    suspend fun prepareStylePackShareFile(packName: String = STYLE_PACK_ASSET_NAME): File =
+        buildCustomizedStylePackFile(packName)
+
     suspend fun saveStylePackToUri(destUri: Uri, packName: String = STYLE_PACK_ASSET_NAME): Result<Unit> = withContext(Dispatchers.IO) {
         runCatching {
+            val zipFile = buildCustomizedStylePackFile(packName)
             context.contentResolver.openOutputStream(destUri)?.use { output ->
-                context.assets.open(packName).use { input ->
+                zipFile.inputStream().use { input ->
                     input.copyTo(output)
                 }
             } ?: throw IllegalStateException("Could not open selected location.")
@@ -201,35 +381,116 @@ class CacheManager(private val context: Context) {
     }
 
     suspend fun saveStylePackToDownloads(packName: String = STYLE_PACK_ASSET_NAME): Result<String> = withContext(Dispatchers.IO) {
+        val zipFile = buildCustomizedStylePackFile(packName)
+        saveFileToDownloads(zipFile, packName, "application/zip")
+    }
+
+    fun listGithubSkillFiles(): List<File> {
+        return githubSkillsDir.listFiles { f -> f.isFile && f.length() > 0L }
+            ?.sortedByDescending { it.lastModified() }
+            ?: emptyList()
+    }
+
+    fun saveGithubSkillFile(fileName: String, content: String): File {
+        val safeName = fileName.replace(Regex("[^A-Za-z0-9._-]"), "_").trim('_').ifBlank { "github_skill.md" }
+        val outFile = File(githubSkillsDir, safeName)
+        outFile.writeText(content, Charsets.UTF_8)
+        return outFile
+    }
+
+    fun deleteGithubSkillFile(fileName: String): Boolean {
+        val f = File(githubSkillsDir, fileName.substringAfterLast('/'))
+        return if (f.exists()) f.delete() else false
+    }
+
+    /**
+     * Imports a file into the Chatbot local storage with a 500 MB limit (250–500 MB range supported),
+     * streaming directly to disk so large files never trigger OOM.
+     */
+    suspend fun importChatAttachment(uri: Uri): Result<ChatUploadedFile> = withContext(Dispatchers.IO) {
         runCatching {
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                val values = ContentValues().apply {
-                    put(MediaStore.Downloads.DISPLAY_NAME, packName)
-                    put(MediaStore.Downloads.MIME_TYPE, "application/zip")
-                    put(MediaStore.Downloads.RELATIVE_PATH, "${Environment.DIRECTORY_DOWNLOADS}/raw_edit")
-                    put(MediaStore.Downloads.IS_PENDING, 1)
-                }
-                val resolver = context.contentResolver
-                val uri = resolver.insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI, values)
-                    ?: throw IllegalStateException("Could not create Downloads entry.")
-                try {
-                    resolver.openOutputStream(uri)?.use { out ->
-                        context.assets.open(packName).use { input ->
-                            input.copyTo(out)
-                        }
-                    } ?: throw IllegalStateException("Could not write ZIP to Downloads.")
-                    val done = ContentValues().apply {
-                        put(MediaStore.Downloads.IS_PENDING, 0)
-                    }
-                    resolver.update(uri, done, null, null)
-                } catch (t: Throwable) {
-                    resolver.delete(uri, null, null)
-                    throw t
-                }
-                "Saved to Downloads/raw_edit/$packName"
-            } else {
-                throw UnsupportedOperationException("Picker required on Android 9")
+            val resolver = context.contentResolver
+            val mimeRaw = resolver.getType(uri)?.lowercase(Locale.US).orEmpty().ifBlank { "application/octet-stream" }
+            val (origName, reportedSize) = queryDisplayNameAndSize(uri)
+            if (reportedSize > MAX_CHAT_ATTACHMENT_BYTES) {
+                throw IllegalArgumentException("File exceeds the 500 MB local storage limit.")
             }
+            val safeName = origName.ifBlank { "upload_${System.currentTimeMillis()}" }
+                .replace(Regex("[^A-Za-z0-9._-]"), "_")
+                .trim('_')
+                .ifBlank { "upload_${System.currentTimeMillis()}" }
+            var destFile = File(chatUploadsDir, safeName)
+            var idx = 1
+            while (destFile.exists()) {
+                val base = safeName.substringBeforeLast('.', safeName)
+                val ext = safeName.substringAfterLast('.', "")
+                destFile = File(chatUploadsDir, if (ext.isNotEmpty()) "${base}_$idx.$ext" else "${base}_$idx")
+                idx++
+            }
+
+            resolver.openInputStream(uri)?.use { input ->
+                FileOutputStream(destFile).use { output ->
+                    val buf = ByteArray(64 * 1024)
+                    var total = 0L
+                    while (true) {
+                        val r = input.read(buf)
+                        if (r <= 0) break
+                        total += r
+                        if (total > MAX_CHAT_ATTACHMENT_BYTES) {
+                            destFile.delete()
+                            throw IllegalArgumentException("File exceeds the 500 MB local storage limit.")
+                        }
+                        output.write(buf, 0, r)
+                    }
+                }
+            } ?: throw IllegalArgumentException("Could not open selected file.")
+
+            val actualSize = destFile.length()
+            val ext = destFile.extension.lowercase(Locale.US)
+
+            // If user uploaded a .ttf or .otf font in Chatbot, also install it into customFontsDir!
+            if (ext == "ttf" || ext == "otf") {
+                runCatching {
+                    destFile.copyTo(File(customFontsDir, destFile.name), overwrite = true)
+                }
+            }
+
+            val isTextLike = ext in setOf("txt", "srt", "md", "html", "htm", "js", "css", "json", "xml", "csv", "py", "kt") ||
+                mimeRaw.startsWith("text/") || mimeRaw.contains("json") || mimeRaw.contains("html")
+
+            val preview = if (isTextLike && actualSize > 0L) {
+                runCatching {
+                    FileInputStream(destFile).use { fis ->
+                        val cap = minOf(actualSize, 24_000L).toInt()
+                        val bytes = ByteArray(cap)
+                        val n = fis.read(bytes)
+                        if (n > 0) String(bytes, 0, n, Charsets.UTF_8) else ""
+                    }
+                }.getOrDefault("")
+            } else if (ext == "zip") {
+                runCatching {
+                    val entries = mutableListOf<String>()
+                    ZipInputStream(FileInputStream(destFile)).use { zis ->
+                        var e = zis.nextEntry
+                        while (e != null && entries.size < 40) {
+                            entries.add("${e.name} (${e.size.coerceAtLeast(0)}B)")
+                            zis.closeEntry()
+                            e = zis.nextEntry
+                        }
+                    }
+                    "ZIP archive entries: ${entries.joinToString(", ")}"
+                }.getOrDefault("ZIP archive (${actualSize} bytes)")
+            } else {
+                ""
+            }
+
+            ChatUploadedFile(
+                fileName = destFile.name,
+                localPath = destFile.absolutePath,
+                mimeType = mimeRaw,
+                sizeBytes = actualSize,
+                textPreview = preview
+            )
         }
     }
 
@@ -270,7 +531,7 @@ class CacheManager(private val context: Context) {
 
             if (isVideo || mimeRaw.startsWith("video/")) {
                 if (reportedSize > MAX_VIDEO_BYTES) {
-                    throw IllegalArgumentException("Video clip exceeds 150 MB limit.")
+                    throw IllegalArgumentException("Video clip exceeds 500 MB limit.")
                 }
                 val ext = origName.substringAfterLast('.', "mp4").lowercase(Locale.US)
                     .takeIf { it in setOf("mp4", "mov", "webm") } ?: "mp4"
@@ -282,7 +543,7 @@ class CacheManager(private val context: Context) {
                 val destFile = File(projectAssetsDir, uniqueName)
                 resolver.openInputStream(uri)?.use { input ->
                     FileOutputStream(destFile).use { output ->
-                        val buf = ByteArray(32 * 1024)
+                        val buf = ByteArray(64 * 1024)
                         var total = 0L
                         while (true) {
                             val r = input.read(buf)
@@ -290,7 +551,7 @@ class CacheManager(private val context: Context) {
                             total += r
                             if (total > MAX_VIDEO_BYTES) {
                                 destFile.delete()
-                                throw IllegalArgumentException("Video clip exceeds 150 MB limit.")
+                                throw IllegalArgumentException("Video clip exceeds 500 MB limit.")
                             }
                             output.write(buf, 0, r)
                         }
@@ -359,17 +620,17 @@ class CacheManager(private val context: Context) {
                     durationSec = durationSec,
                     sizeBytes = actualSize,
                     thumbPath = thumbFile.absolutePath,
-                    defaultDescription = "Local video clip ($vidW x $vidH, ${String.format(Locale.US, "%.1f", durationSec)}s). Tap Auto-describe with Groq AI or edit note.",
+                    defaultDescription = "Local video clip ($vidW x $vidH, ${String.format(Locale.US, "%.1f", durationSec)}s). Tap Auto-describe with Gemini AI or edit note.",
                     defaultSafeZone = "Place kinetic overlay text along opposite margin or clean dark band via RAW.syncVideo."
                 )
             } else {
                 if (reportedSize > MAX_IMAGE_BYTES) {
-                    throw IllegalArgumentException("Image exceeds 15 MB limit.")
+                    throw IllegalArgumentException("Image exceeds 50 MB limit.")
                 }
                 val rawBytes = resolver.openInputStream(uri)?.use { it.readBytes() }
                     ?: throw IllegalArgumentException("Could not read image file.")
                 if (rawBytes.size > MAX_IMAGE_BYTES) {
-                    throw IllegalArgumentException("Image exceeds 15 MB limit.")
+                    throw IllegalArgumentException("Image exceeds 50 MB limit.")
                 }
 
                 val isPng = mimeRaw.contains("png") || origName.lowercase(Locale.US).endsWith(".png")
@@ -451,7 +712,6 @@ class CacheManager(private val context: Context) {
                     bmp.compress(format, 92, fos)
                 }
 
-                // Compact preview/Vision JPEG or PNG thumb (<= 512px)
                 val thumbScale = minOf(1f, 512f / maxOf(bmp.width, bmp.height).toFloat())
                 val thumbBmp = if (thumbScale < 1f) {
                     Bitmap.createScaledBitmap(
@@ -493,9 +753,9 @@ class CacheManager(private val context: Context) {
                     sizeBytes = outFile.length(),
                     thumbPath = thumbFile.absolutePath,
                     defaultDescription = if (kind == LocalAssetEntity.KIND_CUTOUT) {
-                        "Transparent PNG cutout ($finalW x $finalH). Tap Auto-describe with Groq AI or edit note."
+                        "Transparent PNG cutout ($finalW x $finalH). Tap Auto-describe with Gemini AI or edit note."
                     } else {
-                        "Local image ($finalW x $finalH). Tap Auto-describe with Groq AI or edit note."
+                        "Local image ($finalW x $finalH). Tap Auto-describe with Gemini AI or edit note."
                     },
                     defaultSafeZone = "Keep headlines outside the subject center; pair with dark scrim if needed."
                 )
@@ -554,9 +814,9 @@ class CacheManager(private val context: Context) {
 
             val kind = if (isCutout) LocalAssetEntity.KIND_CUTOUT else LocalAssetEntity.KIND_IMAGE
             val desc = customDescription?.takeIf { it.isNotBlank() } ?: if (isCutout) {
-                "Transparent PNG cutout ($finalW x $finalH). Tap Auto-describe with Groq AI or edit note."
+                "Transparent PNG cutout ($finalW x $finalH). Tap Auto-describe with Gemini AI or edit note."
             } else {
-                "Captured PNG image ($finalW x $finalH). Tap Auto-describe with Groq AI or edit note."
+                "Captured PNG image ($finalW x $finalH). Tap Auto-describe with Gemini AI or edit note."
             }
             val safe = customSafeZone?.takeIf { it.isNotBlank() }
                 ?: "Keep headlines outside the subject center; pair with dark scrim if needed."
@@ -666,13 +926,13 @@ class CacheManager(private val context: Context) {
 
             val reportedSize = meta.second
             if (reportedSize > MAX_AUDIO_BYTES) {
-                throw IllegalArgumentException("Audio file is over 100 MB. Pick a smaller file.")
+                throw IllegalArgumentException("Audio file is over 500 MB. Pick a smaller file.")
             }
 
             val destFile = File(projectAudioDir, "audio_${UUID.randomUUID().toString().take(12)}.$ext")
             context.contentResolver.openInputStream(uri)?.use { input ->
                 FileOutputStream(destFile).use { output ->
-                    val buf = ByteArray(16 * 1024)
+                    val buf = ByteArray(32 * 1024)
                     var total = 0L
                     while (true) {
                         val read = input.read(buf)
@@ -680,7 +940,7 @@ class CacheManager(private val context: Context) {
                         total += read
                         if (total > MAX_AUDIO_BYTES) {
                             destFile.delete()
-                            throw IllegalArgumentException("Audio file is over 100 MB. Pick a smaller file.")
+                            throw IllegalArgumentException("Audio file is over 500 MB. Pick a smaller file.")
                         }
                         output.write(buf, 0, read)
                     }
@@ -811,12 +1071,14 @@ class CacheManager(private val context: Context) {
     private fun queryDisplayNameAndSize(uri: Uri): Pair<String, Long> {
         var name = ""
         var size = -1L
-        context.contentResolver.query(uri, null, null, null, null)?.use { cursor ->
-            if (cursor.moveToFirst()) {
-                val nameIdx = cursor.getColumnIndex(OpenableColumns.DISPLAY_NAME)
-                val sizeIdx = cursor.getColumnIndex(OpenableColumns.SIZE)
-                if (nameIdx >= 0) name = cursor.getString(nameIdx).orEmpty()
-                if (sizeIdx >= 0 && !cursor.isNull(sizeIdx)) size = cursor.getLong(sizeIdx)
+        runCatching {
+            context.contentResolver.query(uri, null, null, null, null)?.use { cursor ->
+                if (cursor.moveToFirst()) {
+                    val nameIdx = cursor.getColumnIndex(OpenableColumns.DISPLAY_NAME)
+                    val sizeIdx = cursor.getColumnIndex(OpenableColumns.SIZE)
+                    if (nameIdx >= 0) name = cursor.getString(nameIdx).orEmpty()
+                    if (sizeIdx >= 0 && !cursor.isNull(sizeIdx)) size = cursor.getLong(sizeIdx)
+                }
             }
         }
         return name to size
@@ -829,9 +1091,6 @@ class CacheManager(private val context: Context) {
         }
         return sample
     }
-
-    val customFontsDir: File
-        get() = File(context.filesDir, "custom_fonts").apply { mkdirs() }
 
     fun listCustomFonts(): List<File> {
         return customFontsDir.listFiles { f ->
@@ -846,27 +1105,85 @@ class CacheManager(private val context: Context) {
         return if (f.exists() && f.isFile) f else null
     }
 
+    /**
+     * Supports importing `.ttf`, `.otf`, AND `.zip` font packs (e.g. Google Fonts / DaFont downloads)
+     * as well as files from content providers that omit extensions.
+     */
     fun importCustomFont(uri: Uri): Result<File> = runCatching {
+        val imported = importCustomFonts(uri).getOrThrow()
+        imported.firstOrNull() ?: throw IllegalArgumentException("No .ttf or .otf font found in selection.")
+    }
+
+    fun importCustomFonts(uri: Uri): Result<List<File>> = runCatching {
         val (displayName, _) = queryDisplayNameAndSize(uri)
+        val mime = context.contentResolver.getType(uri)?.lowercase(Locale.US).orEmpty()
         val rawName = displayName.ifBlank { "CustomFont_${System.currentTimeMillis()}.ttf" }
-        val ext = rawName.substringAfterLast('.', "ttf").lowercase(Locale.US)
-        if (ext != "ttf" && ext != "otf") {
-            throw IllegalArgumentException("Only .ttf and .otf font files are supported.")
+        val extCandidate = if (rawName.contains('.')) rawName.substringAfterLast('.').lowercase(Locale.US) else ""
+
+        // If user selected a .zip font archive (like Google Fonts download), extract all .ttf / .otf inside!
+        if (extCandidate == "zip" || mime.contains("zip")) {
+            val extracted = mutableListOf<File>()
+            context.contentResolver.openInputStream(uri)?.use { input ->
+                ZipInputStream(input).use { zis ->
+                    var entry = zis.nextEntry
+                    while (entry != null) {
+                        val entryName = entry.name.replace('\\', '/').substringAfterLast('/')
+                        val eExt = entryName.substringAfterLast('.', "").lowercase(Locale.US)
+                        if (!entry.isDirectory && !entryName.startsWith(".") && (eExt == "ttf" || eExt == "otf")) {
+                            val base = entryName.substringBeforeLast('.')
+                                .replace(Regex("[^A-Za-z0-9_-]"), "_")
+                                .trim('_')
+                                .ifBlank { "CustomFont" }
+                            var dest = File(customFontsDir, "$base.$eExt")
+                            var counter = 1
+                            while (dest.exists()) {
+                                dest = File(customFontsDir, "${base}_$counter.$eExt")
+                                counter++
+                            }
+                            dest.outputStream().use { out -> zis.copyTo(out) }
+                            if (dest.length() > 0L) extracted.add(dest)
+                        }
+                        zis.closeEntry()
+                        entry = zis.nextEntry
+                    }
+                }
+            }
+            if (extracted.isEmpty()) {
+                throw IllegalArgumentException("No .ttf or .otf font files found inside the ZIP archive.")
+            }
+            return@runCatching extracted
         }
-        val base = rawName.substringBeforeLast('.').replace(Regex("[^A-Za-z0-9_-]"), "_").trim('_')
-        val cleanName = "${base.ifBlank { "font" }}.$ext"
-        var dest = File(customFontsDir, cleanName)
+
+        val bytes = context.contentResolver.openInputStream(uri)?.use { it.readBytes() }
+            ?: throw IllegalStateException("Could not read font stream.")
+        if (bytes.size < 12) {
+            throw IllegalArgumentException("Selected font file is empty or invalid.")
+        }
+
+        // Check magic bytes for TrueType (00 01 00 00 or 'true') or OpenType ('OTTO')
+        val isOtoMagic = bytes[0] == 'O'.code.toByte() && bytes[1] == 'T'.code.toByte() &&
+            bytes[2] == 'T'.code.toByte() && bytes[3] == 'O'.code.toByte()
+        val isTtfMagic = (bytes[0] == 0.toByte() && bytes[1] == 1.toByte() && bytes[2] == 0.toByte() && bytes[3] == 0.toByte()) ||
+            (bytes[0] == 't'.code.toByte() && bytes[1] == 'r'.code.toByte() && bytes[2] == 'u'.code.toByte() && bytes[3] == 'e'.code.toByte())
+
+        val finalExt = when {
+            extCandidate == "otf" || isOtoMagic || mime.contains("otf") || mime.contains("opentype") -> "otf"
+            extCandidate == "ttf" || isTtfMagic || mime.contains("ttf") || mime.contains("truetype") || mime.contains("font") -> "ttf"
+            else -> throw IllegalArgumentException("Only .ttf, .otf, or .zip font packs are supported.")
+        }
+
+        val base = rawName.substringBeforeLast('.')
+            .replace(Regex("[^A-Za-z0-9_-]"), "_")
+            .trim('_')
+            .ifBlank { "CustomFont_${System.currentTimeMillis()}" }
+        var dest = File(customFontsDir, "$base.$finalExt")
         var counter = 1
         while (dest.exists()) {
-            dest = File(customFontsDir, "${base}_$counter.$ext")
+            dest = File(customFontsDir, "${base}_$counter.$finalExt")
             counter++
         }
-        context.contentResolver.openInputStream(uri)?.use { input ->
-            dest.outputStream().use { output ->
-                input.copyTo(output)
-            }
-        } ?: throw IllegalStateException("Could not read font stream.")
-        dest
+        dest.writeBytes(bytes)
+        listOf(dest)
     }
 
     fun deleteCustomFont(fileName: String): Boolean {
@@ -878,16 +1195,16 @@ class CacheManager(private val context: Context) {
     companion object {
         val ASSET_FILENAME_REGEX = Regex("^[A-Za-z0-9._-]{1,80}\\.(png|jpg|jpeg|webp|mp4|mov|webm)$")
         private val ALLOWED_AUDIO_EXT = setOf("mp3", "m4a", "wav", "aac", "ogg")
-        private const val MAX_AUDIO_BYTES = 100L * 1024L * 1024L
+        const val MAX_AUDIO_BYTES = 500L * 1024L * 1024L
         private const val MAX_AUDIO_SEC = 20.0 * 60.0
-        private const val MAX_IMAGE_BYTES = 15L * 1024L * 1024L
-        private const val MAX_VIDEO_BYTES = 150L * 1024L * 1024L
+        const val MAX_IMAGE_BYTES = 50L * 1024L * 1024L
+        const val MAX_VIDEO_BYTES = 500L * 1024L * 1024L
+        const val MAX_CHAT_ATTACHMENT_BYTES = 500L * 1024L * 1024L
         private const val MAX_LOCKER_IMAGE_DIM = 1920
         const val CODE_FILE_PREFIX = "@rawfile:"
         const val TOPIC_FILE_PREFIX = "@rawtxt:"
         const val SRT_FILE_PREFIX = "@rawsrt:"
         const val STYLE_PACK_KINETIC = "kinetic-explainer-style.zip"
-        const val STYLE_PACK_SWISS = "swiss-grid-motion-style.zip"
         const val STYLE_PACK_ASSET_NAME = STYLE_PACK_KINETIC
     }
 }

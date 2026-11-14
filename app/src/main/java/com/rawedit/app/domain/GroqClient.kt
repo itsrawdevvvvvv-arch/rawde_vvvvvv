@@ -195,7 +195,7 @@ object GroqClient {
     private val availableModelsByKey = ConcurrentHashMap<String, CachedModels>()
 
     private val PALETTE_THEMES = listOf(
-        "brutalist swiss",
+        "brutalist editorial",
         "warm desert dusk",
         "retro analog film",
         "deep botanical night",

@@ -69,7 +69,17 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.ui.zIndex
 import androidx.core.content.FileProvider
 import com.rawedit.app.BuildConfig
+import android.content.ClipData
+import android.content.ClipboardManager
+import android.content.Context
+import android.content.Intent
+import android.os.Build
+import com.rawedit.app.data.BackupManager
 import com.rawedit.app.data.CacheManager
+import com.rawedit.app.data.local.UserPreferences
+import com.rawedit.app.data.repository.RawEditRepository
+import com.rawedit.app.domain.GitHubToolFetcher
+import java.io.File
 import com.rawedit.app.data.local.UserProfile
 import com.rawedit.app.data.local.VideoEntity
 import com.rawedit.app.domain.AiProvider
@@ -104,11 +114,14 @@ fun ProfileScreen(
     userProfile: UserProfile,
     videos: List<VideoEntity>,
     cacheManager: CacheManager,
+    userPreferences: UserPreferences,
+    repository: RawEditRepository,
     onUpdateName: (String) -> Unit,
     onUpdatePhoto: (String?) -> Unit,
     onOpenGroqKey: () -> Unit,
     onSwitchGroqKey: () -> Unit,
-    onRefreshGroqQuota: () -> Unit
+    onRefreshGroqQuota: () -> Unit,
+    onOpenChatbot: () -> Unit = {}
 ) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
@@ -161,6 +174,71 @@ fun ProfileScreen(
         if (ok && uri != null) {
             scope.launch {
                 pendingCropBitmap = cacheManager.loadBitmapWithExif(uri)
+            }
+        }
+    }
+
+    var githubTokenDraft by remember(userProfile.githubAccessToken) { mutableStateOf(userProfile.githubAccessToken) }
+    var githubVerifying by remember { mutableStateOf(false) }
+    var githubStatusMsg by remember { mutableStateOf<String?>(null) }
+    var githubRepoQuery by remember { mutableStateOf("") }
+    var githubFetching by remember { mutableStateOf(false) }
+    var githubSkillsList by remember { mutableStateOf(cacheManager.listGithubSkillFiles()) }
+    var customFontsList by remember { mutableStateOf(cacheManager.listCustomFonts()) }
+    var backupBusy by remember { mutableStateOf(false) }
+    var pendingBackupFile by remember { mutableStateOf<File?>(null) }
+
+    val fontPicker = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.OpenDocument()
+    ) { uri ->
+        if (uri != null) {
+            val res = cacheManager.importCustomFonts(uri)
+            res.onSuccess { files ->
+                customFontsList = cacheManager.listCustomFonts()
+                toastMsg = if (files.size == 1) "Imported font ${files.first().name}" else "Imported ${files.size} fonts"
+            }.onFailure { err ->
+                toastMsg = err.message ?: "Could not import font."
+            }
+        }
+    }
+
+    val backupSaveLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.CreateDocument("application/zip")
+    ) { destUri ->
+        val srcFile = pendingBackupFile
+        pendingBackupFile = null
+        if (destUri != null && srcFile != null && srcFile.exists()) {
+            backupBusy = true
+            scope.launch {
+                val r = cacheManager.saveFileToUri(srcFile, destUri)
+                backupBusy = false
+                r.onSuccess { toastMsg = "Backup exported successfully" }
+                    .onFailure { err -> toastMsg = err.message ?: "Export failed" }
+            }
+        }
+    }
+
+    val backupRestoreLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.OpenDocument()
+    ) { uri ->
+        if (uri != null) {
+            backupBusy = true
+            scope.launch {
+                val res = BackupManager.restoreFromBackupUri(
+                    context = context,
+                    cacheManager = cacheManager,
+                    userPreferences = userPreferences,
+                    repository = repository,
+                    sourceUri = uri
+                )
+                backupBusy = false
+                res.onSuccess { sum ->
+                    customFontsList = cacheManager.listCustomFonts()
+                    githubSkillsList = cacheManager.listGithubSkillFiles()
+                    toastMsg = "Restored ${sum.projectsCount} projects, ${sum.fontsCount} fonts, ${sum.skillsCount} skills"
+                }.onFailure { err ->
+                    toastMsg = err.message ?: "Could not restore backup ZIP"
+                }
             }
         }
     }
@@ -722,6 +800,379 @@ fun ProfileScreen(
                         fillWidth = false,
                         onClick = { showAboutSheet = true }
                     )
+                }
+            }
+
+            // GitHub Access Token & Skills Fetcher Card
+            item {
+                Spacer(modifier = Modifier.height(12.dp))
+                Column(
+                    modifier = Modifier
+                        .padding(horizontal = 18.dp)
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(28.dp))
+                        .background(RawColors.CardSurface)
+                        .padding(18.dp),
+                    verticalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                text = "GitHub Access Token & Skills",
+                                fontFamily = BricolageFamily,
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 18.5.sp,
+                                color = RawColors.TextPrimary
+                            )
+                            Text(
+                                text = if (userProfile.hasGithubToken) "Token saved (${userProfile.maskGithubToken()}) • Chatbot & app can fetch GitHub tools" else "Optional PAT so AI Chatbot can fetch private/public skills from GitHub",
+                                fontFamily = JetBrainsMonoFamily,
+                                fontSize = 11.5.sp,
+                                color = if (userProfile.hasGithubToken) RawColors.Tan else RawColors.TextMuted
+                            )
+                        }
+                        RawSecondaryButton(
+                            text = "AI Chat",
+                            height = 38.dp,
+                            leadingIcon = RawIconType.SPARK,
+                            fillWidth = false,
+                            onClick = onOpenChatbot
+                        )
+                    }
+
+                    OutlinedTextField(
+                        value = githubTokenDraft,
+                        onValueChange = { githubTokenDraft = it },
+                        singleLine = true,
+                        label = { Text("GitHub Personal Access Token (ghp_...)", fontSize = 11.5.sp) },
+                        placeholder = { Text("ghp_... or github_pat_...", fontSize = 13.sp, color = RawColors.TextMuted) },
+                        textStyle = TextStyle(fontFamily = JetBrainsMonoFamily, fontSize = 12.5.sp, color = RawColors.TextPrimary),
+                        shape = RoundedCornerShape(16.dp),
+                        colors = OutlinedTextFieldDefaults.colors(
+                            focusedBorderColor = RawColors.Tan,
+                            unfocusedBorderColor = RawColors.Divider,
+                            focusedContainerColor = RawColors.RaisedCard,
+                            unfocusedContainerColor = RawColors.RaisedCard,
+                            cursorColor = RawColors.Tan
+                        ),
+                        modifier = Modifier.fillMaxWidth()
+                    )
+
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        BigPrimaryButton(
+                            text = if (githubVerifying) "Verifying..." else "Save & Verify Token",
+                            height = 44.dp,
+                            enabled = !githubVerifying,
+                            onClick = {
+                                val clean = githubTokenDraft.trim()
+                                if (clean.isEmpty()) {
+                                    scope.launch { userPreferences.clearGithubAccessToken() }
+                                    githubStatusMsg = "Token cleared."
+                                    return@BigPrimaryButton
+                                }
+                                githubVerifying = true
+                                scope.launch {
+                                    userPreferences.saveGithubAccessToken(clean)
+                                    val res = GitHubToolFetcher.verifyGithubToken(clean)
+                                    githubVerifying = false
+                                    res.onSuccess { msg ->
+                                        githubStatusMsg = msg
+                                        toastMsg = "GitHub token saved ($msg)"
+                                    }.onFailure { err ->
+                                        githubStatusMsg = "Saved locally (verify note: ${err.message})"
+                                    }
+                                }
+                            },
+                            modifier = Modifier.weight(1f)
+                        )
+                        if (userProfile.hasGithubToken) {
+                            RawSecondaryButton(
+                                text = "Clear",
+                                height = 44.dp,
+                                isDanger = true,
+                                fillWidth = false,
+                                onClick = {
+                                    githubTokenDraft = ""
+                                    githubStatusMsg = null
+                                    scope.launch { userPreferences.clearGithubAccessToken() }
+                                    toastMsg = "GitHub token removed"
+                                }
+                            )
+                        }
+                    }
+
+                    githubStatusMsg?.let { msg ->
+                        Text(
+                            text = msg,
+                            fontFamily = JetBrainsMonoFamily,
+                            fontSize = 11.sp,
+                            color = RawColors.Tan
+                        )
+                    }
+
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        OutlinedTextField(
+                            value = githubRepoQuery,
+                            onValueChange = { githubRepoQuery = it },
+                            singleLine = true,
+                            placeholder = { Text("owner/repo or GitHub URL to download skill...", fontSize = 12.sp, color = RawColors.TextMuted) },
+                            textStyle = TextStyle(fontFamily = JetBrainsMonoFamily, fontSize = 12.sp, color = RawColors.TextPrimary),
+                            shape = RoundedCornerShape(16.dp),
+                            colors = OutlinedTextFieldDefaults.colors(
+                                focusedBorderColor = RawColors.Tan,
+                                unfocusedBorderColor = RawColors.Divider,
+                                focusedContainerColor = RawColors.RaisedCard,
+                                unfocusedContainerColor = RawColors.RaisedCard,
+                                cursorColor = RawColors.Tan
+                            ),
+                            modifier = Modifier.weight(1f)
+                        )
+                        RawSecondaryButton(
+                            text = if (githubFetching) "..." else "Fetch",
+                            height = 48.dp,
+                            fillWidth = false,
+                            enabled = !githubFetching && githubRepoQuery.isNotBlank(),
+                            onClick = {
+                                githubFetching = true
+                                scope.launch {
+                                    val res = GitHubToolFetcher.fetchAndSaveFromGithub(
+                                        queryOrUrl = githubRepoQuery,
+                                        githubToken = userProfile.githubAccessToken.ifBlank { githubTokenDraft },
+                                        cacheManager = cacheManager
+                                    )
+                                    githubFetching = false
+                                    res.onSuccess { items ->
+                                        githubSkillsList = cacheManager.listGithubSkillFiles()
+                                        githubRepoQuery = ""
+                                        toastMsg = "Downloaded ${items.size} skill(s) from GitHub"
+                                    }.onFailure { err ->
+                                        toastMsg = err.message ?: "GitHub fetch failed"
+                                    }
+                                }
+                            }
+                        )
+                    }
+
+                    if (githubSkillsList.isNotEmpty()) {
+                        Text(
+                            text = "DOWNLOADED GITHUB SKILLS (${githubSkillsList.size})",
+                            fontFamily = JetBrainsMonoFamily,
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 10.5.sp,
+                            color = RawColors.Tan
+                        )
+                        githubSkillsList.forEach { sf ->
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clip(RoundedCornerShape(14.dp))
+                                    .background(RawColors.RaisedCard)
+                                    .padding(horizontal = 12.dp, vertical = 8.dp),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text(
+                                    text = sf.name,
+                                    fontFamily = JetBrainsMonoFamily,
+                                    fontSize = 11.5.sp,
+                                    color = RawColors.TextPrimary,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis,
+                                    modifier = Modifier.weight(1f)
+                                )
+                                CircleActionButton(
+                                    icon = RawIconType.TRASH,
+                                    size = 32.dp,
+                                    iconTint = RawColors.ErrorCoral,
+                                    onClick = {
+                                        cacheManager.deleteGithubSkillFile(sf.name)
+                                        githubSkillsList = cacheManager.listGithubSkillFiles()
+                                    }
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+
+            // Custom Fonts Import Card (.ttf / .otf / .zip)
+            item {
+                Spacer(modifier = Modifier.height(12.dp))
+                Column(
+                    modifier = Modifier
+                        .padding(horizontal = 18.dp)
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(28.dp))
+                        .background(RawColors.CardSurface)
+                        .padding(18.dp),
+                    verticalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                text = "Custom Fonts (${customFontsList.size})",
+                                fontFamily = BricolageFamily,
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 18.5.sp,
+                                color = RawColors.TextPrimary
+                            )
+                            Text(
+                                text = "Import .ttf, .otf, or .zip font packs locally",
+                                fontFamily = JetBrainsMonoFamily,
+                                fontSize = 11.5.sp,
+                                color = RawColors.TextMuted
+                            )
+                        }
+                        RawSecondaryButton(
+                            text = "Import Font",
+                            height = 42.dp,
+                            leadingIcon = RawIconType.PLUS,
+                            fillWidth = false,
+                            onClick = { fontPicker.launch(arrayOf("*/*")) }
+                        )
+                    }
+                    if (customFontsList.isNotEmpty()) {
+                        customFontsList.forEach { fontFile ->
+                            val family = fontFile.nameWithoutExtension.replace(
+                                Regex("[-_](Bold|Regular|Medium|SemiBold|Light|Black|ExtraBold)", RegexOption.IGNORE_CASE),
+                                ""
+                            ).replace('-', ' ').replace('_', ' ').trim()
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clip(RoundedCornerShape(14.dp))
+                                    .background(RawColors.RaisedCard)
+                                    .padding(horizontal = 12.dp, vertical = 8.dp),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Column(modifier = Modifier.weight(1f)) {
+                                    Text(
+                                        text = fontFile.name,
+                                        fontFamily = BricolageFamily,
+                                        fontWeight = FontWeight.Bold,
+                                        fontSize = 13.5.sp,
+                                        color = RawColors.TextPrimary
+                                    )
+                                    Text(
+                                        text = "font-family: '$family'",
+                                        fontFamily = JetBrainsMonoFamily,
+                                        fontSize = 11.sp,
+                                        color = RawColors.Tan
+                                    )
+                                }
+                                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                    CircleActionButton(
+                                        icon = RawIconType.COPY,
+                                        size = 34.dp,
+                                        onClick = {
+                                            val cb = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+                                            cb.setPrimaryClip(ClipData.newPlainText("font", family))
+                                            toastMsg = "Copied '$family'"
+                                        }
+                                    )
+                                    CircleActionButton(
+                                        icon = RawIconType.TRASH,
+                                        size = 34.dp,
+                                        iconTint = RawColors.ErrorCoral,
+                                        onClick = {
+                                            cacheManager.deleteCustomFont(fontFile.name)
+                                            customFontsList = cacheManager.listCustomFonts()
+                                        }
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            // Local Backup: Export Data & Import Data
+            item {
+                Spacer(modifier = Modifier.height(12.dp))
+                Column(
+                    modifier = Modifier
+                        .padding(horizontal = 18.dp)
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(28.dp))
+                        .background(RawColors.CardSurface)
+                        .padding(18.dp),
+                    verticalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    Text(
+                        text = "App Backup (Local Phone Storage)",
+                        fontFamily = BricolageFamily,
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 18.5.sp,
+                        color = RawColors.TextPrimary
+                    )
+                    Text(
+                        text = "Export or restore all projects, scripts, SRTs, assets, fonts, skills & settings as a local ZIP backup.",
+                        fontFamily = BricolageFamily,
+                        fontSize = 13.sp,
+                        lineHeight = 18.sp,
+                        color = RawColors.TextMuted
+                    )
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(10.dp)
+                    ) {
+                        BigPrimaryButton(
+                            text = if (backupBusy) "Working..." else "Export Data",
+                            height = 46.dp,
+                            enabled = !backupBusy,
+                            leadingIcon = RawIconType.DOWNLOAD,
+                            onClick = {
+                                backupBusy = true
+                                scope.launch {
+                                    val res = BackupManager.createBackupFile(context, cacheManager, userPreferences, repository)
+                                    res.onSuccess { (zipFile, summary) ->
+                                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                                            val dl = cacheManager.saveFileToDownloads(zipFile, summary.zipFileName, "application/zip")
+                                            backupBusy = false
+                                            dl.onSuccess {
+                                                toastMsg = "Backup saved to Downloads/raw_edit/${summary.zipFileName}"
+                                            }.onFailure {
+                                                pendingBackupFile = zipFile
+                                                backupSaveLauncher.launch(summary.zipFileName)
+                                            }
+                                        } else {
+                                            backupBusy = false
+                                            pendingBackupFile = zipFile
+                                            backupSaveLauncher.launch(summary.zipFileName)
+                                        }
+                                    }.onFailure { err ->
+                                        backupBusy = false
+                                        toastMsg = err.message ?: "Backup export failed"
+                                    }
+                                }
+                            },
+                            modifier = Modifier.weight(1f)
+                        )
+                        RawSecondaryButton(
+                            text = "Import Data",
+                            height = 46.dp,
+                            enabled = !backupBusy,
+                            leadingIcon = RawIconType.FILE,
+                            onClick = { backupRestoreLauncher.launch(arrayOf("application/zip", "*/*")) },
+                            modifier = Modifier.weight(1f)
+                        )
+                    }
                 }
             }
 

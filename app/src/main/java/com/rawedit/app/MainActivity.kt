@@ -54,6 +54,7 @@ import com.rawedit.app.ui.screens.MyReelsScreen
 import com.rawedit.app.ui.screens.OnboardingScreen
 import com.rawedit.app.ui.screens.PaletteScreen
 import com.rawedit.app.ui.screens.ProfileScreen
+import com.rawedit.app.ui.screens.RawChatbotScreen
 import com.rawedit.app.ui.screens.ProfileSetupScreen
 import com.rawedit.app.ui.screens.RenderingScreen
 import com.rawedit.app.ui.screens.ResultScreen
@@ -83,6 +84,7 @@ private sealed interface AppRoute {
     data class KeyframeSheet(val projectId: Long) : AppRoute
     data class Rendering(val projectId: Long) : AppRoute
     data class Result(val videoId: Long, val celebrate: Boolean) : AppRoute
+    data class Chatbot(val projectId: Long? = null) : AppRoute
 }
 
 class MainActivity : ComponentActivity() {
@@ -351,6 +353,7 @@ private fun MainAuthenticatedHost(
                                     HomeScreen(
                                         userProfile = userProfile,
                                         reelsCount = videos.size,
+                                        onOpenChatbot = { pushRoute(AppRoute.Chatbot(null)) },
                                         onStartNewReel = { _ ->
                                             if (!navigatingNewDraft) {
                                                 navigatingNewDraft = true
@@ -406,6 +409,8 @@ private fun MainAuthenticatedHost(
                                     userProfile = userProfile,
                                     videos = videos,
                                     cacheManager = container.cacheManager,
+                                    userPreferences = container.userPreferences,
+                                    repository = container.repository,
                                     onUpdateName = { newName ->
                                         scope.launch { container.userPreferences.updateUserName(newName) }
                                     },
@@ -414,7 +419,8 @@ private fun MainAuthenticatedHost(
                                     },
                                     onOpenGroqKey = { openGroqDialog(switchMode = false) },
                                     onSwitchGroqKey = { openGroqDialog(switchMode = true) },
-                                    onRefreshGroqQuota = { refreshGroqQuota(silent = false) }
+                                    onRefreshGroqQuota = { refreshGroqQuota(silent = false) },
+                                    onOpenChatbot = { pushRoute(AppRoute.Chatbot(null)) }
                                 )
                             }
                         }
@@ -589,11 +595,17 @@ private fun MainAuthenticatedHost(
                             val ids = RawEditRepository.parseAttachedAssetIds(proj.attachedAssetIds).toSet()
                             allAssets.filter { it.id in ids }
                         }
+                        val ghSkills = remember(proj.id) {
+                            container.cacheManager.listGithubSkillFiles().map { "${it.name}: ${it.readText(Charsets.UTF_8).take(400)}" }
+                        }
                         CopyPromptScreen(
                             project = proj,
                             attachedAssets = attachedAssets,
                             palette = activePalette,
                             cacheManager = container.cacheManager,
+                            customPromptNotes = userProfile.customPromptNotes,
+                            githubSkills = ghSkills,
+                            onOpenChatbot = { pushRoute(AppRoute.Chatbot(proj.id)) },
                             onBack = ::popRoute
                         )
                     }
@@ -737,6 +749,22 @@ private fun MainAuthenticatedHost(
                             }
                         )
                     }
+                }
+
+                is AppRoute.Chatbot -> {
+                    RawChatbotScreen(
+                        userProfile = userProfile,
+                        allProjects = projects,
+                        initialProjectId = route.projectId,
+                        allAssets = allAssets,
+                        activePalette = activePalette,
+                        cacheManager = container.cacheManager,
+                        userPreferences = container.userPreferences,
+                        repository = container.repository,
+                        geminiRouter = geminiRouter,
+                        onOpenApiKeySettings = { openGroqDialog(switchMode = false) },
+                        onBack = ::popRoute
+                    )
                 }
             }
         }

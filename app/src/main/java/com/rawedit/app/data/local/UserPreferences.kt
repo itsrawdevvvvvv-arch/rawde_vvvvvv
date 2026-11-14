@@ -16,7 +16,9 @@ import com.rawedit.app.domain.GroqCodec
 import com.rawedit.app.domain.GroqLimitKind
 import com.rawedit.app.domain.GroqQuotaReport
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
+import org.json.JSONObject
 
 private val Context.dataStore: DataStore<Preferences> by preferencesDataStore(name = "raw_edit_prefs")
 
@@ -40,13 +42,24 @@ data class UserProfile(
     val paletteJson: String = "",
     val geminiApiKey: String = "",
     val aiProviderRoute: String = AiProvider.GEMINI_FREE.id,
-    val geminiTaskRoute: String = GeminiTaskRoute.BALANCED_AUTO.id
+    val geminiTaskRoute: String = GeminiTaskRoute.BALANCED_AUTO.id,
+    val githubAccessToken: String = "",
+    val customPromptNotes: String = ""
 ) {
     val hasGroqKey: Boolean
         get() = groqApiKey.isNotBlank()
 
     val hasGeminiKey: Boolean
         get() = geminiApiKey.isNotBlank() && (geminiApiKey.startsWith("AIza") || geminiApiKey.startsWith("AQ") || geminiApiKey.length >= 20)
+
+    val hasGithubToken: Boolean
+        get() = githubAccessToken.isNotBlank()
+
+    fun maskGithubToken(): String {
+        val clean = githubAccessToken.trim()
+        if (clean.length < 10) return if (clean.isEmpty()) "None" else "••••"
+        return "${clean.take(4)}...${clean.takeLast(4)}"
+    }
 
     fun resolvedAiProvider(): AiProvider = when (aiProviderRoute) {
         AiProvider.GROQ_CLOUD.id -> AiProvider.GROQ_CLOUD
@@ -161,6 +174,8 @@ class UserPreferences(private val context: Context) {
         val GEMINI_API_KEY = stringPreferencesKey("gemini_api_key")
         val AI_PROVIDER_ROUTE = stringPreferencesKey("ai_provider_route")
         val GEMINI_TASK_ROUTE = stringPreferencesKey("gemini_task_route")
+        val GITHUB_ACCESS_TOKEN = stringPreferencesKey("github_access_token")
+        val CUSTOM_PROMPT_NOTES = stringPreferencesKey("custom_prompt_notes")
     }
 
     val userProfile: Flow<UserProfile> = context.dataStore.data.map { prefs ->
@@ -186,7 +201,9 @@ class UserPreferences(private val context: Context) {
             paletteJson = prefs[Keys.PALETTE_JSON] ?: "",
             geminiApiKey = prefs[Keys.GEMINI_API_KEY] ?: "",
             aiProviderRoute = prefs[Keys.AI_PROVIDER_ROUTE] ?: AiProvider.GEMINI_FREE.id,
-            geminiTaskRoute = prefs[Keys.GEMINI_TASK_ROUTE] ?: GeminiTaskRoute.BALANCED_AUTO.id
+            geminiTaskRoute = prefs[Keys.GEMINI_TASK_ROUTE] ?: GeminiTaskRoute.BALANCED_AUTO.id,
+            githubAccessToken = prefs[Keys.GITHUB_ACCESS_TOKEN] ?: "",
+            customPromptNotes = prefs[Keys.CUSTOM_PROMPT_NOTES] ?: ""
         )
     }
 
@@ -328,6 +345,83 @@ class UserPreferences(private val context: Context) {
     suspend fun clearGeminiSession() {
         context.dataStore.edit { prefs ->
             prefs.remove(Keys.GEMINI_API_KEY)
+        }
+    }
+
+    suspend fun saveGithubAccessToken(token: String) {
+        context.dataStore.edit { prefs ->
+            val clean = token.trim().removePrefix("Bearer ").removePrefix("token ").trim()
+            if (clean.isNotEmpty()) {
+                prefs[Keys.GITHUB_ACCESS_TOKEN] = clean
+            } else {
+                prefs.remove(Keys.GITHUB_ACCESS_TOKEN)
+            }
+        }
+    }
+
+    suspend fun clearGithubAccessToken() {
+        context.dataStore.edit { prefs ->
+            prefs.remove(Keys.GITHUB_ACCESS_TOKEN)
+        }
+    }
+
+    suspend fun saveCustomPromptNotes(notes: String) {
+        context.dataStore.edit { prefs ->
+            val trimmed = notes.trim()
+            if (trimmed.isNotEmpty()) {
+                prefs[Keys.CUSTOM_PROMPT_NOTES] = trimmed
+            } else {
+                prefs.remove(Keys.CUSTOM_PROMPT_NOTES)
+            }
+        }
+    }
+
+    suspend fun exportToJson(): JSONObject {
+        val current = userProfile.first()
+        return JSONObject().apply {
+            put("userName", current.userName)
+            put("profilePhotoPath", current.profilePhotoPath ?: "")
+            put("onboardingDone", current.onboardingDone)
+            put("joinDateMillis", current.joinDateMillis)
+            put("groqApiKey", current.groqApiKey)
+            put("groqModelPref", current.groqModelPref)
+            put("paletteCounter", current.paletteCounter)
+            put("paletteJson", current.paletteJson)
+            put("geminiApiKey", current.geminiApiKey)
+            put("aiProviderRoute", current.aiProviderRoute)
+            put("geminiTaskRoute", current.geminiTaskRoute)
+            put("githubAccessToken", current.githubAccessToken)
+            put("customPromptNotes", current.customPromptNotes)
+        }
+    }
+
+    suspend fun importFromJson(obj: JSONObject, restoredPhotoPath: String? = null) {
+        context.dataStore.edit { prefs ->
+            val name = obj.optString("userName", "").trim()
+            if (name.isNotEmpty()) prefs[Keys.USER_NAME] = name
+            if (restoredPhotoPath != null) {
+                prefs[Keys.PHOTO_PATH] = restoredPhotoPath
+            }
+            prefs[Keys.ONBOARDING_DONE] = obj.optBoolean("onboardingDone", true)
+            val join = obj.optLong("joinDateMillis", System.currentTimeMillis())
+            if (join > 0L) prefs[Keys.JOIN_DATE] = join
+            val groqKey = obj.optString("groqApiKey", "").trim()
+            if (groqKey.isNotEmpty()) prefs[Keys.GROQ_API_KEY] = groqKey
+            val groqPref = obj.optString("groqModelPref", "").trim()
+            if (groqPref.isNotEmpty()) prefs[Keys.GROQ_MODEL_PREF] = groqPref
+            prefs[Keys.PALETTE_COUNTER] = obj.optInt("paletteCounter", 1).coerceAtLeast(1)
+            val palJson = obj.optString("paletteJson", "")
+            if (palJson.isNotEmpty()) prefs[Keys.PALETTE_JSON] = palJson
+            val gemKey = obj.optString("geminiApiKey", "").trim()
+            if (gemKey.isNotEmpty()) prefs[Keys.GEMINI_API_KEY] = gemKey
+            val aiRoute = obj.optString("aiProviderRoute", "")
+            if (aiRoute.isNotEmpty()) prefs[Keys.AI_PROVIDER_ROUTE] = aiRoute
+            val gemRoute = obj.optString("geminiTaskRoute", "")
+            if (gemRoute.isNotEmpty()) prefs[Keys.GEMINI_TASK_ROUTE] = gemRoute
+            val ghToken = obj.optString("githubAccessToken", "").trim()
+            if (ghToken.isNotEmpty()) prefs[Keys.GITHUB_ACCESS_TOKEN] = ghToken
+            val promptNotes = obj.optString("customPromptNotes", "").trim()
+            if (promptNotes.isNotEmpty()) prefs[Keys.CUSTOM_PROMPT_NOTES] = promptNotes else prefs.remove(Keys.CUSTOM_PROMPT_NOTES)
         }
     }
 

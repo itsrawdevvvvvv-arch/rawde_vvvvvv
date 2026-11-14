@@ -4,6 +4,7 @@ import android.content.Context
 import android.content.SharedPreferences
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
+import android.media.MediaMetadataRetriever
 import android.util.Base64
 import com.rawedit.app.data.local.LocalAssetEntity
 import kotlinx.coroutines.CancellationException
@@ -25,7 +26,8 @@ import kotlin.random.Random
 
 enum class GeminiRouteMode {
     JSON_WORKHORSE, // 3.5-flash-lite (500 RPD) -> 3.1-flash-lite (500 RPD) -> 3.6-flash (20 RPD) -> 3.8-flash (20 RPD)
-    CREATIVE_FLASH  // 3.8-flash (20 RPD) -> 3.6-flash (20 RPD) -> 3.5-flash-lite (500 RPD) -> 3.1-flash-lite (500 RPD)
+    CREATIVE_FLASH, // 3.8-flash (20 RPD) -> 3.6-flash (20 RPD) -> 3.5-flash-lite (500 RPD) -> 3.1-flash-lite (500 RPD)
+    FAST_CHAT       // Instant low-latency chain: gemini-2.5-flash -> 3.5-flash-lite -> 2.5-flash-lite
 }
 
 enum class AiProvider(val id: String, val label: String) {
@@ -82,8 +84,15 @@ class GeminiWaterfallRouter(context: Context) {
             "gemini-3.1-flash-lite"
         )
 
+        val FAST_CHAIN = listOf(
+            "gemini-2.5-flash",
+            "gemini-3.5-flash-lite",
+            "gemini-2.5-flash-lite",
+            "gemini-3.8-flash"
+        )
+
         val PALETTE_THEMES = listOf(
-            "brutalist swiss",
+            "brutalist editorial",
             "warm desert dusk",
             "retro analog film",
             "deep botanical night",
@@ -109,19 +118,18 @@ class GeminiWaterfallRouter(context: Context) {
             else -> 20
         }
 
-        // Minimum spacing to avoid burst 429 RPM errors on single-model loops
         fun getMinIntervalMsForModel(modelId: String): Long = when {
-            modelId.contains("flash-lite") -> 4_000L // 15 RPM = 4s spacing
-            else -> 12_000L                          // 5 RPM = 12s spacing
+            modelId.contains("flash-lite") -> 4_000L
+            else -> 12_000L
         }
 
         fun sanitizeApiKey(raw: String): String {
             return raw.trim()
                 .removeSurrounding("\"")
                 .removeSurrounding("'")
-                .replace("\u200B", "") // zero-width space
-                .replace("\uFEFF", "") // zero-width BOM
-                .replace("\u00A0", "") // non-breaking space
+                .replace("\u200B", "")
+                .replace("\uFEFF", "")
+                .replace("\u00A0", "")
                 .filter { !it.isWhitespace() }
         }
 
@@ -155,7 +163,8 @@ class GeminiWaterfallRouter(context: Context) {
             prompt: String,
             systemInstruction: String? = null,
             expectJson: Boolean = true,
-            images: List<GeminiImageInput> = emptyList()
+            images: List<GeminiImageInput> = emptyList(),
+            maxOutputTokens: Int = 8192
         ): String {
             val userParts = JSONArray()
             userParts.put(JSONObject().put("text", prompt))
@@ -187,7 +196,7 @@ class GeminiWaterfallRouter(context: Context) {
                     if (expectJson) {
                         put("responseMimeType", "application/json")
                     }
-                    // Minimal/zero thinking prevents 503 scheduling bottlenecks & timeouts
+                    put("maxOutputTokens", maxOutputTokens.coerceIn(512, 16384))
                     put("thinkingConfig", JSONObject().put("thinkingBudget", 0))
                 })
             }
@@ -195,10 +204,6 @@ class GeminiWaterfallRouter(context: Context) {
         }
     }
 
-    /**
-     * Computes epoch millis of the next Midnight Pacific Time (America/Los_Angeles) reset.
-     * Corresponds to 1:30 PM Indian Standard Time (IST).
-     */
     fun getNextPacificMidnightMillis(): Long = computeNextPacificMidnightMs()
 
     fun checkAndResetDailyCountersIfNeeded() {
@@ -242,17 +247,14 @@ class GeminiWaterfallRouter(context: Context) {
         prefs.edit().clear().apply()
     }
 
-    /**
-     * Executes a prompt with automatic 503 jittered backoff, 429 PerDay detection,
-     * and seamless cascade across the 4-model free-tier waterfall.
-     */
     suspend fun generate(
         apiKey: String,
         prompt: String,
         systemInstruction: String? = null,
         routeMode: GeminiRouteMode = GeminiRouteMode.JSON_WORKHORSE,
         expectJson: Boolean = true,
-        images: List<GeminiImageInput> = emptyList()
+        images: List<GeminiImageInput> = emptyList(),
+        maxOutputTokens: Int = 8192
     ): Result<GeminiGenerationResult> = withContext(Dispatchers.IO) {
         val cleanKey = sanitizeApiKey(apiKey)
         if (!isValidApiKey(cleanKey)) {
@@ -261,7 +263,11 @@ class GeminiWaterfallRouter(context: Context) {
             )
         }
 
-        val chain = if (routeMode == GeminiRouteMode.JSON_WORKHORSE) WORKHORSE_CHAIN else CREATIVE_CHAIN
+        val chain = when (routeMode) {
+            GeminiRouteMode.FAST_CHAT -> FAST_CHAIN
+            GeminiRouteMode.JSON_WORKHORSE -> (WORKHORSE_CHAIN + "gemini-2.5-flash").distinct()
+            GeminiRouteMode.CREATIVE_FLASH -> (listOf("gemini-2.5-flash") + CREATIVE_CHAIN).distinct()
+        }
         var totalAttempts = 0
         var lastErrorSummary = "All models in waterfall failed."
 
@@ -270,20 +276,15 @@ class GeminiWaterfallRouter(context: Context) {
                 continue
             }
 
-            // Cap retries at 2 per model so 503 waves don't drain daily RPD
-            for (attempt in 0 until 2) {
+            // Single fast attempt per model for chat/lightweight prompts; 2 attempts only for heavy media/SRT
+            val maxAttempts = if (images.isEmpty() && prompt.length < 12_000) 1 else 2
+            val isQuick = images.isEmpty() && prompt.length < 12_000
+            for (attempt in 0 until maxAttempts) {
                 totalAttempts++
 
-                // Respect burst spacing if retrying the same model
-                val waitMs = rateMutex.withLock {
-                    val lastTs = lastRequestTimeMs[model] ?: 0L
-                    val elapsed = System.currentTimeMillis() - lastTs
-                    val minGap = if (attempt > 0) 1_500L else 600L
-                    val needed = (minGap - elapsed).coerceAtLeast(0L)
-                    lastRequestTimeMs[model] = System.currentTimeMillis() + needed
-                    needed
+                if (attempt > 0) {
+                    delay(450L)
                 }
-                if (waitMs > 0L) delay(waitMs)
 
                 val encodedKey = try {
                     java.net.URLEncoder.encode(cleanKey, "UTF-8")
@@ -292,14 +293,20 @@ class GeminiWaterfallRouter(context: Context) {
                     "https://generativelanguage.googleapis.com/v1beta/models/$model:generateContent?key=$encodedKey"
                 val conn = (URL(endpoint).openConnection() as HttpURLConnection).apply {
                     requestMethod = "POST"
-                    connectTimeout = 20_000
-                    readTimeout = 90_000 // 90s timeout prevents drops on busy waves
+                    connectTimeout = 8_000
+                    readTimeout = if (isQuick) 20_000 else 55_000
                     doOutput = true
                     setRequestProperty("Content-Type", "application/json; charset=UTF-8")
                     setRequestProperty("x-goog-api-key", cleanKey)
                 }
 
-                val payloadString = buildGenerateContentPayload(prompt, systemInstruction, expectJson, images)
+                val payloadString = buildGenerateContentPayload(
+                    prompt = prompt,
+                    systemInstruction = systemInstruction,
+                    expectJson = expectJson,
+                    images = images,
+                    maxOutputTokens = maxOutputTokens
+                )
 
                 try {
                     conn.outputStream.use { os ->
@@ -341,31 +348,25 @@ class GeminiWaterfallRouter(context: Context) {
                     val errBody = conn.errorStream?.bufferedReader()?.use { it.readText() }.orEmpty()
                     lastErrorSummary = parseCleanErrorMessage(status, model, errBody)
 
-                    // 1. Check if key itself is invalid (400 API_KEY_INVALID or 403)
                     if (status == 400 && errBody.contains("API_KEY_INVALID", ignoreCase = true)) {
                         return@withContext Result.failure(
                             IllegalStateException("API Key is invalid. Check your key in Google AI Studio.")
                         )
                     }
 
-                    // 2. Check if Daily Quota (RPD) is exhausted or model is restricted (limit: 0 / 404)
                     if (status == 404 ||
                         errBody.contains("PerDay", ignoreCase = true) ||
                         errBody.contains("limit: 0", ignoreCase = true)
                     ) {
                         markModelDailyExhausted(model)
-                        break // Immediately cascade to next model in waterfall
+                        break
                     }
 
-                    // 3. Transient 503 (High Demand / Overloaded) or Per-Minute 429:
-                    // Backoff with random jitter ONCE, then cascade to next model
-                    if ((status == 503 || status == 429 || status == 500) && attempt == 0) {
-                        val jitterMs = Random.nextLong(350L, 1150L)
-                        delay(1_250L + jitterMs)
+                    if ((status == 503 || status == 429 || status == 500) && attempt == 0 && maxAttempts > 1) {
+                        delay(Random.nextLong(300L, 650L))
                         continue
                     }
 
-                    // Otherwise move to next model in waterfall
                     break
                 } catch (ce: CancellationException) {
                     throw ce
@@ -383,10 +384,6 @@ class GeminiWaterfallRouter(context: Context) {
         Result.failure(IllegalStateException(lastErrorSummary))
     }
 
-    /**
-     * Lightweight health & key verification ping for the Profile Tab Modal.
-     * Uses minimal payload to prevent 400 errors from unsupported generationConfig fields.
-     */
     suspend fun testApiKeyHealth(apiKey: String): List<ModelHealthStatus> = withContext(Dispatchers.IO) {
         val cleanKey = sanitizeApiKey(apiKey)
         val testModels = listOf("gemini-2.5-flash", "gemini-3.5-flash-lite", "gemini-3.8-flash")
@@ -410,8 +407,6 @@ class GeminiWaterfallRouter(context: Context) {
                 setRequestProperty("x-goog-api-key", cleanKey)
             }
 
-            // Minimal payload without thinkingConfig or maxOutputTokens
-            // so all Gemini models accept the request without 400 INVALID_ARGUMENT
             val pingPayload = JSONObject().apply {
                 put("contents", JSONArray().put(
                     JSONObject().put("parts", JSONArray().put(JSONObject().put("text", "ping")))
@@ -705,9 +700,15 @@ class GeminiWaterfallRouter(context: Context) {
         }
     }
 
+    /**
+     * Full 100% Audio-to-SRT Transcription with duration verification, automatic multi-pass
+     * continuation if a model stops early (at 25% or 50%), and full script alignment.
+     */
     suspend fun transcribeAudioWordByWord(
         apiKey: String,
-        audioFile: File
+        audioFile: File,
+        knownDurationSec: Double = 0.0,
+        scriptHint: String = ""
     ): Result<SrtParseResult> = withContext(Dispatchers.IO) {
         try {
             val cleanKey = sanitizeApiKey(apiKey)
@@ -716,6 +717,21 @@ class GeminiWaterfallRouter(context: Context) {
             }
             if (!audioFile.exists() || audioFile.length() == 0L) {
                 return@withContext Result.failure(IllegalStateException("Audio file not found or empty: ${audioFile.name}"))
+            }
+
+            val actualDurationSec = if (knownDurationSec > 0.5) {
+                knownDurationSec
+            } else {
+                val retriever = MediaMetadataRetriever()
+                try {
+                    retriever.setDataSource(audioFile.absolutePath)
+                    val ms = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_DURATION)?.toLongOrNull() ?: 0L
+                    (ms / 1000.0).coerceAtLeast(1.0)
+                } catch (_: Exception) {
+                    15.0
+                } finally {
+                    runCatching { retriever.release() }
+                }
             }
 
             val rawBytes = audioFile.readBytes()
@@ -730,31 +746,127 @@ class GeminiWaterfallRouter(context: Context) {
                 else -> "audio/mp3"
             }
 
+            val endTsStr = SrtParser.formatTimestamp(actualDurationSec)
+            val durStr = String.format(Locale.US, "%.2f", actualDurationSec)
+            val cleanScript = scriptHint.trim()
+            val scriptSection = if (cleanScript.isNotBlank()) {
+                "\nREFERENCE FULL SCRIPT (You MUST cover 100% of these words from start to end without stopping early):\n$cleanScript\n"
+            } else {
+                ""
+            }
+
             val prompt = """
-                You are a professional audio subtitler.
-                Transcribe the spoken words in this audio into standard SubRip (.srt) subtitle format.
-                Requirements:
-                1. Every entry MUST have a sequential cue number (1, 2, 3...), timestamp line (HH:MM:SS,mmm --> HH:MM:SS,mmm), and the spoken words.
-                2. Keep cues short: 1 to 4 words per cue for kinetic typography pacing.
-                3. The timing must match the audio timestamps accurately.
-                4. Output ONLY the raw SRT text, no explanations, no markdown fences.
+                You are an exact, complete audio-to-SRT subtitle transcriber.
+                TOTAL AUDIO DURATION: $durStr seconds (00:00:00,000 to $endTsStr).
+                $scriptSection
+                CRITICAL INSTRUCTIONS — DO NOT STOP AT 25% OR 50%:
+                1. You MUST transcribe 100% of the spoken words across the ENTIRE $durStr seconds from 00:00:00,000 all the way until $endTsStr.
+                2. Every entry MUST use standard SubRip (.srt) format:
+                   - Sequential cue number (1, 2, 3...)
+                   - Full timestamp line in exact HH:MM:SS,mmm --> HH:MM:SS,mmm format
+                   - 2 to 4 spoken words per cue for punchy kinetic typography pacing.
+                3. Never summarize, never skip the second half, and never stop before the audio ends at $endTsStr.
+                4. Output ONLY raw .srt text — no markdown code fences, no commentary.
             """.trimIndent()
 
-            val res = generate(
+            val initialRes = generate(
                 apiKey = cleanKey,
                 prompt = prompt,
                 routeMode = GeminiRouteMode.JSON_WORKHORSE,
                 expectJson = false,
-                images = listOf(GeminiImageInput(base64Data = b64, mimeType = mime))
+                images = listOf(GeminiImageInput(base64Data = b64, mimeType = mime)),
+                maxOutputTokens = 16384
             ).getOrThrow()
 
-            val rawSrt = res.text
-                .replace("```srt", "")
-                .replace("```", "")
-                .trim()
+            val collectedCues = mutableListOf<SrtCue>()
+            val firstParsed = SrtParser.parse(initialRes.text)
+            if (firstParsed.valid) {
+                collectedCues.addAll(firstParsed.cues)
+            }
 
-            val parsed = SrtParser.parse(rawSrt)
-            Result.success(parsed)
+            // Multi-pass continuation loop if transcription stopped before covering at least 86% of the audio duration
+            var pass = 0
+            while (pass < 3 && actualDurationSec > 4.0) {
+                val coveredUntil = collectedCues.maxOfOrNull { it.endSec } ?: 0.0
+                if (coveredUntil >= actualDurationSec * 0.86 || (actualDurationSec - coveredUntil) <= 2.2) {
+                    break
+                }
+                pass++
+                val resumeTs = SrtParser.formatTimestamp(coveredUntil)
+                val tailContext = collectedCues.takeLast(4).joinToString("\n") { c ->
+                    "${SrtParser.formatTimestamp(c.startSec)} --> ${SrtParser.formatTimestamp(c.endSec)}: ${c.text}"
+                }
+                val contPrompt = """
+                    The SRT transcription of this $durStr-second audio stopped early at $resumeTs (${String.format(Locale.US, "%.1f", (coveredUntil / actualDurationSec) * 100)}% of the audio).
+                    Last transcribed cues:
+                    $tailContext
+                    $scriptSection
+                    CONTINUE transcribing the remaining spoken audio starting strictly from $resumeTs all the way to the end of the audio at $endTsStr ($durStr seconds).
+                    Use exact HH:MM:SS,mmm --> HH:MM:SS,mmm format, 2 to 4 words per cue. Output ONLY the remaining raw SRT cues.
+                """.trimIndent()
+
+                val contRes = generate(
+                    apiKey = cleanKey,
+                    prompt = contPrompt,
+                    routeMode = GeminiRouteMode.JSON_WORKHORSE,
+                    expectJson = false,
+                    images = listOf(GeminiImageInput(base64Data = b64, mimeType = mime)),
+                    maxOutputTokens = 16384
+                ).getOrNull() ?: break
+
+                val contParsed = SrtParser.parse(contRes.text)
+                if (!contParsed.valid || contParsed.cues.isEmpty()) break
+
+                // If the model returned timestamps starting near 00:00:00 instead of offset `coveredUntil`, shift them by `coveredUntil`
+                val minNewStart = contParsed.cues.minOf { it.startSec }
+                val shouldOffset = minNewStart < coveredUntil * 0.5 && coveredUntil > 3.0
+                val adjustedNewCues = contParsed.cues.map { c ->
+                    if (shouldOffset) {
+                        c.copy(
+                            startSec = (c.startSec + coveredUntil).coerceAtMost(actualDurationSec),
+                            endSec = (c.endSec + coveredUntil).coerceAtMost(actualDurationSec)
+                        )
+                    } else {
+                        c
+                    }
+                }.filter { it.endSec > coveredUntil + 0.15 }
+
+                if (adjustedNewCues.isEmpty()) break
+                collectedCues.addAll(adjustedNewCues)
+            }
+
+            // If user provided a full script and the audio transcription still missed the tail words, align the remaining script words across the remaining duration!
+            if (cleanScript.isNotBlank()) {
+                val scriptWords = cleanScript.split(Regex("\\s+")).filter { it.isNotBlank() }
+                val transcribedWordsCount = collectedCues.sumOf { it.text.split(Regex("\\s+")).count { w -> w.isNotBlank() } }
+                val coveredUntil = collectedCues.maxOfOrNull { it.endSec } ?: 0.0
+                if (transcribedWordsCount < (scriptWords.size * 0.85).toInt() && coveredUntil < actualDurationSec - 1.0) {
+                    val remainingWords = scriptWords.drop(transcribedWordsCount).joinToString(" ")
+                    if (remainingWords.isNotBlank()) {
+                        val tailSrt = SrtParser.generateFullScriptSrt(
+                            scriptText = remainingWords,
+                            totalDurationSec = actualDurationSec,
+                            startOffsetSec = coveredUntil,
+                            startingCueIndex = collectedCues.size + 1
+                        )
+                        if (tailSrt.valid) {
+                            collectedCues.addAll(tailSrt.cues)
+                        }
+                    }
+                }
+            }
+
+            if (collectedCues.isEmpty() && cleanScript.isNotBlank()) {
+                return@withContext Result.success(
+                    SrtParser.generateFullScriptSrt(cleanScript, actualDurationSec)
+                )
+            }
+
+            val finalParsed = SrtParser.buildResultFromCues(collectedCues)
+            if (!finalParsed.valid) {
+                return@withContext Result.failure(IllegalStateException(finalParsed.error ?: "Could not parse SRT output."))
+            }
+            Result.success(finalParsed)
         } catch (ce: CancellationException) {
             throw ce
         } catch (t: Throwable) {
