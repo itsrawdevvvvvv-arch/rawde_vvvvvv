@@ -233,12 +233,9 @@ object ChatbotEngine {
                     if (activeProject != null) {
                         appendLine("=== ACTIVE PROJECT (${activeProject.title}) ===")
                         appendLine("Audio: ${activeProject.audioName} (${String.format(Locale.US, "%.2f", activeProject.audioDurationSec)}s)")
-                        if (activeTopic.isNotBlank()) appendLine("Full Active Script/Topic:
-${activeTopic.take(4000)}")
-                        if (activeSrt.isNotBlank()) appendLine("Full Active SRT (${activeProject.srtCueCount} cues):
-${activeSrt.take(5000)}")
-                        if (activeHtml.isNotBlank()) appendLine("Active HTML Code (${activeHtml.length} chars):
-${activeHtml.take(8000)}")
+                        if (activeTopic.isNotBlank()) appendLine("Full Active Script/Topic:\n${activeTopic.take(4000)}")
+                        if (activeSrt.isNotBlank()) appendLine("Full Active SRT (${activeProject.srtCueCount} cues):\n${activeSrt.take(5000)}")
+                        if (activeHtml.isNotBlank()) appendLine("Active HTML Code (${activeHtml.length} chars):\n${activeHtml.take(8000)}")
                     }
                     appendLine("=== CURRENT CUSTOM PROMPT DIRECTIVES ===")
                     appendLine(userProfile.customPromptNotes.ifBlank { "(Default Kinetic Explainer prompt)" })
