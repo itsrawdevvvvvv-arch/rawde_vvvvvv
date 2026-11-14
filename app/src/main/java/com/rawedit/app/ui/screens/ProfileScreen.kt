@@ -73,6 +73,7 @@ import com.rawedit.app.data.CacheManager
 import com.rawedit.app.data.local.UserProfile
 import com.rawedit.app.data.local.VideoEntity
 import com.rawedit.app.domain.AiProvider
+import com.rawedit.app.domain.GeminiTaskRoute
 import com.rawedit.app.domain.GroqCodec
 import com.rawedit.app.ui.components.BigPrimaryButton
 import com.rawedit.app.ui.components.CircleActionButton
@@ -527,28 +528,19 @@ fun ProfileScreen(
                 }
             }
 
-            // Groq AI & Quota card
+            // Google Gemini AI & Waterfall card
             item {
                 Spacer(modifier = Modifier.height(4.dp))
-                val activeProvider = userProfile.resolvedAiProvider()
-                val hasKey = userProfile.hasActiveAiKey
-                val quota = userProfile.toGroqQuotaReportOrNull()
-                val isExhausted = activeProvider == AiProvider.GROQ_CLOUD && (userProfile.groqQuotaExhausted || quota?.isExhausted == true)
-                val isLow = quota?.isLow == true
-                val routeLabel = GroqCodec.routeDisplayLabel(userProfile.groqModelPref)
-                val quotaLabel = userProfile.quotaSummaryText()
-                val subtitle = when (activeProvider) {
-                    AiProvider.GEMINI_FREE -> if (userProfile.hasGeminiKey) {
-                        "${userProfile.maskGeminiKey()}  \u2022  Gemini Waterfall (Free)"
-                    } else {
-                        "Google AI Studio  \u2022  1,040 RPD Free"
-                    }
-                    AiProvider.AUTO_HYBRID -> "Auto Hybrid  \u2022  Gemini \u2192 Groq"
-                    AiProvider.GROQ_CLOUD -> if (userProfile.hasGroqKey) {
-                        "${GroqCodec.maskApiKey(userProfile.groqApiKey)}  \u2022  $routeLabel"
-                    } else {
-                        "Not configured  \u2022  api.groq.com"
-                    }
+                val hasKey = userProfile.hasGeminiKey
+                val routeLabel = when (userProfile.geminiTaskRoute) {
+                    GeminiTaskRoute.MAX_QUOTA_SAVER.id -> "Max Quota (1,000 RPD)"
+                    GeminiTaskRoute.MAX_QUALITY.id -> "Max Creative (Flash 3.8)"
+                    else -> "Balanced Waterfall"
+                }
+                val subtitle = if (hasKey) {
+                    "${userProfile.maskGeminiKey()}  \u2022  1,040 RPD Free Waterfall"
+                } else {
+                    "Google AI Studio  \u2022  1,040 RPD Free"
                 }
                 val cardShape = RoundedCornerShape(28.dp)
                 Column(
@@ -557,11 +549,6 @@ fun ProfileScreen(
                         .fillMaxWidth()
                         .clip(cardShape)
                         .background(RawColors.CardSurface)
-                        .then(
-                            if (isExhausted) {
-                                Modifier.border(1.dp, RawColors.ErrorBorder, cardShape)
-                            } else Modifier
-                        )
                         .clickable(onClick = onOpenGroqKey)
                         .padding(18.dp),
                     verticalArrangement = Arrangement.spacedBy(12.dp)
@@ -580,28 +567,18 @@ fun ProfileScreen(
                                 modifier = Modifier
                                     .size(42.dp)
                                     .clip(CircleShape)
-                                    .background(
-                                        when {
-                                            isExhausted -> RawColors.ErrorSoft
-                                            hasKey -> RawColors.AccentSoft
-                                            else -> RawColors.RaisedCard
-                                        }
-                                    ),
+                                    .background(if (hasKey) RawColors.AccentSoft else RawColors.RaisedCard),
                                 contentAlignment = Alignment.Center
                             ) {
                                 RawIcon(
                                     type = RawIconType.KEY,
                                     size = 19.dp,
-                                    tint = when {
-                                        isExhausted -> RawColors.ErrorCoral
-                                        hasKey -> RawColors.Tan
-                                        else -> RawColors.TextMuted
-                                    }
+                                    tint = if (hasKey) RawColors.Tan else RawColors.TextMuted
                                 )
                             }
                             Column {
                                 Text(
-                                    text = "AI & Quota Engine",
+                                    text = "Google Gemini Free AI",
                                     fontFamily = BricolageFamily,
                                     fontWeight = FontWeight.Bold,
                                     fontSize = 18.sp,
@@ -621,22 +598,12 @@ fun ProfileScreen(
                         }
 
                         if (hasKey) {
-                            Row(
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.spacedBy(8.dp)
-                            ) {
-                                CircleActionButton(
-                                    icon = RawIconType.REFRESH,
-                                    size = 38.dp,
-                                    onClick = onRefreshGroqQuota
-                                )
-                                RawSecondaryButton(
-                                    text = "Manage",
-                                    height = 42.dp,
-                                    fillWidth = false,
-                                    onClick = onOpenGroqKey
-                                )
-                            }
+                            RawSecondaryButton(
+                                text = "Manage",
+                                height = 42.dp,
+                                fillWidth = false,
+                                onClick = onOpenGroqKey
+                            )
                         } else {
                             RawSecondaryButton(
                                 text = "Add key",
@@ -664,18 +631,18 @@ fun ProfileScreen(
                             ) {
                                 Column(modifier = Modifier.weight(1f)) {
                                     Text(
-                                        text = "GROQ QUOTA REMAINING",
+                                        text = "FREE TIER WATERFALL POOL",
                                         fontFamily = JetBrainsMonoFamily,
                                         fontWeight = FontWeight.Bold,
                                         fontSize = 10.5.sp,
                                         color = RawColors.TextMuted
                                     )
                                     Text(
-                                        text = quotaLabel,
+                                        text = "1,040 RPD Free  \u2022  $routeLabel",
                                         fontFamily = BricolageFamily,
                                         fontWeight = FontWeight.Bold,
-                                        fontSize = 18.sp,
-                                        color = if (isExhausted || isLow) RawColors.ErrorCoral else RawColors.Tan,
+                                        fontSize = 16.sp,
+                                        color = RawColors.Tan,
                                         maxLines = 1,
                                         overflow = TextOverflow.Ellipsis
                                     )
@@ -684,55 +651,35 @@ fun ProfileScreen(
                                 Box(
                                     modifier = Modifier
                                         .clip(CircleShape)
-                                        .background(if (isExhausted) RawColors.Cream else RawColors.CardSurface)
+                                        .background(RawColors.CardSurface)
                                         .clickable(onClick = onSwitchGroqKey)
                                         .padding(horizontal = 12.dp, vertical = 7.dp)
                                 ) {
                                     Text(
-                                        text = "Switch key",
+                                        text = "Configure",
                                         fontFamily = BricolageFamily,
                                         fontWeight = FontWeight.Bold,
                                         fontSize = 12.5.sp,
-                                        color = if (isExhausted) RawColors.Ink else RawColors.TextPrimary
+                                        color = RawColors.TextPrimary
                                     )
                                 }
                             }
 
-                            if (quota != null && quota.hasTelemetry) {
-                                Box(
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .height(6.dp)
-                                        .clip(CircleShape)
-                                        .background(RawColors.BgPrimary)
-                                ) {
-                                    Box(
-                                        modifier = Modifier
-                                            .fillMaxWidth(quota.primaryFraction)
-                                            .height(6.dp)
-                                            .clip(CircleShape)
-                                            .background(if (isExhausted || isLow) RawColors.ErrorCoral else RawColors.Tan)
-                                    )
-                                }
-                                Text(
-                                    text = "${quota.formattedRequestsSummary()}  \u2022  ${quota.formattedTokensSummary()}",
-                                    fontFamily = JetBrainsMonoFamily,
-                                    fontSize = 11.sp,
-                                    color = RawColors.TextMuted,
-                                    maxLines = 1,
-                                    overflow = TextOverflow.Ellipsis
-                                )
-                            }
+                            Text(
+                                text = "Flash-Lite 3.5 (500 RPD) \u2022 Flash-Lite 3.1 (500 RPD) \u2022 Flash 3.6 (20 RPD) \u2022 Flash 3.8 (20 RPD)",
+                                fontFamily = JetBrainsMonoFamily,
+                                fontSize = 11.sp,
+                                color = RawColors.TextMuted,
+                                maxLines = 2,
+                                overflow = TextOverflow.Ellipsis
+                            )
 
-                            if (isExhausted) {
-                                Text(
-                                    text = "Quota ran out on this key. Tap Switch key to paste a fresh Groq API key.",
-                                    fontFamily = BricolageFamily,
-                                    fontSize = 12.5.sp,
-                                    lineHeight = 17.5.sp,
-                                    color = RawColors.ErrorCoral
-                                )
-                            }
+                            Text(
+                                text = "Auto-failover on 429 quota exhaustion. Resets daily at PT midnight.",
+                                fontFamily = BricolageFamily,
+                                fontSize = 12.sp,
+                                color = RawColors.TextMuted
+                            )
                         }
                     }
                 }

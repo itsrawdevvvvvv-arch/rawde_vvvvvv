@@ -64,7 +64,7 @@ import com.rawedit.app.data.CacheManager
 import com.rawedit.app.data.local.LocalAssetEntity
 import com.rawedit.app.data.local.ProjectEntity
 import com.rawedit.app.data.repository.RawEditRepository
-import com.rawedit.app.domain.GroqClient
+import com.rawedit.app.domain.GeminiWaterfallRouter
 import com.rawedit.app.ui.components.BigPrimaryButton
 import com.rawedit.app.ui.components.CircleActionButton
 import com.rawedit.app.ui.components.FormatHelpers
@@ -110,9 +110,11 @@ fun AssetLockerScreen(
     onDeleteAsset: (LocalAssetEntity) -> Unit,
     onOpenGroqKey: () -> Unit,
     onSwitchGroqKey: () -> Unit,
-    onRefreshGroqQuota: () -> Unit
+    onRefreshGroqQuota: () -> Unit,
+    geminiRouter: GeminiWaterfallRouter? = null
 ) {
     val context = LocalContext.current
+    val router = geminiRouter ?: remember { GeminiWaterfallRouter(context) }
     val scope = rememberCoroutineScope()
     val listState = rememberLazyListState()
 
@@ -225,7 +227,7 @@ fun AssetLockerScreen(
                         )
                         Text(
                             text = when {
-                                !hasKey -> "Add Groq key"
+                                !hasKey -> "Add Gemini key"
                                 quotaExhausted -> "Quota 0 \u2022 Switch"
                                 else -> quotaBadgeText
                             },
@@ -413,7 +415,7 @@ fun AssetLockerScreen(
                             ) {
                                 RawIcon(RawIconType.KEY, size = 18.dp, tint = RawColors.Tan)
                                 Text(
-                                    text = "Add a Groq API key to auto-describe images and safe typography zones.",
+                                    text = "Add a Gemini API key to auto-describe images and safe typography zones.",
                                     style = RawTypography.bodyMedium.copy(fontSize = 13.5.sp, lineHeight = 19.sp),
                                     color = RawColors.TextMuted,
                                     modifier = Modifier.weight(1f)
@@ -449,7 +451,7 @@ fun AssetLockerScreen(
                             ) {
                                 RawIcon(RawIconType.WARN, size = 18.dp, tint = RawColors.ErrorCoral)
                                 Text(
-                                    text = "Groq quota ran out on this key. Switch API key to run AI auto-describe or cutout audit.",
+                                    text = "Gemini quota ran out on this key. Switch API key to run AI auto-describe or cutout audit.",
                                     style = RawTypography.bodyMedium.copy(fontSize = 13.5.sp, lineHeight = 19.sp),
                                     color = RawColors.ErrorCoral,
                                     modifier = Modifier.weight(1f)
@@ -533,17 +535,16 @@ fun AssetLockerScreen(
                                         }
                                         describingAssetId = asset.id
                                         scope.launch {
-                                            val res = GroqClient.describeAsset(
+                                            val res = router.describeAsset(
                                                 apiKey = apiKey,
                                                 asset = asset,
-                                                imageFile = imgFile,
-                                                modelPref = modelPref
+                                                imageFile = imgFile
                                             )
                                             describingAssetId = null
                                             res.onSuccess { (desc, safe) ->
                                                 onUpdateAssetNotes(asset.id, desc, safe)
                                                 onRefreshGroqQuota()
-                                                toastMsg = "Groq AI note updated"
+                                                toastMsg = "Gemini AI note updated"
                                             }.onFailure { err ->
                                                 toastMsg = err.message ?: "Auto-describe failed"
                                             }
@@ -923,7 +924,7 @@ private fun AssetLockerCard(
                 color = RawColors.TextMuted
             )
             Text(
-                text = asset.description.ifBlank { "No description yet. Run Auto-describe with Groq AI or edit note." },
+                text = asset.description.ifBlank { "No description yet. Run Auto-describe with Gemini AI or edit note." },
                 fontFamily = BricolageFamily,
                 fontWeight = FontWeight.Medium,
                 fontSize = 13.5.sp,

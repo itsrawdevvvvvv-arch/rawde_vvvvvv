@@ -87,7 +87,7 @@ import com.rawedit.app.data.local.LocalAssetEntity
 import com.rawedit.app.data.local.ProjectEntity
 import com.rawedit.app.domain.CodeValidationResult
 import com.rawedit.app.domain.CodeValidator
-import com.rawedit.app.domain.GroqClient
+import com.rawedit.app.domain.GeminiWaterfallRouter
 import com.rawedit.app.domain.PaletteColorMath
 import com.rawedit.app.domain.PaletteState
 import com.rawedit.app.domain.PromptGenerator
@@ -174,11 +174,15 @@ fun AddVoiceScreen(
     project: ProjectEntity,
     cacheManager: CacheManager,
     groqApiKey: String = "",
+    geminiApiKey: String = "",
     onOpenGroqKey: () -> Unit = {},
+    onOpenGeminiKey: () -> Unit = onOpenGroqKey,
+    geminiRouter: GeminiWaterfallRouter? = null,
     onBack: () -> Unit,
     onSave: (ProjectEntity) -> Unit
 ) {
     val context = LocalContext.current
+    val router = geminiRouter ?: remember { GeminiWaterfallRouter(context) }
     val scope = rememberCoroutineScope()
     val animEnabled = rememberAnimationsEnabled()
     val scrollState = rememberScrollState()
@@ -539,7 +543,7 @@ fun AddVoiceScreen(
                             color = RawColors.TextPrimary
                         )
                         Text(
-                            text = if (transcribingAudio) "Transcribing with Groq Whisper..." else "Generate precise word timestamps via Groq AI",
+                            text = if (transcribingAudio) "Transcribing with Gemini AI..." else "Generate precise word timestamps via Gemini AI",
                             fontFamily = BricolageFamily,
                             fontSize = 12.5.sp,
                             lineHeight = 16.5.sp,
@@ -558,14 +562,15 @@ fun AddVoiceScreen(
                             height = 38.dp,
                             fillWidth = false,
                             onClick = {
-                                if (groqApiKey.isBlank()) {
-                                    onOpenGroqKey()
+                                val key = if (geminiApiKey.isNotBlank()) geminiApiKey else groqApiKey
+                                if (key.isBlank()) {
+                                    onOpenGeminiKey()
                                 } else {
                                     transcribingAudio = true
                                     srtError = null
                                     scope.launch {
                                         val f = File(audioPath)
-                                        val res = GroqClient.transcribeAudioWordByWord(groqApiKey, f)
+                                        val res = router.transcribeAudioWordByWord(key, f)
                                         transcribingAudio = false
                                         res.onSuccess { parsed ->
                                             srtText = parsed.cleanedSrt

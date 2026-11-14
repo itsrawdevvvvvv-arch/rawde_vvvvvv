@@ -2,6 +2,10 @@ package com.rawedit.app.domain
 
 import android.content.Context
 import android.content.SharedPreferences
+import android.graphics.Bitmap
+import android.graphics.BitmapFactory
+import android.util.Base64
+import com.rawedit.app.data.local.LocalAssetEntity
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
@@ -10,10 +14,13 @@ import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import org.json.JSONArray
 import org.json.JSONObject
+import java.io.ByteArrayOutputStream
+import java.io.File
 import java.net.HttpURLConnection
 import java.net.URL
 import java.time.ZoneId
 import java.time.ZonedDateTime
+import java.util.Locale
 import kotlin.random.Random
 
 enum class GeminiRouteMode {
@@ -74,6 +81,27 @@ class GeminiWaterfallRouter(context: Context) {
             "gemini-3.5-flash-lite",
             "gemini-3.1-flash-lite"
         )
+
+        val PALETTE_THEMES = listOf(
+            "brutalist swiss",
+            "warm desert dusk",
+            "retro analog film",
+            "deep botanical night",
+            "nordic ceramic studio",
+            "cyber editorial print",
+            "sunbaked clay and slate",
+            "midnight jazz lounge",
+            "soft espresso bauhaus",
+            "coastal slate and saffron",
+            "editorial terracotta archive",
+            "warm ochre darkroom"
+        )
+
+        const val PALETTE_SYSTEM =
+            "You are an elite editorial art director specializing in modern kinetic-typography motion design. Respond strictly with raw JSON matching the requested schema."
+
+        const val ASSET_SYSTEM =
+            "You are a computer-vision asset analyst for vertical video editing. Respond strictly with raw valid JSON containing the exact keys requested."
 
         fun getDailyLimitForModel(modelId: String): Int = when {
             modelId.contains("flash-lite") -> 500
@@ -458,6 +486,279 @@ class GeminiWaterfallRouter(context: Context) {
             "[$model HTTP $status] $msg"
         } catch (_: Exception) {
             "[$model HTTP $status] Service busy or unavailable."
+        }
+    }
+
+    fun encodeFileForVision(file: File, maxDim: Int): Pair<String, String> {
+        val raw = file.readBytes()
+        val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+        BitmapFactory.decodeByteArray(raw, 0, raw.size, bounds)
+        if (bounds.outWidth <= 0 || bounds.outHeight <= 0) {
+            return Base64.encodeToString(raw, Base64.NO_WRAP) to "image/jpeg"
+        }
+        var sample = 1
+        while (bounds.outWidth / sample > maxDim * 2 || bounds.outHeight / sample > maxDim * 2) {
+            sample *= 2
+        }
+        val decoded = BitmapFactory.decodeByteArray(
+            raw,
+            0,
+            raw.size,
+            BitmapFactory.Options().apply { inSampleSize = sample }
+        ) ?: return Base64.encodeToString(raw, Base64.NO_WRAP) to "image/jpeg"
+
+        val maxSide = maxOf(decoded.width, decoded.height)
+        val finalBmp = if (maxSide > maxDim) {
+            val scale = maxDim.toFloat() / maxSide.toFloat()
+            Bitmap.createScaledBitmap(
+                decoded,
+                (decoded.width * scale).toInt().coerceAtLeast(1),
+                (decoded.height * scale).toInt().coerceAtLeast(1),
+                true
+            )
+        } else {
+            decoded
+        }
+        val stream = ByteArrayOutputStream()
+        finalBmp.compress(Bitmap.CompressFormat.JPEG, 85, stream)
+        val b64 = Base64.encodeToString(stream.toByteArray(), Base64.NO_WRAP)
+        return b64 to "image/jpeg"
+    }
+
+    suspend fun generatePalette(
+        apiKey: String,
+        nextNumber: Int,
+        previousMood: String? = null
+    ): Result<PaletteState> = withContext(Dispatchers.IO) {
+        try {
+            val themeHint = PALETTE_THEMES[Random.nextInt(PALETTE_THEMES.size)]
+            val seed = Random.nextInt(100_000, 999_999)
+            val prevNote = previousMood?.takeIf { it.isNotBlank() }?.let { "Different from previous vibe: $it." } ?: ""
+            val prompt = """
+                Generate a completely original, curated 3-color editorial palette for a kinetic-typography video edit (variation seed: $seed, aesthetic direction: "$themeHint"). $prevNote
+                Choose 3 distinct harmonious hex colors usable together as background, dominant display type, and accent. Avoid near-black muddy duplicates.
+                Respond strictly with a single JSON object containing:
+                - "colors": array of exactly 3 objects, each with "hex" (#XXXXXX) and "name" (2 lowercase words)
+                - "mood": 2-4 word vibe
+                - "pairing": one concise sentence explaining background vs headline vs accent usage
+            """.trimIndent()
+
+            val res = generate(
+                apiKey = apiKey,
+                prompt = prompt,
+                systemInstruction = PALETTE_SYSTEM,
+                routeMode = GeminiRouteMode.JSON_WORKHORSE,
+                expectJson = true
+            ).getOrThrow()
+
+            val obj = JSONObject(GroqCodec.stripJsonFences(res.text))
+            val arr = obj.optJSONArray("colors")
+                ?: throw IllegalStateException("Gemini palette response did not contain a colors array.")
+            val swatches = mutableListOf<PaletteSwatch>()
+            for (i in 0 until minOf(3, arr.length())) {
+                val cObj = arr.optJSONObject(i) ?: continue
+                val hex = PaletteColorMath.normalizeHex(cObj.optString("hex", ""), PaletteState.DEFAULT_SWATCHES[i].hex)
+                val name = cObj.optString("name", "tone").trim().lowercase(Locale.US).ifBlank { "tone" }
+                swatches.add(PaletteSwatch(hex = hex, name = name))
+            }
+            while (swatches.size < 3) {
+                swatches.add(PaletteState.DEFAULT_SWATCHES[swatches.size])
+            }
+            val state = PaletteState(
+                number = nextNumber.coerceAtLeast(1),
+                mood = obj.optString("mood", "Editorial Motion").trim().ifBlank { "Editorial Motion" },
+                pairing = obj.optString(
+                    "pairing",
+                    "Use 01 & 03 for clean contrast with 02 for kinetic highlight pills."
+                ).trim(),
+                colors = swatches
+            )
+            Result.success(state)
+        } catch (ce: CancellationException) {
+            throw ce
+        } catch (t: Throwable) {
+            Result.failure(t)
+        }
+    }
+
+    suspend fun describeAsset(
+        apiKey: String,
+        asset: LocalAssetEntity,
+        imageFile: File
+    ): Result<Pair<String, String>> = withContext(Dispatchers.IO) {
+        try {
+            val (b64, mime) = encodeFileForVision(imageFile, maxDim = 960)
+            val isWebShot = asset.description.contains("Interactive UI targets", ignoreCase = true)
+            val prompt = when {
+                asset.kind == LocalAssetEntity.KIND_CLIP -> {
+                    "This 3-frame storyboard is sampled at 10%, 50%, 85% from the video clip ${asset.relativePath} (${asset.width}x${asset.height}, ${String.format(Locale.US, "%.1f", asset.durationSec)}s). Respond strictly with raw JSON with keys: \"description\" (1 concise sentence describing visual motion/content across the clip) and \"safeZone\" (1 concise sentence stating where kinetic overlay typography can sit safely with high contrast)."
+                }
+                isWebShot -> {
+                    "Analyze this tutorial UI screenshot (${asset.relativePath}, ${asset.width}x${asset.height}). Extracted UI context: ${asset.description.take(700)}. Respond strictly with raw JSON with keys: \"description\" (1-2 concise sentences describing the UI screen AND preserving key target [x,y,wxh] boxes for tutorial cursor/highlight animation) and \"safeZone\" (1 concise sentence stating which region is safest for kinetic titles without covering interactive controls)."
+                }
+                asset.kind == LocalAssetEntity.KIND_CUTOUT -> {
+                    "Analyze this foreground cutout asset (${asset.relativePath}, ${asset.width}x${asset.height}). Respond strictly with raw JSON with keys: \"description\" (1 concise sentence describing the subject/product) and \"safeZone\" (1 concise sentence stating which quadrant or edge is best for caption typography)."
+                }
+                else -> {
+                    "Analyze this video edit image asset (${asset.relativePath}, ${asset.width}x${asset.height}). Respond strictly with raw JSON with keys: \"description\" (1 concise sentence describing subject, colors, and scene) and \"safeZone\" (1 concise sentence stating where overlay text can sit safely with high contrast)."
+                }
+            }
+
+            val res = generate(
+                apiKey = apiKey,
+                prompt = prompt,
+                systemInstruction = ASSET_SYSTEM,
+                routeMode = GeminiRouteMode.JSON_WORKHORSE,
+                expectJson = true,
+                images = listOf(GeminiImageInput(base64Data = b64, mimeType = mime))
+            ).getOrThrow()
+
+            val obj = JSONObject(GroqCodec.stripJsonFences(res.text))
+            val desc = obj.optString("description", "").trim()
+            val safe = obj.optString("safeZone", "").trim()
+            Result.success(Pair(desc, safe))
+        } catch (ce: CancellationException) {
+            throw ce
+        } catch (t: Throwable) {
+            Result.failure(t)
+        }
+    }
+
+    suspend fun auditCutout(
+        apiKey: String,
+        comparisonFile: File,
+        currentTolerance: Int,
+        currentPad: CutoutPadRatios,
+        isSvgSource: Boolean,
+        keepOriginalMode: Boolean
+    ): Result<CutoutAuditResult> = withContext(Dispatchers.IO) {
+        try {
+            val (b64, mime) = encodeFileForVision(comparisonFile, maxDim = 1024)
+            val padInfo = String.format(
+                Locale.US,
+                "T=%.2f, R=%.2f, B=%.2f, L=%.2f",
+                currentPad.top,
+                currentPad.right,
+                currentPad.bottom,
+                currentPad.left
+            )
+            val prompt = """
+                Inspect this side-by-side PNG cutout diagnostic image carefully.
+                LEFT panel shows the SOURCE original. RIGHT panel shows the extracted PNG CUTOUT placed over a dark gray checkerboard.
+                Current parameters: isSvg=$isSvgSource, tolerance=$currentTolerance, keepOriginal=$keepOriginalMode, padding=[$padInfo].
+
+                Check for two specific conversion defects:
+                1. UNNECESSARY CROPPING: outer vector strokes, rounded corners, drop shadows, circular rings, or thin edges clipped/cut off at the top, right, bottom, or left border of the RIGHT cutout.
+                2. OVER-REMOVAL / ACCIDENTAL ERASURE: bright foreground details, inner logo text, eyes, shiny highlights, or anti-aliased edges erased into checkerboard tiles (comparing RIGHT vs LEFT), OR the LEFT image is a full rectangular UI screenshot/scene that should keep its background intact rather than keying out corners.
+
+                Respond ONLY with raw valid JSON containing exact keys:
+                - "status": "OK" or "ADJUST"
+                - "diagnosis": 1 concise honest sentence summarizing whether clipping or accidental erasure was seen and what you fixed (or "Cutout edges and interior details look clean.")
+                - "keepOriginal": boolean (set true ONLY if background removal destroyed a complex UI card, photo, or non-transparent scene)
+                - "recommendedTolerance": integer (if isSvg=true, use 0; if inner light shapes/text were erased on a raster logo, lower to 6..20; otherwise $currentTolerance)
+                - "extraPadTop": number 0.0..0.16
+                - "extraPadRight": number 0.0..0.16
+                - "extraPadBottom": number 0.0..0.16
+                - "extraPadLeft": number 0.0..0.16
+            """.trimIndent()
+
+            val res = generate(
+                apiKey = apiKey,
+                prompt = prompt,
+                systemInstruction = "Respond strictly with raw valid JSON matching the exact schema keys.",
+                routeMode = GeminiRouteMode.JSON_WORKHORSE,
+                expectJson = true,
+                images = listOf(GeminiImageInput(base64Data = b64, mimeType = mime))
+            ).getOrThrow()
+
+            val obj = JSONObject(GroqCodec.stripJsonFences(res.text))
+            val statusRaw = obj.optString("status", "OK").trim().uppercase(Locale.US)
+            val diagnosis = obj.optString("diagnosis", "Cutout edges verified by Gemini Vision.")
+            val keepOriginal = obj.optBoolean("keepOriginal", keepOriginalMode)
+            val recommendedTolerance = obj.optInt("recommendedTolerance", currentTolerance)
+            val extraT = obj.optDouble("extraPadTop", 0.0).toFloat().coerceIn(0f, 0.16f)
+            val extraR = obj.optDouble("extraPadRight", 0.0).toFloat().coerceIn(0f, 0.16f)
+            val extraB = obj.optDouble("extraPadBottom", 0.0).toFloat().coerceIn(0f, 0.16f)
+            val extraL = obj.optDouble("extraPadLeft", 0.0).toFloat().coerceIn(0f, 0.16f)
+
+            val hasDelta = keepOriginal != keepOriginalMode ||
+                (!isSvgSource && recommendedTolerance != currentTolerance) ||
+                extraT > 0.01f || extraR > 0.01f || extraB > 0.01f || extraL > 0.01f
+
+            Result.success(
+                CutoutAuditResult(
+                    status = if (statusRaw == "ADJUST" || hasDelta) "ADJUST" else "OK",
+                    diagnosis = diagnosis.ifBlank { "Cutout edges and interior details verified by Gemini Vision." },
+                    keepOriginal = keepOriginal,
+                    recommendedTolerance = recommendedTolerance,
+                    extraPadTop = extraT,
+                    extraPadRight = extraR,
+                    extraPadBottom = extraB,
+                    extraPadLeft = extraL,
+                    needsReprocess = hasDelta
+                )
+            )
+        } catch (ce: CancellationException) {
+            throw ce
+        } catch (t: Throwable) {
+            Result.failure(t)
+        }
+    }
+
+    suspend fun transcribeAudioWordByWord(
+        apiKey: String,
+        audioFile: File
+    ): Result<SrtParseResult> = withContext(Dispatchers.IO) {
+        try {
+            val cleanKey = sanitizeApiKey(apiKey)
+            if (!isValidApiKey(cleanKey)) {
+                return@withContext Result.failure(IllegalStateException("Add your Gemini API key in Profile -> AI & Quota first."))
+            }
+            if (!audioFile.exists() || audioFile.length() == 0L) {
+                return@withContext Result.failure(IllegalStateException("Audio file not found or empty: ${audioFile.name}"))
+            }
+
+            val rawBytes = audioFile.readBytes()
+            val b64 = Base64.encodeToString(rawBytes, Base64.NO_WRAP)
+            val ext = audioFile.extension.lowercase(Locale.US)
+            val mime = when (ext) {
+                "wav" -> "audio/wav"
+                "m4a" -> "audio/m4a"
+                "ogg" -> "audio/ogg"
+                "aac" -> "audio/aac"
+                "flac" -> "audio/flac"
+                else -> "audio/mp3"
+            }
+
+            val prompt = """
+                You are a professional audio subtitler.
+                Transcribe the spoken words in this audio into standard SubRip (.srt) subtitle format.
+                Requirements:
+                1. Every entry MUST have a sequential cue number (1, 2, 3...), timestamp line (HH:MM:SS,mmm --> HH:MM:SS,mmm), and the spoken words.
+                2. Keep cues short: 1 to 4 words per cue for kinetic typography pacing.
+                3. The timing must match the audio timestamps accurately.
+                4. Output ONLY the raw SRT text, no explanations, no markdown fences.
+            """.trimIndent()
+
+            val res = generate(
+                apiKey = cleanKey,
+                prompt = prompt,
+                routeMode = GeminiRouteMode.JSON_WORKHORSE,
+                expectJson = false,
+                images = listOf(GeminiImageInput(base64Data = b64, mimeType = mime))
+            ).getOrThrow()
+
+            val rawSrt = res.text
+                .replace("```srt", "")
+                .replace("```", "")
+                .trim()
+
+            val parsed = SrtParser.parse(rawSrt)
+            Result.success(parsed)
+        } catch (ce: CancellationException) {
+            throw ce
+        } catch (t: Throwable) {
+            Result.failure(t)
         }
     }
 }

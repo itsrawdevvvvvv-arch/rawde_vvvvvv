@@ -28,9 +28,7 @@ object UnifiedAiRouter {
         images: List<GeminiImageInput> = emptyList(),
         preferCreative: Boolean = false
     ): Result<UnifiedAiResult> = withContext(Dispatchers.IO) {
-        val provider = userProfile.resolvedAiProvider()
         val hasGemini = userProfile.hasGeminiKey
-        val hasGroq = userProfile.hasGroqKey
 
         val routeMode = when {
             userProfile.geminiTaskRoute == GeminiTaskRoute.MAX_QUOTA_SAVER.id -> GeminiRouteMode.JSON_WORKHORSE
@@ -39,93 +37,28 @@ object UnifiedAiRouter {
             else -> GeminiRouteMode.JSON_WORKHORSE
         }
 
-        when (provider) {
-            AiProvider.GEMINI_FREE -> {
-                if (!hasGemini) {
-                    return@withContext Result.failure(
-                        IllegalStateException("Please add your Google AI Studio Gemini API key in Profile -> AI & Quota.")
-                    )
-                }
-                val res = geminiRouter.generate(
-                    apiKey = userProfile.geminiApiKey,
-                    prompt = prompt,
-                    systemInstruction = systemInstruction,
-                    routeMode = routeMode,
-                    expectJson = expectJson,
-                    images = images
-                )
-                res.map { g ->
-                    UnifiedAiResult(
-                        text = g.text,
-                        providerUsed = "Gemini",
-                        modelUsed = g.modelUsed,
-                        fallbackTriggered = g.fallbackTriggered,
-                        toastNotice = if (g.fallbackTriggered) "Served via ${g.modelUsed} fallback" else null
-                    )
-                }
-            }
+        if (!hasGemini) {
+            return@withContext Result.failure(
+                IllegalStateException("Please add your Google AI Studio Gemini API key in Profile -> AI & Quota.")
+            )
+        }
 
-            AiProvider.GROQ_CLOUD -> {
-                if (!hasGroq) {
-                    return@withContext Result.failure(
-                        IllegalStateException("Please add your Groq API key in Profile -> AI & Quota.")
-                    )
-                }
-                executeGroqFallback(
-                    userProfile = userProfile,
-                    prompt = prompt,
-                    systemInstruction = systemInstruction,
-                    expectJson = expectJson,
-                    images = images
-                )
-            }
-
-            AiProvider.AUTO_HYBRID -> {
-                // Try Gemini waterfall first if key is present
-                if (hasGemini) {
-                    val geminiRes = geminiRouter.generate(
-                        apiKey = userProfile.geminiApiKey,
-                        prompt = prompt,
-                        systemInstruction = systemInstruction,
-                        routeMode = routeMode,
-                        expectJson = expectJson,
-                        images = images
-                    )
-                    if (geminiRes.isSuccess) {
-                        val g = geminiRes.getOrThrow()
-                        return@withContext Result.success(
-                            UnifiedAiResult(
-                                text = g.text,
-                                providerUsed = "Gemini",
-                                modelUsed = g.modelUsed,
-                                fallbackTriggered = g.fallbackTriggered,
-                                toastNotice = if (g.fallbackTriggered) "Served via ${g.modelUsed} fallback" else null
-                            )
-                        )
-                    }
-                }
-
-                // If Gemini failed or no Gemini key, cascade to Groq if available
-                if (hasGroq) {
-                    val groqRes = executeGroqFallback(
-                        userProfile = userProfile,
-                        prompt = prompt,
-                        systemInstruction = systemInstruction,
-                        expectJson = expectJson,
-                        images = images
-                    )
-                    return@withContext groqRes.map { gr ->
-                        gr.copy(
-                            fallbackTriggered = true,
-                            toastNotice = "Served via Groq fallback (${gr.modelUsed})"
-                        )
-                    }
-                }
-
-                Result.failure(
-                    IllegalStateException("All AI providers unavailable. Add a free Gemini or Groq API key in Profile -> AI & Quota.")
-                )
-            }
+        val res = geminiRouter.generate(
+            apiKey = userProfile.geminiApiKey,
+            prompt = prompt,
+            systemInstruction = systemInstruction,
+            routeMode = routeMode,
+            expectJson = expectJson,
+            images = images
+        )
+        res.map { g ->
+            UnifiedAiResult(
+                text = g.text,
+                providerUsed = "Gemini",
+                modelUsed = g.modelUsed,
+                fallbackTriggered = g.fallbackTriggered,
+                toastNotice = if (g.fallbackTriggered) "Served via ${g.modelUsed} fallback" else null
+            )
         }
     }
 
@@ -136,94 +69,71 @@ object UnifiedAiRouter {
         durationSec: Double,
         htmlHash: Int = 0
     ): Result<SheetReviewResult> = withContext(Dispatchers.IO) {
-        val provider = userProfile.resolvedAiProvider()
-        val hasGemini = userProfile.hasGeminiKey
-        val hasGroq = userProfile.hasGroqKey
-
-        if (provider == AiProvider.GROQ_CLOUD || (!hasGemini && hasGroq)) {
-            return@withContext GroqClient.reviewContactSheet(
-                apiKey = userProfile.groqApiKey,
-                samples = samples,
-                durationSec = durationSec,
-                htmlHash = htmlHash,
-                modelPref = userProfile.groqModelPref
+        if (!userProfile.hasGeminiKey) {
+            return@withContext Result.failure(
+                IllegalStateException("Please add your Google AI Studio Gemini API key in Profile -> AI & Quota.")
             )
         }
 
-        if (hasGemini) {
-            val geminiResult = runCatching {
-                val bundle = KeyframeSheetGenerator.buildReviewCollageBundle(samples, durationSec)
-                if (bundle.jpegBytes.isEmpty() || bundle.pickedSamples.isEmpty()) {
-                    throw IllegalStateException("No keyframe thumbnails available to inspect.")
-                }
-                val flagsText = if (bundle.flagLines.isEmpty()) "None" else bundle.flagLines.joinToString("\n")
-                val userPrompt = (
-                    "DURATION: ${String.format(Locale.US, "%.1f", durationSec)}s\n" +
-                        "FLAGS (f|t|selector|x,y,wxh|issue):\n$flagsText"
-                    ).take(1500)
-                val b64 = Base64.encodeToString(bundle.jpegBytes, Base64.NO_WRAP)
+        val geminiResult = runCatching {
+            val bundle = KeyframeSheetGenerator.buildReviewCollageBundle(samples, durationSec)
+            if (bundle.jpegBytes.isEmpty() || bundle.pickedSamples.isEmpty()) {
+                throw IllegalStateException("No keyframe thumbnails available to inspect.")
+            }
+            val flagsText = if (bundle.flagLines.isEmpty()) "None" else bundle.flagLines.joinToString("\n")
+            val userPrompt = (
+                "DURATION: ${String.format(Locale.US, "%.1f", durationSec)}s\n" +
+                    "FLAGS (f|t|selector|x,y,wxh|issue):\n$flagsText"
+                ).take(1500)
+            val b64 = Base64.encodeToString(bundle.jpegBytes, Base64.NO_WRAP)
 
-                val genRes = geminiRouter.generate(
-                    apiKey = userProfile.geminiApiKey,
-                    prompt = userPrompt,
-                    systemInstruction = GroqClient.REVIEW_SYSTEM,
-                    routeMode = GeminiRouteMode.JSON_WORKHORSE,
-                    expectJson = true,
-                    images = listOf(GeminiImageInput(base64Data = b64, mimeType = "image/jpeg"))
-                ).getOrThrow()
+            val genRes = geminiRouter.generate(
+                apiKey = userProfile.geminiApiKey,
+                prompt = userPrompt,
+                systemInstruction = GroqClient.REVIEW_SYSTEM,
+                routeMode = GeminiRouteMode.JSON_WORKHORSE,
+                expectJson = true,
+                images = listOf(GeminiImageInput(base64Data = b64, mimeType = "image/jpeg"))
+            ).getOrThrow()
 
-                val parsed = GroqCodec.parseReviewJson(genRes.text, htmlHash)
-                if (parsed.parseFailed) {
-                    SheetReviewResult(
-                        summary = "Unreadable review response from Gemini — retry",
-                        issues = emptyList(),
-                        cachedReview = null
+            val parsed = GroqCodec.parseReviewJson(genRes.text, htmlHash)
+            if (parsed.parseFailed) {
+                SheetReviewResult(
+                    summary = "Unreadable review response from Gemini — retry",
+                    issues = emptyList(),
+                    cachedReview = null
+                )
+            } else {
+                val mappedIssues = parsed.issues.map { issue ->
+                    val picked = bundle.pickedSamples.getOrNull(
+                        (issue.f - 1).coerceIn(0, (bundle.pickedSamples.size - 1).coerceAtLeast(0))
                     )
+                    SheetIssue(
+                        frame = picked?.let { "#${it.index + 1}" } ?: "F${issue.f}",
+                        time = picked?.let { String.format(Locale.US, "t=%.2fs", it.timeSec) }.orEmpty(),
+                        problem = "[${issue.type}] ${issue.where}".trim(),
+                        fix = issue.fix,
+                        sampleIndex = picked?.index ?: -1
+                    )
+                }
+                val summary = if (mappedIssues.isEmpty()) {
+                    "Gemini Vision checked ${bundle.pickedSamples.size}-frame collage: layout and contrast look clean."
                 } else {
-                    val mappedIssues = parsed.issues.map { issue ->
-                        val picked = bundle.pickedSamples.getOrNull(
-                            (issue.f - 1).coerceIn(0, (bundle.pickedSamples.size - 1).coerceAtLeast(0))
-                        )
-                        SheetIssue(
-                            frame = picked?.let { "#${it.index + 1}" } ?: "F${issue.f}",
-                            time = picked?.let { String.format(Locale.US, "t=%.2fs", it.timeSec) }.orEmpty(),
-                            problem = "[${issue.type}] ${issue.where}".trim(),
-                            fix = issue.fix,
-                            sampleIndex = picked?.index ?: -1
-                        )
-                    }
-                    val summary = if (mappedIssues.isEmpty()) {
-                        "Gemini Vision checked ${bundle.pickedSamples.size}-frame collage: layout and contrast look clean."
-                    } else {
-                        "Found ${mappedIssues.size} visual issue(s) across ${bundle.pickedSamples.size}-frame collage."
-                    }
-                    SheetReviewResult(
-                        summary = summary,
-                        issues = mappedIssues,
-                        cachedReview = parsed
-                    )
+                    "Found ${mappedIssues.size} visual issue(s) across ${bundle.pickedSamples.size}-frame collage."
                 }
-            }
-
-            if (geminiResult.isSuccess) {
-                return@withContext geminiResult
-            }
-
-            // Fallback to Groq if in AUTO_HYBRID mode
-            if (provider == AiProvider.AUTO_HYBRID && hasGroq) {
-                return@withContext GroqClient.reviewContactSheet(
-                    apiKey = userProfile.groqApiKey,
-                    samples = samples,
-                    durationSec = durationSec,
-                    htmlHash = htmlHash,
-                    modelPref = userProfile.groqModelPref
+                SheetReviewResult(
+                    summary = summary,
+                    issues = mappedIssues,
+                    cachedReview = parsed
                 )
             }
-
-            return@withContext Result.failure(geminiResult.exceptionOrNull() ?: IllegalStateException("Review failed"))
         }
 
-        Result.failure(IllegalStateException("No AI provider configured. Add Gemini or Groq key."))
+        if (geminiResult.isSuccess) {
+            geminiResult
+        } else {
+            Result.failure(geminiResult.exceptionOrNull() ?: IllegalStateException("Review failed"))
+        }
     }
 
     suspend fun autoFixLoop(
@@ -238,17 +148,19 @@ object UnifiedAiRouter {
         recapture: suspend (String) -> List<KeyframeSample>,
         onRound: (round: Int, issuesNow: Int) -> Unit = { _, _ -> }
     ): Result<GroqAutoFixOutcome> = withContext(Dispatchers.IO) {
-        val provider = userProfile.resolvedAiProvider()
-        val hasGemini = userProfile.hasGeminiKey
-        val hasGroq = userProfile.hasGroqKey
+        if (!userProfile.hasGeminiKey) {
+            return@withContext Result.failure(
+                IllegalStateException("Please add your Google AI Studio Gemini API key in Profile -> AI & Quota.")
+            )
+        }
 
-        if (provider == AiProvider.GROQ_CLOUD || (!hasGemini && hasGroq)) {
-            return@withContext GroqClient.autoFixLoop(
-                apiKey = userProfile.groqApiKey,
+        val geminiFix = runCatching {
+            autoFixWithGemini(
+                geminiRouter = geminiRouter,
+                apiKey = userProfile.geminiApiKey,
                 samples = samples,
                 htmlCode = htmlCode,
                 durationSec = durationSec,
-                modelPref = userProfile.groqModelPref,
                 lastReview = lastReview,
                 maxRounds = maxRounds,
                 validator = validator,
@@ -256,46 +168,11 @@ object UnifiedAiRouter {
                 onRound = onRound
             )
         }
-
-        // Try Gemini auto fix if Gemini is active
-        if (hasGemini) {
-            val geminiFix = runCatching {
-                autoFixWithGemini(
-                    geminiRouter = geminiRouter,
-                    apiKey = userProfile.geminiApiKey,
-                    samples = samples,
-                    htmlCode = htmlCode,
-                    durationSec = durationSec,
-                    lastReview = lastReview,
-                    maxRounds = maxRounds,
-                    validator = validator,
-                    recapture = recapture,
-                    onRound = onRound
-                )
-            }
-            if (geminiFix.isSuccess) {
-                return@withContext geminiFix
-            }
-
-            if (provider == AiProvider.AUTO_HYBRID && hasGroq) {
-                return@withContext GroqClient.autoFixLoop(
-                    apiKey = userProfile.groqApiKey,
-                    samples = samples,
-                    htmlCode = htmlCode,
-                    durationSec = durationSec,
-                    modelPref = userProfile.groqModelPref,
-                    lastReview = lastReview,
-                    maxRounds = maxRounds,
-                    validator = validator,
-                    recapture = recapture,
-                    onRound = onRound
-                )
-            }
-
-            return@withContext Result.failure(geminiFix.exceptionOrNull() ?: IllegalStateException("Auto-fix failed"))
+        if (geminiFix.isSuccess) {
+            geminiFix
+        } else {
+            Result.failure(geminiFix.exceptionOrNull() ?: IllegalStateException("Auto-fix failed"))
         }
-
-        Result.failure(IllegalStateException("No AI provider configured. Add Gemini or Groq key."))
     }
 
     private suspend fun autoFixWithGemini(
@@ -401,43 +278,5 @@ object UnifiedAiRouter {
             issuesAfter = startIssues,
             roundsRun = rounds
         )
-    }
-
-    private suspend fun executeGroqFallback(
-        userProfile: UserProfile,
-        prompt: String,
-        systemInstruction: String?,
-        expectJson: Boolean,
-        images: List<GeminiImageInput>
-    ): Result<UnifiedAiResult> = withContext(Dispatchers.IO) {
-        try {
-            val groqImages = images.map { img ->
-                GroqImageInput(
-                    base64Data = img.base64Data,
-                    mimeType = img.mimeType
-                )
-            }
-
-            val res = GroqClient.callRawChatCompletion(
-                apiKey = userProfile.groqApiKey,
-                modelPref = userProfile.groqModelPref,
-                prompt = prompt,
-                systemInstruction = systemInstruction,
-                jsonObjectMode = expectJson,
-                images = groqImages
-            )
-            Result.success(
-                UnifiedAiResult(
-                    text = res.text,
-                    providerUsed = "Groq",
-                    modelUsed = res.modelUsed,
-                    fallbackTriggered = false
-                )
-            )
-        } catch (ce: CancellationException) {
-            throw ce
-        } catch (t: Throwable) {
-            Result.failure(t)
-        }
     }
 }

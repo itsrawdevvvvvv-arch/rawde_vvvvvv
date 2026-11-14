@@ -869,23 +869,14 @@ fun KeyframeSheetScreen(
                                                 aiError = null
                                                 needsStructuralPrompt = false
                                                 scope.launch {
-                                                    val review = if (userProfile != null && (userProfile.hasGeminiKey || userProfile.hasGroqKey)) {
-                                                        UnifiedAiRouter.reviewContactSheet(
-                                                            geminiRouter = geminiRouter,
-                                                            userProfile = userProfile,
-                                                            samples = res.samples,
-                                                            durationSec = res.durationSec,
-                                                            htmlHash = resolvedHtml.hashCode()
-                                                        )
-                                                    } else {
-                                                        GroqClient.reviewContactSheet(
-                                                            apiKey = apiKey,
-                                                            samples = res.samples,
-                                                            durationSec = res.durationSec,
-                                                            htmlHash = resolvedHtml.hashCode(),
-                                                            modelPref = modelPref
-                                                        )
-                                                    }
+                                                    val profile = userProfile ?: UserProfile(geminiApiKey = apiKey)
+                                                    val review = UnifiedAiRouter.reviewContactSheet(
+                                                        geminiRouter = geminiRouter,
+                                                        userProfile = profile,
+                                                        samples = res.samples,
+                                                        durationSec = res.durationSec,
+                                                        htmlHash = resolvedHtml.hashCode()
+                                                    )
                                                     aiBusy = false
                                                     aiAction = ""
                                                     review.onSuccess { r ->
@@ -944,65 +935,35 @@ fun KeyframeSheetScreen(
                                                 scope.launch {
                                                     val htmlBeforeFix = resolvedHtml
                                                     fixProgress = "Patching..."
-                                                    val outcomeRes = if (userProfile != null && (userProfile.hasGeminiKey || userProfile.hasGroqKey)) {
-                                                        UnifiedAiRouter.autoFixLoop(
-                                                            geminiRouter = geminiRouter,
-                                                            userProfile = userProfile,
-                                                            samples = res.samples,
-                                                            htmlCode = htmlBeforeFix,
-                                                            durationSec = res.durationSec,
-                                                            lastReview = lastReview,
-                                                            maxRounds = 3,
-                                                            validator = { candidateHtml ->
-                                                                CodeValidator.validateFull(context, cacheManager, candidateHtml)
-                                                            },
-                                                            recapture = { candidateHtml ->
-                                                                fixProgress = "Verifying..."
-                                                                KeyframeSheetGenerator.captureKeyframes(
-                                                                    context = context,
-                                                                    cacheManager = cacheManager,
-                                                                    projectId = project.id,
-                                                                    rawHtml = candidateHtml,
-                                                                    durationSec = res.durationSec,
-                                                                    mode = selectedMode,
-                                                                    onProgress = { _, _, _, _ -> },
-                                                                    cancelled = { isScreenDisposed }
-                                                                ).samples
-                                                            },
-                                                            onRound = { round, issuesNow ->
-                                                                fixProgress = "Round $round: $issuesNow issues left"
-                                                            }
-                                                        )
-                                                    } else {
-                                                        GroqClient.autoFixLoop(
-                                                            apiKey = apiKey,
-                                                            samples = res.samples,
-                                                            htmlCode = htmlBeforeFix,
-                                                            durationSec = res.durationSec,
-                                                            modelPref = modelPref,
-                                                            lastReview = lastReview,
-                                                            maxRounds = 3,
-                                                            validator = { candidateHtml ->
-                                                                CodeValidator.validateFull(context, cacheManager, candidateHtml)
-                                                            },
-                                                            recapture = { candidateHtml ->
-                                                                fixProgress = "Verifying..."
-                                                                KeyframeSheetGenerator.captureKeyframes(
-                                                                    context = context,
-                                                                    cacheManager = cacheManager,
-                                                                    projectId = project.id,
-                                                                    rawHtml = candidateHtml,
-                                                                    durationSec = res.durationSec,
-                                                                    mode = selectedMode,
-                                                                    onProgress = { _, _, _, _ -> },
-                                                                    cancelled = { isScreenDisposed }
-                                                                ).samples
-                                                            },
-                                                            onRound = { round, issuesNow ->
-                                                                fixProgress = "Round $round: $issuesNow issues left"
-                                                            }
-                                                        )
-                                                    }
+                                                    val profile = userProfile ?: UserProfile(geminiApiKey = apiKey)
+                                                    val outcomeRes = UnifiedAiRouter.autoFixLoop(
+                                                        geminiRouter = geminiRouter,
+                                                        userProfile = profile,
+                                                        samples = res.samples,
+                                                        htmlCode = htmlBeforeFix,
+                                                        durationSec = res.durationSec,
+                                                        lastReview = lastReview,
+                                                        maxRounds = 3,
+                                                        validator = { candidateHtml ->
+                                                            CodeValidator.validateFull(context, cacheManager, candidateHtml)
+                                                        },
+                                                        recapture = { candidateHtml ->
+                                                            fixProgress = "Verifying..."
+                                                            KeyframeSheetGenerator.captureKeyframes(
+                                                                context = context,
+                                                                cacheManager = cacheManager,
+                                                                projectId = project.id,
+                                                                rawHtml = candidateHtml,
+                                                                durationSec = res.durationSec,
+                                                                mode = selectedMode,
+                                                                onProgress = { _, _, _, _ -> },
+                                                                cancelled = { isScreenDisposed }
+                                                            ).samples
+                                                        },
+                                                        onRound = { round, issuesNow ->
+                                                            fixProgress = "Round $round: $issuesNow issues left"
+                                                        }
+                                                    )
                                                     aiBusy = false
                                                     aiAction = ""
                                                     fixProgress = ""
@@ -1135,7 +1096,7 @@ fun KeyframeSheetScreen(
                                             }
                                             if (isHardBlockedUi) {
                                                 RawSecondaryButton(
-                                                    text = "Switch Groq API Key",
+                                                    text = "Gemini API Settings",
                                                     height = 42.dp,
                                                     leadingIcon = RawIconType.KEY,
                                                     onClick = onSwitchGroqKey

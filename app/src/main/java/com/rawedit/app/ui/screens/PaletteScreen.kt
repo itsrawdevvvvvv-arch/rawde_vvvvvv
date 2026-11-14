@@ -54,11 +54,7 @@ import androidx.compose.ui.unit.sp
 import androidx.core.content.FileProvider
 import com.rawedit.app.data.CacheManager
 import com.rawedit.app.data.local.UserProfile
-import com.rawedit.app.domain.GroqClient
-import com.rawedit.app.domain.GroqCooldownException
-import com.rawedit.app.domain.GroqHardLimitException
-import com.rawedit.app.domain.GroqLimiter
-import com.rawedit.app.domain.GroqUi
+import com.rawedit.app.domain.GeminiWaterfallRouter
 import com.rawedit.app.domain.PaletteColorMath
 import com.rawedit.app.domain.PaletteExporter
 import com.rawedit.app.domain.PaletteJsonCodec
@@ -86,9 +82,11 @@ fun PaletteScreen(
     userProfile: UserProfile,
     cacheManager: CacheManager,
     onSavePaletteState: (counter: Int, json: String) -> Unit,
-    onOpenGroqKey: () -> Unit,
-    onSwitchGroqKey: () -> Unit,
-    onRefreshGroqQuota: () -> Unit
+    geminiRouter: GeminiWaterfallRouter? = null,
+    onOpenGeminiKey: () -> Unit = {},
+    onOpenGroqKey: () -> Unit = onOpenGeminiKey,
+    onSwitchGroqKey: () -> Unit = onOpenGeminiKey,
+    onRefreshGroqQuota: () -> Unit = {}
 ) {
     val context = LocalContext.current
     val haptic = LocalHapticFeedback.current
@@ -134,21 +132,11 @@ fun PaletteScreen(
         }
     }
 
-    val hasGroqKey = userProfile.hasGroqKey
-    val groqUi by GroqLimiter.ui.collectAsState()
-    val isExhausted = userProfile.groqQuotaExhausted || groqUi is GroqUi.HardBlocked
+    val hasGeminiKey = userProfile.hasGeminiKey
 
     fun regeneratePalette() {
-        if (!hasGroqKey) {
-            onOpenGroqKey()
-            return
-        }
-        if (isExhausted) {
-            onSwitchGroqKey()
-            return
-        }
-        if (groqUi is GroqUi.Cooling) {
-            toastMsg = "Rate window cooling \u2014 wait a few seconds"
+        if (!hasGeminiKey) {
+            onOpenGeminiKey()
             return
         }
         if (generating) return
@@ -159,31 +147,26 @@ fun PaletteScreen(
         } else {
             maxOf(userProfile.paletteCounter, currentPalette.number + 1)
         }
+        val router = geminiRouter ?: GeminiWaterfallRouter(context)
         scope.launch {
-            val res = GroqClient.generatePalette(
-                apiKey = userProfile.groqApiKey,
+            val res = router.generatePalette(
+                apiKey = userProfile.geminiApiKey,
                 nextNumber = targetNumber,
-                previousMood = currentPalette.mood,
-                modelPref = userProfile.groqModelPref
+                previousMood = currentPalette.mood
             )
             generating = false
             res.onSuccess { palette ->
                 onSavePaletteState(targetNumber + 1, PaletteJsonCodec.encode(palette))
-                onRefreshGroqQuota()
                 haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
                 toastMsg = "Palette #${palette.numFormatted} ready"
             }.onFailure { err ->
-                errorMsg = when (err) {
-                    is GroqCooldownException -> "Rate window full \u2014 retry in ${err.waitSec}s"
-                    is GroqHardLimitException -> err.message
-                    else -> err.message ?: "Groq AI palette request failed"
-                }
+                errorMsg = err.message ?: "Gemini AI palette request failed"
             }
         }
     }
 
-    LaunchedEffect(userProfile.groqApiKey, userProfile.groqQuotaExhausted, userProfile.paletteJson) {
-        if (userProfile.hasGroqKey && !userProfile.groqQuotaExhausted && userProfile.paletteJson.isBlank() && !autoFetchedOnce) {
+    LaunchedEffect(userProfile.geminiApiKey, userProfile.paletteJson) {
+        if (userProfile.hasGeminiKey && userProfile.paletteJson.isBlank() && !autoFetchedOnce) {
             autoFetchedOnce = true
             regeneratePalette()
         }
@@ -275,19 +258,15 @@ fun PaletteScreen(
                         modifier = Modifier
                             .clip(CircleShape)
                             .background(
-                                when {
-                                    isExhausted -> RawColors.ErrorSoft
-                                    hasGroqKey -> RawColors.AccentSoft
-                                    else -> RawColors.RaisedCard
-                                }
+                                if (hasGeminiKey) RawColors.AccentSoft else RawColors.RaisedCard
                             )
                             .border(
                                 width = 1.dp,
-                                color = if (isExhausted) RawColors.ErrorBorder else Color.Transparent,
+                                color = Color.Transparent,
                                 shape = CircleShape
                             )
                             .clickable {
-                                if (isExhausted) onSwitchGroqKey() else onOpenGroqKey()
+                                onOpenGeminiKey()
                             }
                             .padding(horizontal = 12.dp, vertical = 7.dp),
                         verticalAlignment = Alignment.CenterVertically,
@@ -296,26 +275,14 @@ fun PaletteScreen(
                         RawIcon(
                             type = RawIconType.KEY,
                             size = 14.dp,
-                            tint = when {
-                                isExhausted -> RawColors.ErrorCoral
-                                hasGroqKey -> RawColors.Tan
-                                else -> RawColors.TextMuted
-                            }
+                            tint = if (hasGeminiKey) RawColors.Tan else RawColors.TextMuted
                         )
                         Text(
-                            text = when {
-                                !hasGroqKey -> "Add Groq key"
-                                isExhausted -> "Quota 0 \u2022 Switch"
-                                else -> userProfile.quotaSummaryText()
-                            },
+                            text = if (!hasGeminiKey) "Add Gemini key" else "Gemini Free \u2022 1,040 RPD",
                             fontFamily = JetBrainsMonoFamily,
                             fontWeight = FontWeight.Bold,
                             fontSize = 11.5.sp,
-                            color = when {
-                                isExhausted -> RawColors.ErrorCoral
-                                hasGroqKey -> RawColors.Tan
-                                else -> RawColors.TextMuted
-                            },
+                            color = if (hasGeminiKey) RawColors.Tan else RawColors.TextMuted,
                             maxLines = 1,
                             overflow = TextOverflow.Ellipsis
                         )
@@ -323,13 +290,13 @@ fun PaletteScreen(
                 }
             }
 
-            if (!hasGroqKey) {
+            if (!hasGeminiKey) {
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
                         .clip(RoundedCornerShape(24.dp))
                         .background(RawColors.CardSurface)
-                        .clickable { onOpenGroqKey() }
+                        .clickable { onOpenGeminiKey() }
                         .padding(horizontal = 16.dp, vertical = 14.dp),
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(12.dp)
@@ -344,7 +311,7 @@ fun PaletteScreen(
                             color = RawColors.TextPrimary
                         )
                         Text(
-                            text = "Add a Groq API key to generate fresh editorial AI palettes.",
+                            text = "Add a Gemini API key to generate fresh editorial AI palettes with Google AI Studio.",
                             style = RawTypography.bodyMedium.copy(fontSize = 13.sp, lineHeight = 18.sp),
                             color = RawColors.TextMuted
                         )
@@ -357,48 +324,6 @@ fun PaletteScreen(
                     ) {
                         Text(
                             text = "Add key",
-                            fontFamily = BricolageFamily,
-                            fontWeight = FontWeight.Bold,
-                            fontSize = 12.5.sp,
-                            color = RawColors.Ink
-                        )
-                    }
-                }
-            } else if (isExhausted) {
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .clip(RoundedCornerShape(24.dp))
-                        .background(RawColors.ErrorSoft)
-                        .border(1.dp, RawColors.ErrorBorder, RoundedCornerShape(24.dp))
-                        .clickable { onSwitchGroqKey() }
-                        .padding(horizontal = 16.dp, vertical = 14.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(12.dp)
-                ) {
-                    RawIcon(type = RawIconType.WARN, size = 18.dp, tint = RawColors.ErrorCoral)
-                    Column(modifier = Modifier.weight(1f)) {
-                        Text(
-                            text = "Groq quota exhausted",
-                            fontFamily = BricolageFamily,
-                            fontWeight = FontWeight.Bold,
-                            fontSize = 15.sp,
-                            color = RawColors.ErrorCoral
-                        )
-                        Text(
-                            text = "Switch to another Groq API key to generate more palettes right away.",
-                            style = RawTypography.bodyMedium.copy(fontSize = 13.sp, lineHeight = 18.sp),
-                            color = RawColors.TextMuted
-                        )
-                    }
-                    Box(
-                        modifier = Modifier
-                            .clip(CircleShape)
-                            .background(RawColors.Cream)
-                            .padding(horizontal = 12.dp, vertical = 6.dp)
-                    ) {
-                        Text(
-                            text = "Switch",
                             fontFamily = BricolageFamily,
                             fontWeight = FontWeight.Bold,
                             fontSize = 12.5.sp,
@@ -424,14 +349,12 @@ fun PaletteScreen(
                         fontSize = 14.sp,
                         color = RawColors.ErrorCoral
                     )
-                    if (isExhausted || err.contains("quota", ignoreCase = true) || err.contains("credit", ignoreCase = true)) {
-                        RawSecondaryButton(
-                            text = "Switch Groq API Key",
-                            height = 42.dp,
-                            leadingIcon = RawIconType.KEY,
-                            onClick = onSwitchGroqKey
-                        )
-                    }
+                    RawSecondaryButton(
+                        text = "Manage Gemini API Key",
+                        height = 42.dp,
+                        leadingIcon = RawIconType.KEY,
+                        onClick = onOpenGeminiKey
+                    )
                 }
             }
 

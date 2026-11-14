@@ -131,21 +131,6 @@ fun AiQuotaDialog(
     var geminiTesting by remember { mutableStateOf(false) }
     var geminiHealthList by remember { mutableStateOf<List<ModelHealthStatus>>(emptyList()) }
 
-    // Groq state
-    val hasExistingGroqKey = currentApiKey.isNotBlank()
-    var groqKeyDraft by remember(currentApiKey, startInSwitchMode) {
-        mutableStateOf(if (startInSwitchMode) "" else currentApiKey)
-    }
-    var revealGroqKey by remember { mutableStateOf(false) }
-    var selectedGroqPref by remember(currentModelPref) {
-        mutableStateOf(GroqCodec.normalizeModelPref(currentModelPref))
-    }
-    var liveGroqQuota by remember(initialQuota, currentApiKey) {
-        mutableStateOf(initialQuota ?: GroqClient.getLatestQuota(currentApiKey))
-    }
-    var groqTesting by remember { mutableStateOf(false) }
-    var refreshingGroqQuota by remember { mutableStateOf(false) }
-
     var statusMessage by remember { mutableStateOf<String?>(null) }
     var isStatusError by remember { mutableStateOf(false) }
 
@@ -198,77 +183,8 @@ fun AiQuotaDialog(
         }
     }
 
-    fun runGroqQuotaRefresh() {
-        val targetKey = GroqCodec.normalizeApiKey(
-            if (groqKeyDraft.isNotBlank()) groqKeyDraft else currentApiKey
-        )
-        if (targetKey.isEmpty() || refreshingGroqQuota) return
-        refreshingGroqQuota = true
-        statusMessage = null
-        scope.launch {
-            val res = GroqClient.refreshQuota(targetKey, selectedGroqPref)
-            refreshingGroqQuota = false
-            res.onSuccess { report ->
-                liveGroqQuota = report
-                onSaveKeySession(targetKey, selectedGroqPref, report)
-                isStatusError = report.isExhausted
-                statusMessage = if (report.isExhausted) {
-                    "Quota exhausted on ${GroqCodec.maskApiKey(targetKey)}. Paste another Groq API key below."
-                } else {
-                    "Quota updated: ${report.formattedRequestsSummary()} | ${report.formattedTokensSummary()}"
-                }
-            }.onFailure { err ->
-                isStatusError = true
-                if (err is GroqHardLimitException && err.quota != null) {
-                    liveGroqQuota = err.quota
-                    onSaveKeySession(targetKey, selectedGroqPref, err.quota)
-                }
-                statusMessage = when (err) {
-                    is GroqCooldownException -> "Rate window cooling — retry in ${err.waitSec}s"
-                    else -> err.message ?: "Could not check Groq quota."
-                }
-            }
-        }
-    }
-
-    fun runGroqTestAndSave() {
-        val normalized = GroqCodec.normalizeApiKey(groqKeyDraft)
-        if (normalized.isEmpty()) {
-            isStatusError = true
-            statusMessage = "Paste your Groq API key (starts with gsk_) first."
-            return
-        }
-        if (groqTesting) return
-        groqTesting = true
-        isStatusError = false
-        statusMessage = null
-        scope.launch {
-            val res = GroqClient.testConnectionDetailed(normalized, selectedGroqPref)
-            groqTesting = false
-            res.onSuccess { info ->
-                GroqLimiter.reset()
-                val quota = info.quota ?: GroqClient.getLatestQuota(normalized)
-                liveGroqQuota = quota
-                onSaveKeySession(normalized, selectedGroqPref, quota)
-                isStatusError = false
-                val fallbackNote = if (info.usedFallback) " [fallback]" else ""
-                val quotaNote = quota?.takeIf { it.hasTelemetry }?.let { " | ${it.bannerLabel()}" }.orEmpty()
-                statusMessage = "Connected in ${info.latencyMs}ms (${info.modelUsed}$fallbackNote, ${info.availableModelsCount} models)$quotaNote"
-            }.onFailure { err ->
-                isStatusError = true
-                if (err is GroqHardLimitException && err.quota != null) {
-                    liveGroqQuota = err.quota
-                }
-                statusMessage = when (err) {
-                    is GroqCooldownException -> "Rate window cooling — retry in ${err.waitSec}s"
-                    else -> err.message ?: "Connection failed."
-                }
-            }
-        }
-    }
-
     Dialog(
-        onDismissRequest = { if (!geminiTesting && !groqTesting) onDismiss() },
+        onDismissRequest = { if (!geminiTesting) onDismiss() },
         properties = DialogProperties(usePlatformDefaultWidth = false)
     ) {
         Column(
@@ -302,7 +218,7 @@ fun AiQuotaDialog(
                             .padding(horizontal = 10.dp, vertical = 4.dp)
                     ) {
                         Text(
-                            text = selectedProvider.label.uppercase(),
+                            text = "GEMINI 1,040 RPD",
                             fontFamily = JetBrainsMonoFamily,
                             fontWeight = FontWeight.Bold,
                             fontSize = 10.sp,
@@ -313,86 +229,35 @@ fun AiQuotaDialog(
                 CircleActionButton(
                     icon = RawIconType.CLOSE,
                     size = 36.dp,
-                    enabled = !geminiTesting && !groqTesting,
+                    enabled = !geminiTesting,
                     onClick = onDismiss
                 )
             }
 
             // Title & Subtitle
             Text(
-                text = "AI & Quota Engine",
+                text = "Google Gemini AI Engine",
                 fontFamily = BricolageFamily,
                 fontWeight = FontWeight.Bold,
                 fontSize = 24.sp,
                 color = EduWaveColors.TextPrimary
             )
             Text(
-                text = "Zero-downtime Google Gemini Free-Tier waterfall (1,040 RPD) with automated 503 resilience and Groq Cloud failover.",
+                text = "Zero-downtime Google Gemini Free-Tier waterfall (1,040 RPD) across Flash-Lite and Flash models with instant automatic failover.",
                 fontFamily = BricolageFamily,
                 fontSize = 13.sp,
                 lineHeight = 18.sp,
                 color = EduWaveColors.TextMuted
             )
 
-            // 1. Provider Route Segmented Stadium Pill
-            Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                Text(
-                    text = "AI PROVIDER ROUTE",
-                    fontFamily = JetBrainsMonoFamily,
-                    fontWeight = FontWeight.Bold,
-                    fontSize = 11.sp,
-                    color = EduWaveColors.TextMuted
-                )
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .clip(RoundedCornerShape(50))
-                        .background(EduWaveColors.ElevatedInput)
-                        .border(1.dp, EduWaveColors.BorderSubtle, RoundedCornerShape(50))
-                        .padding(3.dp),
-                    horizontalArrangement = Arrangement.SpaceEvenly
-                ) {
-                    AiProvider.values().forEach { provider ->
-                        val isSelected = selectedProvider == provider
-                        Box(
-                            modifier = Modifier
-                                .weight(1f)
-                                .clip(RoundedCornerShape(50))
-                                .background(if (isSelected) EduWaveColors.AccentTan else Color.Transparent)
-                                .clickable {
-                                    selectedProvider = provider
-                                    onSaveAiProvider(provider.id)
-                                }
-                                .padding(vertical = 8.dp),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Text(
-                                text = when (provider) {
-                                    AiProvider.GEMINI_FREE -> "Gemini (Free)"
-                                    AiProvider.GROQ_CLOUD -> "Groq Cloud"
-                                    AiProvider.AUTO_HYBRID -> "Auto Hybrid"
-                                },
-                                fontFamily = BricolageFamily,
-                                fontWeight = FontWeight.Bold,
-                                fontSize = 12.sp,
-                                color = if (isSelected) Color(0xFF080808) else EduWaveColors.TextMuted,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis
-                            )
-                        }
-                    }
-                }
-            }
-
-            // 2. GEMINI FREE-TIER WATERFALL SECTION
-            if (selectedProvider == AiProvider.GEMINI_FREE || selectedProvider == AiProvider.AUTO_HYBRID) {
-                Column(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .clip(RoundedCornerShape(20.dp))
-                        .background(EduWaveColors.ElevatedInput)
-                        .border(1.dp, EduWaveColors.BorderSubtle, RoundedCornerShape(20.dp))
-                        .padding(14.dp),
+            // GEMINI FREE-TIER WATERFALL SECTION
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(20.dp))
+                    .background(EduWaveColors.ElevatedInput)
+                    .border(1.dp, EduWaveColors.BorderSubtle, RoundedCornerShape(20.dp))
+                    .padding(14.dp),
                     verticalArrangement = Arrangement.spacedBy(10.dp)
                 ) {
                     Row(
@@ -540,17 +405,37 @@ fun AiQuotaDialog(
                         val liteUsed = geminiRouter.getUsedToday("gemini-3.5-flash-lite")
                         val liteStatus = geminiHealthList.firstOrNull { it.modelId == "gemini-3.5-flash-lite" }?.statusLabel ?: "READY (500 RPD)"
                         ModelHealthRow(
-                            modelName = "gemini-3.5-flash-lite",
+                            modelName = "gemini-3.5-flash-lite (Workhorse)",
                             statusLabel = liteStatus,
                             usedText = "$liteUsed / 500 RPD",
                             isAvailable = !geminiRouter.isModelInCooldown("gemini-3.5-flash-lite")
                         )
 
-                        // Row 2: 3.8-flash
+                        // Row 2: 3.1-flash-lite
+                        val lite31Used = geminiRouter.getUsedToday("gemini-3.1-flash-lite")
+                        val lite31Status = geminiHealthList.firstOrNull { it.modelId == "gemini-3.1-flash-lite" }?.statusLabel ?: "READY (500 RPD)"
+                        ModelHealthRow(
+                            modelName = "gemini-3.1-flash-lite (Backup Lite)",
+                            statusLabel = lite31Status,
+                            usedText = "$lite31Used / 500 RPD",
+                            isAvailable = !geminiRouter.isModelInCooldown("gemini-3.1-flash-lite")
+                        )
+
+                        // Row 3: 3.6-flash
+                        val flash36Used = geminiRouter.getUsedToday("gemini-3.6-flash")
+                        val flash36Status = geminiHealthList.firstOrNull { it.modelId == "gemini-3.6-flash" }?.statusLabel ?: "READY (20 RPD)"
+                        ModelHealthRow(
+                            modelName = "gemini-3.6-flash (Creative)",
+                            statusLabel = flash36Status,
+                            usedText = "$flash36Used / 20 RPD",
+                            isAvailable = !geminiRouter.isModelInCooldown("gemini-3.6-flash")
+                        )
+
+                        // Row 4: 3.8-flash
                         val flashUsed = geminiRouter.getUsedToday("gemini-3.8-flash")
                         val flashStatus = geminiHealthList.firstOrNull { it.modelId == "gemini-3.8-flash" }?.statusLabel ?: "READY (20 RPD)"
                         ModelHealthRow(
-                            modelName = "gemini-3.8-flash",
+                            modelName = "gemini-3.8-flash (High Reasoning)",
                             statusLabel = flashStatus,
                             usedText = "$flashUsed / 20 RPD",
                             isAvailable = !geminiRouter.isModelInCooldown("gemini-3.8-flash")
@@ -570,7 +455,7 @@ fun AiQuotaDialog(
                         text = if (geminiTesting) "Verifying with Google..." else "Test & Save Gemini Key",
                         height = 46.dp,
                         leadingIcon = RawIconType.KEY,
-                        enabled = !geminiTesting && !groqTesting,
+                        enabled = !geminiTesting,
                         onClick = { runGeminiTestAndSave() }
                     )
 
@@ -598,185 +483,8 @@ fun AiQuotaDialog(
                         )
                     }
                 }
-            }
 
-            // 3. GROQ CLOUD SECTION
-            if (selectedProvider == AiProvider.GROQ_CLOUD || selectedProvider == AiProvider.AUTO_HYBRID) {
-                Column(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .clip(RoundedCornerShape(20.dp))
-                        .background(EduWaveColors.ElevatedInput)
-                        .border(1.dp, EduWaveColors.BorderSubtle, RoundedCornerShape(20.dp))
-                        .padding(14.dp),
-                    verticalArrangement = Arrangement.spacedBy(10.dp)
-                ) {
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Text(
-                            text = "GROQ CLOUD INFERENCE",
-                            fontFamily = JetBrainsMonoFamily,
-                            fontWeight = FontWeight.Bold,
-                            fontSize = 11.sp,
-                            color = EduWaveColors.AccentTan
-                        )
-                        Text(
-                            text = "console.groq.com ↗",
-                            fontFamily = BricolageFamily,
-                            fontSize = 12.sp,
-                            color = EduWaveColors.AccentTan,
-                            textDecoration = TextDecoration.Underline,
-                            modifier = Modifier.clickable {
-                                GroqCodec.openUrlInChromeOrBrowser(context, GroqCodec.KEYS_CONSOLE_URL)
-                            }
-                        )
-                    }
 
-                    // Active Groq Meter
-                    if (hasExistingGroqKey) {
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.SpaceBetween,
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Column {
-                                Text(
-                                    text = "ACTIVE: ${GroqCodec.maskApiKey(currentApiKey)}",
-                                    fontFamily = JetBrainsMonoFamily,
-                                    fontSize = 10.5.sp,
-                                    color = EduWaveColors.TextMuted
-                                )
-                                Text(
-                                    text = liveGroqQuota?.bannerLabel() ?: "Groq Ready",
-                                    fontFamily = BricolageFamily,
-                                    fontWeight = FontWeight.Bold,
-                                    fontSize = 15.sp,
-                                    color = EduWaveColors.AccentTan
-                                )
-                            }
-                            Box(
-                                modifier = Modifier
-                                    .clip(CircleShape)
-                                    .background(EduWaveColors.CardBg)
-                                    .clickable(enabled = !refreshingGroqQuota && !groqTesting) { runGroqQuotaRefresh() }
-                                    .padding(horizontal = 10.dp, vertical = 5.dp)
-                            ) {
-                                Text(
-                                    text = if (refreshingGroqQuota) "..." else "Refresh",
-                                    fontFamily = BricolageFamily,
-                                    fontSize = 12.sp,
-                                    color = EduWaveColors.TextPrimary
-                                )
-                            }
-                        }
-                    }
-
-                    // Input
-                    OutlinedTextField(
-                        value = groqKeyDraft,
-                        onValueChange = { groqKeyDraft = it },
-                        singleLine = true,
-                        visualTransformation = if (revealGroqKey) VisualTransformation.None else PasswordVisualTransformation(),
-                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Ascii),
-                        label = { Text("Groq API key (gsk_...)", fontSize = 11.5.sp) },
-                        placeholder = { Text("gsk_...", color = EduWaveColors.TextMuted, fontSize = 13.sp) },
-                        trailingIcon = {
-                            Row(verticalAlignment = Alignment.CenterVertically) {
-                                Box(
-                                    modifier = Modifier
-                                        .clip(CircleShape)
-                                        .background(EduWaveColors.CardBg)
-                                        .clickable {
-                                            val text = clipboardManager.getText()?.text.orEmpty().trim()
-                                            if (text.startsWith("gsk_")) groqKeyDraft = text
-                                        }
-                                        .padding(horizontal = 8.dp, vertical = 4.dp)
-                                ) {
-                                    Text("Paste", fontSize = 10.5.sp, fontFamily = JetBrainsMonoFamily, color = EduWaveColors.AccentTan)
-                                }
-                                Box(
-                                    modifier = Modifier
-                                        .clip(CircleShape)
-                                        .clickable { revealGroqKey = !revealGroqKey }
-                                        .padding(6.dp)
-                                ) {
-                                    RawIcon(
-                                        type = if (revealGroqKey) RawIconType.EYE_OFF else RawIconType.EYE,
-                                        size = 17.dp,
-                                        tint = EduWaveColors.TextMuted
-                                    )
-                                }
-                            }
-                        },
-                        textStyle = TextStyle(fontFamily = JetBrainsMonoFamily, fontSize = 13.sp, color = EduWaveColors.TextPrimary),
-                        shape = RoundedCornerShape(14.dp),
-                        colors = OutlinedTextFieldDefaults.colors(
-                            focusedBorderColor = EduWaveColors.AccentTan,
-                            unfocusedBorderColor = EduWaveColors.BorderSubtle,
-                            focusedContainerColor = EduWaveColors.CardBg,
-                            unfocusedContainerColor = EduWaveColors.CardBg,
-                            cursorColor = EduWaveColors.AccentTan
-                        ),
-                        modifier = Modifier.fillMaxWidth()
-                    )
-
-                    // Model Selector Chips
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .horizontalScroll(rememberScrollState()),
-                        horizontalArrangement = Arrangement.spacedBy(6.dp)
-                    ) {
-                        GroqCodec.MODEL_OPTIONS.forEach { opt ->
-                            val selected = selectedGroqPref == opt.prefId
-                            Box(
-                                modifier = Modifier
-                                    .clip(RoundedCornerShape(50))
-                                    .background(if (selected) EduWaveColors.AccentTan else EduWaveColors.CardBg)
-                                    .border(1.dp, if (selected) Color.Transparent else EduWaveColors.BorderSubtle, RoundedCornerShape(50))
-                                    .clickable {
-                                        selectedGroqPref = opt.prefId
-                                        onSaveModelPref(opt.prefId)
-                                    }
-                                    .padding(horizontal = 11.dp, vertical = 6.dp)
-                            ) {
-                                Text(
-                                    text = opt.shortLabel,
-                                    fontFamily = BricolageFamily,
-                                    fontWeight = FontWeight.Bold,
-                                    fontSize = 11.5.sp,
-                                    color = if (selected) Color(0xFF080808) else EduWaveColors.TextPrimary
-                                )
-                            }
-                        }
-                    }
-
-                    BigPrimaryButton(
-                        text = if (groqTesting) "Testing Groq..." else "Test & Save Groq Key",
-                        height = 46.dp,
-                        leadingIcon = RawIconType.KEY,
-                        enabled = !groqTesting && !geminiTesting,
-                        onClick = { runGroqTestAndSave() }
-                    )
-
-                    if (hasExistingGroqKey) {
-                        RawSecondaryButton(
-                            text = "Clear Groq key",
-                            height = 38.dp,
-                            enabled = !groqTesting,
-                            onClick = {
-                                GroqLimiter.reset()
-                                onClearKey()
-                                groqKeyDraft = ""
-                                statusMessage = "Groq key cleared."
-                            }
-                        )
-                    }
-                }
-            }
 
             // Status message banner
             statusMessage?.let { msg ->
@@ -802,7 +510,7 @@ fun AiQuotaDialog(
             RawSecondaryButton(
                 text = "Done",
                 height = 46.dp,
-                enabled = !geminiTesting && !groqTesting,
+                enabled = !geminiTesting,
                 onClick = onDismiss,
                 modifier = Modifier.fillMaxWidth()
             )

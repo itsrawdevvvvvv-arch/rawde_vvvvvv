@@ -53,7 +53,7 @@ import com.rawedit.app.domain.CutoutAuditMath
 import com.rawedit.app.domain.CutoutAuditResult
 import com.rawedit.app.domain.CutoutPadRatios
 import com.rawedit.app.domain.CutoutProcessor
-import com.rawedit.app.domain.GroqClient
+import com.rawedit.app.domain.GeminiWaterfallRouter
 import com.rawedit.app.domain.GroqCodec
 import com.rawedit.app.ui.components.BigPrimaryButton
 import com.rawedit.app.ui.components.CircleActionButton
@@ -122,6 +122,7 @@ fun CutoutStudioDialog(
     ) -> Unit
 ) {
     val context = LocalContext.current
+    val geminiRouter = remember { GeminiWaterfallRouter(context) }
     val scope = rememberCoroutineScope()
     val isSvg = input is CutoutStudioInput.SvgInput
 
@@ -202,14 +203,13 @@ fun CutoutStudioDialog(
             auditError = "Could not build comparison preview."
             return
         }
-        val res = GroqClient.auditCutout(
+        val res = geminiRouter.auditCutout(
             apiKey = apiKey,
             comparisonFile = compareFile,
             currentTolerance = tolerance,
             currentPad = currentPad,
             isSvgSource = isSvg,
-            keepOriginalMode = keepOriginal,
-            modelPref = modelPref
+            keepOriginalMode = keepOriginal
         )
         runCatching { compareFile.delete() }
         res.onSuccess { audit ->
@@ -414,10 +414,10 @@ fun CutoutStudioDialog(
                         RawIcon(RawIconType.SPARK, size = 16.dp, tint = RawColors.Tan)
                         val title = when {
                             isAiChecking -> "AI inspecting edges..."
-                            quotaExhausted -> "Groq quota exhausted"
+                            quotaExhausted -> "Gemini quota exhausted"
                             auditResult?.status == "ADJUST" -> "AI REFINED OUTPUT"
                             auditResult != null -> "AI VERIFIED CLEAN"
-                            apiKey.isBlank() -> "Groq Cutout Check (Optional)"
+                            apiKey.isBlank() -> "Gemini Cutout Check (Optional)"
                             else -> "AI edge audit ready"
                         }
                         Text(
@@ -459,10 +459,10 @@ fun CutoutStudioDialog(
 
                 val statusLine = when {
                     isAiChecking -> "Checking whether strokes, inner details, or corners were unnecessarily cropped or erased."
-                    quotaExhausted -> "Groq quota ran out on this key. Tap Switch key above to continue AI edge inspection."
+                    quotaExhausted -> "Gemini quota ran out on this key. Tap Switch key above to continue AI edge inspection."
                     auditError != null -> auditError!!
                     auditResult != null -> auditResult!!.diagnosis
-                    apiKey.isBlank() -> "Add a Groq API key so Llama 4 Vision checks cutouts for accidental crops or erased inner details."
+                    apiKey.isBlank() -> "Add a Gemini API key so Gemini Vision checks cutouts for accidental crops or erased inner details."
                     else -> "Tap Re-check after slider changes to re-verify edges."
                 }
                 Text(

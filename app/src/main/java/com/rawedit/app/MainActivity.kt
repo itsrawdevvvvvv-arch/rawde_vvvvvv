@@ -23,6 +23,7 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.unit.dp
 import com.rawedit.app.data.local.LocalAssetEntity
@@ -172,6 +173,8 @@ private fun MainAuthenticatedHost(
             ?: PaletteState.DEFAULT_01.copy(number = userProfile.paletteCounter.coerceAtLeast(1))
     }
 
+    val context = LocalContext.current
+    val geminiRouter = remember { GeminiWaterfallRouter(context) }
     var backStack by remember { mutableStateOf<List<AppRoute>>(listOf(AppRoute.Tabs)) }
     var currentTab by remember { mutableStateOf(MainTab.HOME) }
     var isForward by remember { mutableStateOf(true) }
@@ -269,23 +272,18 @@ private fun MainAuthenticatedHost(
                 )
                 val newId = container.repository.insertAsset(entity)
                 container.repository.attachAssetToProject(projectId, newId)
-                if (userProfile.hasGroqKey && !userProfile.groqQuotaExhausted) {
+                if (userProfile.hasGeminiKey) {
                     val visionFile = container.cacheManager.getAssetFile(imp.fileName)
                     if (visionFile != null && visionFile.exists()) {
-                        val descRes = GroqClient.describeAsset(
-                            apiKey = userProfile.groqApiKey,
+                        val descRes = geminiRouter.describeAsset(
+                            apiKey = userProfile.geminiApiKey,
                             asset = entity.copy(id = newId),
-                            imageFile = visionFile,
-                            modelPref = userProfile.groqModelPref
+                            imageFile = visionFile
                         )
                         descRes.onSuccess { (desc, safe) ->
                             container.repository.updateAssetDescription(newId, desc, safe)
-                            refreshGroqQuota(silent = true)
                             hostToastMsg = "Saved & described ${imp.relativePath}"
-                        }.onFailure { err ->
-                            if (err is GroqHardLimitException) {
-                                err.quota?.let { container.userPreferences.saveGroqQuota(it) }
-                            }
+                        }.onFailure {
                             hostToastMsg = "Saved ${imp.relativePath}"
                         }
                     } else {
@@ -467,7 +465,10 @@ private fun MainAuthenticatedHost(
                             project = proj,
                             cacheManager = container.cacheManager,
                             groqApiKey = userProfile.groqApiKey,
+                            geminiApiKey = userProfile.geminiApiKey,
+                            geminiRouter = geminiRouter,
                             onOpenGroqKey = { showGroqKeyDialog = true },
+                            onOpenGeminiKey = { showGroqKeyDialog = true },
                             onBack = ::popRoute,
                             onSave = { updated ->
                                 scope.launch {
@@ -511,27 +512,22 @@ private fun MainAuthenticatedHost(
                                         )
                                         val newId = container.repository.insertAsset(entity)
                                         container.repository.attachAssetToProject(proj.id, newId)
-                                        if (userProfile.hasGroqKey && !userProfile.groqQuotaExhausted) {
+                                        if (userProfile.hasGeminiKey) {
                                             val visionFile = if (imp.kind == LocalAssetEntity.KIND_CLIP) {
                                                 imp.thumbPath.takeIf { it.isNotBlank() }?.let(::File)
                                             } else {
                                                 container.cacheManager.getAssetFile(imp.fileName)
                                             }
                                             if (visionFile != null && visionFile.exists()) {
-                                                val descRes = GroqClient.describeAsset(
-                                                    apiKey = userProfile.groqApiKey,
+                                                val descRes = geminiRouter.describeAsset(
+                                                    apiKey = userProfile.geminiApiKey,
                                                     asset = entity.copy(id = newId),
-                                                    imageFile = visionFile,
-                                                    modelPref = userProfile.groqModelPref
+                                                    imageFile = visionFile
                                                 )
                                                 descRes.onSuccess { (desc, safe) ->
                                                     container.repository.updateAssetDescription(newId, desc, safe)
-                                                    refreshGroqQuota(silent = true)
                                                     hostToastMsg = "Added & described ${imp.relativePath}"
-                                                }.onFailure { err ->
-                                                    if (err is GroqHardLimitException) {
-                                                        err.quota?.let { container.userPreferences.saveGroqQuota(it) }
-                                                    }
+                                                }.onFailure {
                                                     hostToastMsg = "Added ${imp.relativePath}"
                                                 }
                                             } else {
@@ -564,7 +560,8 @@ private fun MainAuthenticatedHost(
                             },
                             onOpenGroqKey = { openGroqDialog(switchMode = false) },
                             onSwitchGroqKey = { openGroqDialog(switchMode = true) },
-                            onRefreshGroqQuota = { refreshGroqQuota(silent = true) }
+                            onRefreshGroqQuota = { refreshGroqQuota(silent = true) },
+                            geminiRouter = geminiRouter
                         )
                     }
                 }
