@@ -6,6 +6,8 @@ import com.rawedit.app.domain.CodeValidator
 import com.rawedit.app.domain.CutoutAuditMath
 import com.rawedit.app.domain.CutoutAuditResult
 import com.rawedit.app.domain.CutoutPadRatios
+import com.rawedit.app.domain.GeminiRouteMode
+import com.rawedit.app.domain.GeminiWaterfallRouter
 import com.rawedit.app.domain.GroqApiException
 import com.rawedit.app.domain.GroqCodec
 import com.rawedit.app.domain.GroqFailureCategory
@@ -715,5 +717,45 @@ Enjoy!
         assertEquals(2, KeyframeSheetGenerator.countIssues(samples))
         val compressed = KeyframeSheetGenerator.compressFlagLines(domBundle.flagLines)
         assertTrue(compressed.contains("span.sub") || compressed.isBlank())
+    }
+
+    @Test
+    fun geminiWaterfallRouterVerification() {
+        // 1. Waterfall Chain Ordering
+        assertEquals("gemini-3.5-flash-lite", GeminiWaterfallRouter.WORKHORSE_CHAIN.first())
+        assertEquals("gemini-3.8-flash", GeminiWaterfallRouter.CREATIVE_CHAIN.first())
+        assertEquals(4, GeminiWaterfallRouter.WORKHORSE_CHAIN.size)
+        assertEquals(4, GeminiWaterfallRouter.CREATIVE_CHAIN.size)
+
+        // 2. Free Tier Daily Limits
+        assertEquals(500, GeminiWaterfallRouter.dailyLimitForModel("gemini-3.5-flash-lite"))
+        assertEquals(500, GeminiWaterfallRouter.dailyLimitForModel("gemini-3.1-flash-lite"))
+        assertEquals(20, GeminiWaterfallRouter.dailyLimitForModel("gemini-3.8-flash"))
+        assertEquals(20, GeminiWaterfallRouter.dailyLimitForModel("gemini-3.6-flash"))
+
+        // 3. API Key Validation & Masking
+        assertTrue(GeminiWaterfallRouter.isValidApiKey("AIzaSyB12345678901234567890123456789xQ2"))
+        assertFalse(GeminiWaterfallRouter.isValidApiKey("gsk_1234567890"))
+        assertFalse(GeminiWaterfallRouter.isValidApiKey("AIzaShort"))
+        assertEquals("AIza...9xQ2", GeminiWaterfallRouter.maskApiKey("AIzaSyB12345678901234567890123456789xQ2"))
+        assertEquals("AIza...9xQ2", GeminiWaterfallRouter.maskKey("AIzaSyB12345678901234567890123456789xQ2"))
+
+        // 4. Pacific Midnight Computation (resets daily in future)
+        val nowMs = System.currentTimeMillis()
+        val nextMidnight = GeminiWaterfallRouter.computeNextPacificMidnightMs(nowMs)
+        assertTrue(nextMidnight > nowMs)
+        val diffHours = (nextMidnight - nowMs) / (1000 * 3600.0)
+        assertTrue(diffHours in 0.0..24.0)
+
+        // 5. Zero-Thinking Budget Payload Verification
+        val payload = GeminiWaterfallRouter.buildGenerateContentPayload(
+            prompt = "Test prompt",
+            systemInstruction = "You are a helper",
+            expectJson = true,
+            images = emptyList()
+        )
+        assertTrue(payload.contains("\"thinkingBudget\":0") || payload.contains("\"thinkingBudget\": 0"))
+        assertTrue(payload.contains("application/json"))
+        assertTrue(payload.contains("Test prompt"))
     }
 }

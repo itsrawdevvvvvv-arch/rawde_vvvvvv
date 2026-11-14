@@ -87,7 +87,9 @@ import coil.request.CachePolicy
 import coil.request.ImageRequest
 import com.rawedit.app.data.CacheManager
 import com.rawedit.app.data.local.ProjectEntity
+import com.rawedit.app.data.local.UserProfile
 import com.rawedit.app.domain.CodeValidator
+import com.rawedit.app.domain.GeminiWaterfallRouter
 import com.rawedit.app.domain.GroqAutoFixStatus
 import com.rawedit.app.domain.GroqClient
 import com.rawedit.app.domain.GroqCodec
@@ -98,6 +100,7 @@ import com.rawedit.app.domain.GroqLimiter
 import com.rawedit.app.domain.GroqPromptTooLargeException
 import com.rawedit.app.domain.GroqReviewResult
 import com.rawedit.app.domain.GroqUi
+import com.rawedit.app.domain.UnifiedAiRouter
 import com.rawedit.app.domain.HtmlVersionStore
 import com.rawedit.app.domain.KeyframeSample
 import com.rawedit.app.domain.KeyframeSheetGenerator
@@ -139,6 +142,7 @@ fun KeyframeSheetScreen(
     modelPref: String,
     quotaExhausted: Boolean,
     quotaBadgeText: String,
+    userProfile: UserProfile? = null,
     onBack: () -> Unit,
     onEditCode: () -> Unit,
     onApplyFixedHtml: (String, Double) -> Unit,
@@ -150,6 +154,7 @@ fun KeyframeSheetScreen(
     val context = LocalContext.current
     val haptic = LocalHapticFeedback.current
     val scope = rememberCoroutineScope()
+    val geminiRouter = remember { GeminiWaterfallRouter(context) }
     val animEnabled = rememberAnimationsEnabled()
     val gridState = rememberLazyGridState()
 
@@ -783,9 +788,10 @@ fun KeyframeSheetScreen(
                                             modifier = Modifier.weight(1f)
                                         ) {
                                             RawIcon(RawIconType.SPARK, size = 18.dp, tint = RawColors.Tan)
+                                            val hasActiveAi = (userProfile?.hasActiveAiKey ?: false) || apiKey.isNotBlank()
                                             Column {
                                                 Text(
-                                                    text = "Groq Frame Review & Auto-Fix",
+                                                    text = "AI Frame Review & Auto-Fix",
                                                     fontFamily = BricolageFamily,
                                                     fontWeight = FontWeight.Bold,
                                                     fontSize = 18.sp,
@@ -793,21 +799,22 @@ fun KeyframeSheetScreen(
                                                 )
                                                 Text(
                                                     text = when {
-                                                        apiKey.isBlank() -> "Optional \u2022 Add Groq key"
+                                                        !hasActiveAi -> "Optional \u2022 Add AI key"
+                                                        userProfile != null -> userProfile.quotaSummaryText()
                                                         groqUi is GroqUi.Cooling -> "$limiterLabel \u2022 $quotaBadgeText"
                                                         isHardBlockedUi -> limiterLabel
                                                         else -> "$limiterLabel \u2022 $quotaBadgeText"
                                                     },
                                                     style = RawTypography.labelMedium,
                                                     color = when {
-                                                        isHardBlockedUi -> RawColors.ErrorCoral
+                                                        isHardBlockedUi && userProfile?.hasGeminiKey != true -> RawColors.ErrorCoral
                                                         groqUi is GroqUi.Cooling -> RawColors.Tan
                                                         else -> RawColors.TextMuted
                                                     }
                                                 )
                                             }
                                         }
-                                        if (isHardBlockedUi) {
+                                        if (isHardBlockedUi && userProfile?.hasGeminiKey != true) {
                                             Box(
                                                 modifier = Modifier
                                                     .clip(CircleShape)
@@ -842,18 +849,18 @@ fun KeyframeSheetScreen(
                                         RawSecondaryButton(
                                             text = if (aiBusy && aiAction == "review") "Reviewing..." else "AI review",
                                             height = 48.dp,
-                                            enabled = !aiBusy && (apiKey.isBlank() || canTapAi || isHardBlockedUi),
+                                            enabled = !aiBusy && (!hasActiveAi || canTapAi || isHardBlockedUi || userProfile?.hasGeminiKey == true),
                                             leadingIcon = RawIconType.LENS,
                                             onClick = {
-                                                if (apiKey.isBlank()) {
+                                                if (!hasActiveAi) {
                                                     onOpenGroqKey()
                                                     return@RawSecondaryButton
                                                 }
-                                                if (isHardBlockedUi) {
+                                                if (isHardBlockedUi && userProfile?.hasGeminiKey != true) {
                                                     onSwitchGroqKey()
                                                     return@RawSecondaryButton
                                                 }
-                                                if (!canTapAi) {
+                                                if (!canTapAi && userProfile?.hasGeminiKey != true) {
                                                     toastMsg = limiterLabel
                                                     return@RawSecondaryButton
                                                 }
@@ -862,13 +869,23 @@ fun KeyframeSheetScreen(
                                                 aiError = null
                                                 needsStructuralPrompt = false
                                                 scope.launch {
-                                                    val review = GroqClient.reviewContactSheet(
-                                                        apiKey = apiKey,
-                                                        samples = res.samples,
-                                                        durationSec = res.durationSec,
-                                                        htmlHash = resolvedHtml.hashCode(),
-                                                        modelPref = modelPref
-                                                    )
+                                                    val review = if (userProfile != null && (userProfile.hasGeminiKey || userProfile.hasGroqKey)) {
+                                                        UnifiedAiRouter.reviewContactSheet(
+                                                            geminiRouter = geminiRouter,
+                                                            userProfile = userProfile,
+                                                            samples = res.samples,
+                                                            durationSec = res.durationSec,
+                                                            htmlHash = resolvedHtml.hashCode()
+                                                        )
+                                                    } else {
+                                                        GroqClient.reviewContactSheet(
+                                                            apiKey = apiKey,
+                                                            samples = res.samples,
+                                                            durationSec = res.durationSec,
+                                                            htmlHash = resolvedHtml.hashCode(),
+                                                            modelPref = modelPref
+                                                        )
+                                                    }
                                                     aiBusy = false
                                                     aiAction = ""
                                                     review.onSuccess { r ->
@@ -891,7 +908,7 @@ fun KeyframeSheetScreen(
                                                                 toastMsg = "Too many flags to send; fix the top ones first"
                                                             }
                                                             else -> {
-                                                                aiError = err.message ?: "Groq AI inspection failed."
+                                                                aiError = err.message ?: "AI inspection failed."
                                                             }
                                                         }
                                                     }
@@ -903,20 +920,20 @@ fun KeyframeSheetScreen(
                                         BigPrimaryButton(
                                             text = if (aiBusy && aiAction == "fix") fixProgress.ifBlank { "Patching..." } else "Auto-fix",
                                             height = 48.dp,
-                                            enabled = !aiBusy && (apiKey.isBlank() || canTapAi || isHardBlockedUi),
+                                            enabled = !aiBusy && (!hasActiveAi || canTapAi || isHardBlockedUi || userProfile?.hasGeminiKey == true),
                                             leadingIcon = RawIconType.SPARK,
                                             containerColor = RawColors.Tan,
                                             contentColor = RawColors.Ink,
                                             onClick = {
-                                                if (apiKey.isBlank()) {
+                                                if (!hasActiveAi) {
                                                     onOpenGroqKey()
                                                     return@BigPrimaryButton
                                                 }
-                                                if (isHardBlockedUi) {
+                                                if (isHardBlockedUi && userProfile?.hasGeminiKey != true) {
                                                     onSwitchGroqKey()
                                                     return@BigPrimaryButton
                                                 }
-                                                if (!canTapAi) {
+                                                if (!canTapAi && userProfile?.hasGeminiKey != true) {
                                                     toastMsg = limiterLabel
                                                     return@BigPrimaryButton
                                                 }
@@ -927,34 +944,63 @@ fun KeyframeSheetScreen(
                                                 scope.launch {
                                                     val htmlBeforeFix = resolvedHtml
                                                     fixProgress = "Patching..."
-                                                    val outcomeRes = GroqClient.autoFixLoop(
-                                                        apiKey = apiKey,
-                                                        samples = res.samples,
-                                                        htmlCode = htmlBeforeFix,
-                                                        durationSec = res.durationSec,
-                                                        modelPref = modelPref,
-                                                        lastReview = lastReview,
-                                                        maxRounds = 3,
-                                                        validator = { candidateHtml ->
-                                                            CodeValidator.validateFull(context, cacheManager, candidateHtml)
-                                                        },
-                                                        recapture = { candidateHtml ->
-                                                            fixProgress = "Verifying..."
-                                                            KeyframeSheetGenerator.captureKeyframes(
-                                                                context = context,
-                                                                cacheManager = cacheManager,
-                                                                projectId = project.id,
-                                                                rawHtml = candidateHtml,
-                                                                durationSec = res.durationSec,
-                                                                mode = selectedMode,
-                                                                onProgress = { _, _, _, _ -> },
-                                                                cancelled = { isScreenDisposed }
-                                                            ).samples
-                                                        },
-                                                        onRound = { round, issuesNow ->
-                                                            fixProgress = "Round $round: $issuesNow issues left"
-                                                        }
-                                                    )
+                                                    val outcomeRes = if (userProfile != null && (userProfile.hasGeminiKey || userProfile.hasGroqKey)) {
+                                                        UnifiedAiRouter.autoFixLoop(
+                                                            geminiRouter = geminiRouter,
+                                                            userProfile = userProfile,
+                                                            samples = res.samples,
+                                                            htmlCode = htmlBeforeFix,
+                                                            durationSec = res.durationSec,
+                                                            lastReview = lastReview,
+                                                            maxRounds = 3,
+                                                            validator = { candidateHtml ->
+                                                                CodeValidator.validateFull(context, cacheManager, candidateHtml)
+                                                            },
+                                                            recapture = { candidateHtml ->
+                                                                fixProgress = "Verifying..."
+                                                                KeyframeSheetGenerator.captureKeyframes(
+                                                                    context = context,
+                                                                    cacheManager = cacheManager,
+                                                                    projectId = project.id,
+                                                                    rawHtml = candidateHtml,
+                                                                    durationSec = res.durationSec,
+                                                                    mode = selectedMode,
+                                                                    onProgress = { _, _, _, _ -> },
+                                                                    cancelled = { isScreenDisposed }
+                                                                ).samples
+                                                            },
+                                                            onProgress = { fixProgress = it }
+                                                        )
+                                                    } else {
+                                                        GroqClient.autoFixLoop(
+                                                            apiKey = apiKey,
+                                                            samples = res.samples,
+                                                            htmlCode = htmlBeforeFix,
+                                                            durationSec = res.durationSec,
+                                                            modelPref = modelPref,
+                                                            lastReview = lastReview,
+                                                            maxRounds = 3,
+                                                            validator = { candidateHtml ->
+                                                                CodeValidator.validateFull(context, cacheManager, candidateHtml)
+                                                            },
+                                                            recapture = { candidateHtml ->
+                                                                fixProgress = "Verifying..."
+                                                                KeyframeSheetGenerator.captureKeyframes(
+                                                                    context = context,
+                                                                    cacheManager = cacheManager,
+                                                                    projectId = project.id,
+                                                                    rawHtml = candidateHtml,
+                                                                    durationSec = res.durationSec,
+                                                                    mode = selectedMode,
+                                                                    onProgress = { _, _, _, _ -> },
+                                                                    cancelled = { isScreenDisposed }
+                                                                ).samples
+                                                            },
+                                                            onRound = { round, issuesNow ->
+                                                                fixProgress = "Round $round: $issuesNow issues left"
+                                                            }
+                                                        )
+                                                    }
                                                     aiBusy = false
                                                     aiAction = ""
                                                     fixProgress = ""

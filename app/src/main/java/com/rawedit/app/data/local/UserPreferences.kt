@@ -9,6 +9,9 @@ import androidx.datastore.preferences.core.intPreferencesKey
 import androidx.datastore.preferences.core.longPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
+import com.rawedit.app.domain.AiProvider
+import com.rawedit.app.domain.GeminiTaskRoute
+import com.rawedit.app.domain.GeminiWaterfallRouter
 import com.rawedit.app.domain.GroqCodec
 import com.rawedit.app.domain.GroqLimitKind
 import com.rawedit.app.domain.GroqQuotaReport
@@ -34,10 +37,43 @@ data class UserProfile(
     val groqHardBlockKind: String = "",
     val groqQuotaUpdatedAtMs: Long = 0L,
     val paletteCounter: Int = 1,
-    val paletteJson: String = ""
+    val paletteJson: String = "",
+    val geminiApiKey: String = "",
+    val aiProviderRoute: String = AiProvider.GEMINI_FREE.id,
+    val geminiTaskRoute: String = GeminiTaskRoute.BALANCED_AUTO.id
 ) {
     val hasGroqKey: Boolean
         get() = groqApiKey.isNotBlank()
+
+    val hasGeminiKey: Boolean
+        get() = geminiApiKey.isNotBlank() && geminiApiKey.startsWith("AIza")
+
+    fun resolvedAiProvider(): AiProvider = when (aiProviderRoute) {
+        AiProvider.GROQ_CLOUD.id -> AiProvider.GROQ_CLOUD
+        AiProvider.AUTO_HYBRID.id -> AiProvider.AUTO_HYBRID
+        else -> AiProvider.GEMINI_FREE
+    }
+
+    fun resolvedGeminiTaskRoute(): GeminiTaskRoute = when (geminiTaskRoute) {
+        GeminiTaskRoute.MAX_QUOTA_SAVER.id -> GeminiTaskRoute.MAX_QUOTA_SAVER
+        GeminiTaskRoute.MAX_QUALITY.id -> GeminiTaskRoute.MAX_QUALITY
+        else -> GeminiTaskRoute.BALANCED_AUTO
+    }
+
+    val hasActiveAiKey: Boolean
+        get() = when (resolvedAiProvider()) {
+            AiProvider.GEMINI_FREE -> hasGeminiKey
+            AiProvider.GROQ_CLOUD -> hasGroqKey
+            AiProvider.AUTO_HYBRID -> hasGeminiKey || hasGroqKey
+        }
+
+    fun activeAiKey(): String = when (resolvedAiProvider()) {
+        AiProvider.GEMINI_FREE -> geminiApiKey
+        AiProvider.GROQ_CLOUD -> groqApiKey
+        AiProvider.AUTO_HYBRID -> if (hasGeminiKey) geminiApiKey else groqApiKey
+    }
+
+    fun maskGeminiKey(): String = GeminiWaterfallRouter.maskApiKey(geminiApiKey)
 
     fun isHardBlocked(nowMs: Long = System.currentTimeMillis()): Boolean =
         groqHardBlockUntilMs > nowMs
@@ -66,22 +102,37 @@ data class UserProfile(
     }
 
     fun quotaSummaryText(nowMs: Long = System.currentTimeMillis()): String {
-        if (!hasGroqKey) return "Add Groq key"
-        if (isHardBlocked(nowMs)) {
-            return if (groqHardBlockKind == GroqLimitKind.CREDITS.name) {
-                "Credits out \u2022 Switch"
-            } else {
-                val left = GroqCodec.formatDurationShort(groqHardBlockUntilMs - nowMs)
-                "Daily limit \u2022 $left"
+        return when (resolvedAiProvider()) {
+            AiProvider.GEMINI_FREE -> {
+                if (hasGeminiKey) "Gemini Free \u2022 1,040 RPD" else "Add Gemini key"
+            }
+            AiProvider.AUTO_HYBRID -> {
+                when {
+                    hasGeminiKey && hasGroqKey -> "Hybrid (Gemini \u2192 Groq)"
+                    hasGeminiKey -> "Gemini (Groq idle)"
+                    hasGroqKey -> "Groq (Gemini idle)"
+                    else -> "Setup AI key"
+                }
+            }
+            AiProvider.GROQ_CLOUD -> {
+                if (!hasGroqKey) return "Add Groq key"
+                if (isHardBlocked(nowMs)) {
+                    return if (groqHardBlockKind == GroqLimitKind.CREDITS.name) {
+                        "Credits out \u2022 Switch"
+                    } else {
+                        val left = GroqCodec.formatDurationShort(groqHardBlockUntilMs - nowMs)
+                        "Daily limit \u2022 $left"
+                    }
+                }
+                GroqCodec.formatQuotaBannerLabel(
+                    remainingRequests = groqRemainingRequests,
+                    limitRequests = groqLimitRequests,
+                    remainingTokens = groqRemainingTokens,
+                    limitTokens = groqLimitTokens,
+                    exhausted = false
+                )
             }
         }
-        return GroqCodec.formatQuotaBannerLabel(
-            remainingRequests = groqRemainingRequests,
-            limitRequests = groqLimitRequests,
-            remainingTokens = groqRemainingTokens,
-            limitTokens = groqLimitTokens,
-            exhausted = false
-        )
     }
 }
 
@@ -107,6 +158,9 @@ class UserPreferences(private val context: Context) {
         val GROQ_QUOTA_UPDATED_AT = longPreferencesKey("groq_quota_updated_at")
         val PALETTE_COUNTER = intPreferencesKey("palette_counter")
         val PALETTE_JSON = stringPreferencesKey("palette_json")
+        val GEMINI_API_KEY = stringPreferencesKey("gemini_api_key")
+        val AI_PROVIDER_ROUTE = stringPreferencesKey("ai_provider_route")
+        val GEMINI_TASK_ROUTE = stringPreferencesKey("gemini_task_route")
     }
 
     val userProfile: Flow<UserProfile> = context.dataStore.data.map { prefs ->
@@ -129,7 +183,10 @@ class UserPreferences(private val context: Context) {
             groqHardBlockKind = if (activeBlockUntil > 0L) (prefs[Keys.GROQ_HARD_BLOCK_KIND] ?: GroqLimitKind.DAILY.name) else "",
             groqQuotaUpdatedAtMs = prefs[Keys.GROQ_QUOTA_UPDATED_AT] ?: 0L,
             paletteCounter = (prefs[Keys.PALETTE_COUNTER] ?: 1).coerceAtLeast(1),
-            paletteJson = prefs[Keys.PALETTE_JSON] ?: ""
+            paletteJson = prefs[Keys.PALETTE_JSON] ?: "",
+            geminiApiKey = prefs[Keys.GEMINI_API_KEY] ?: "",
+            aiProviderRoute = prefs[Keys.AI_PROVIDER_ROUTE] ?: AiProvider.GEMINI_FREE.id,
+            geminiTaskRoute = prefs[Keys.GEMINI_TASK_ROUTE] ?: GeminiTaskRoute.BALANCED_AUTO.id
         )
     }
 
@@ -242,6 +299,35 @@ class UserPreferences(private val context: Context) {
     suspend fun clearGroqSession() {
         context.dataStore.edit { prefs ->
             clearGroqKeysFromPrefs(prefs)
+        }
+    }
+
+    suspend fun saveGeminiApiKey(apiKey: String) {
+        context.dataStore.edit { prefs ->
+            val clean = apiKey.trim()
+            if (clean.isNotEmpty()) {
+                prefs[Keys.GEMINI_API_KEY] = clean
+            } else {
+                prefs.remove(Keys.GEMINI_API_KEY)
+            }
+        }
+    }
+
+    suspend fun saveAiProviderRoute(providerRoute: String) {
+        context.dataStore.edit { prefs ->
+            prefs[Keys.AI_PROVIDER_ROUTE] = providerRoute
+        }
+    }
+
+    suspend fun saveGeminiTaskRoute(taskRoute: String) {
+        context.dataStore.edit { prefs ->
+            prefs[Keys.GEMINI_TASK_ROUTE] = taskRoute
+        }
+    }
+
+    suspend fun clearGeminiSession() {
+        context.dataStore.edit { prefs ->
+            prefs.remove(Keys.GEMINI_API_KEY)
         }
     }
 

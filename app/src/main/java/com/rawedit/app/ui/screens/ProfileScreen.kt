@@ -72,6 +72,7 @@ import com.rawedit.app.BuildConfig
 import com.rawedit.app.data.CacheManager
 import com.rawedit.app.data.local.UserProfile
 import com.rawedit.app.data.local.VideoEntity
+import com.rawedit.app.domain.AiProvider
 import com.rawedit.app.domain.GroqCodec
 import com.rawedit.app.ui.components.BigPrimaryButton
 import com.rawedit.app.ui.components.CircleActionButton
@@ -529,16 +530,25 @@ fun ProfileScreen(
             // Groq AI & Quota card
             item {
                 Spacer(modifier = Modifier.height(4.dp))
-                val hasKey = userProfile.hasGroqKey
+                val activeProvider = userProfile.resolvedAiProvider()
+                val hasKey = userProfile.hasActiveAiKey
                 val quota = userProfile.toGroqQuotaReportOrNull()
-                val isExhausted = userProfile.groqQuotaExhausted || quota?.isExhausted == true
+                val isExhausted = activeProvider == AiProvider.GROQ_CLOUD && (userProfile.groqQuotaExhausted || quota?.isExhausted == true)
                 val isLow = quota?.isLow == true
                 val routeLabel = GroqCodec.routeDisplayLabel(userProfile.groqModelPref)
                 val quotaLabel = userProfile.quotaSummaryText()
-                val subtitle = if (hasKey) {
-                    "${GroqCodec.maskApiKey(userProfile.groqApiKey)}  \u2022  $routeLabel"
-                } else {
-                    "Not configured  \u2022  api.groq.com"
+                val subtitle = when (activeProvider) {
+                    AiProvider.GEMINI_FREE -> if (userProfile.hasGeminiKey) {
+                        "${userProfile.maskGeminiKey()}  \u2022  Gemini Waterfall (Free)"
+                    } else {
+                        "Google AI Studio  \u2022  1,040 RPD Free"
+                    }
+                    AiProvider.AUTO_HYBRID -> "Auto Hybrid  \u2022  Gemini \u2192 Groq"
+                    AiProvider.GROQ_CLOUD -> if (userProfile.hasGroqKey) {
+                        "${GroqCodec.maskApiKey(userProfile.groqApiKey)}  \u2022  $routeLabel"
+                    } else {
+                        "Not configured  \u2022  api.groq.com"
+                    }
                 }
                 val cardShape = RoundedCornerShape(28.dp)
                 Column(
@@ -591,7 +601,7 @@ fun ProfileScreen(
                             }
                             Column {
                                 Text(
-                                    text = "Groq AI & Quota",
+                                    text = "AI & Quota Engine",
                                     fontFamily = BricolageFamily,
                                     fontWeight = FontWeight.Bold,
                                     fontSize = 18.sp,

@@ -73,7 +73,7 @@ data class GroqAutoFixOutcome(
     val roundsRun: Int = 0
 )
 
-private data class GroqCompletionResult(
+data class GroqCompletionResult(
     val text: String,
     val modelUsed: String,
     val quota: GroqQuotaReport?
@@ -357,6 +357,30 @@ object GroqClient {
         } catch (t: Throwable) {
             Result.failure(t)
         }
+    }
+
+    suspend fun callRawChatCompletion(
+        apiKey: String,
+        modelPref: String,
+        prompt: String,
+        systemInstruction: String? = null,
+        jsonObjectMode: Boolean = false,
+        images: List<GroqImageInput> = emptyList(),
+        maxCompletionTokens: Int? = null,
+        temperature: Double = 0.2
+    ): GroqCompletionResult {
+        return callChatWithFallback(
+            apiKey = apiKey,
+            modelPref = modelPref,
+            prompt = prompt,
+            images = images,
+            requiresVision = images.isNotEmpty(),
+            heavyTask = false,
+            systemInstruction = systemInstruction,
+            jsonObjectMode = jsonObjectMode,
+            maxCompletionTokens = maxCompletionTokens,
+            temperature = temperature
+        )
     }
 
     suspend fun transcribeAudioWordByWord(
@@ -1376,13 +1400,13 @@ object GroqClient {
         return Base64.encodeToString(baos.toByteArray(), Base64.NO_WRAP) to "image/jpeg"
     }
 
-    private const val REVIEW_SYSTEM = """You review frames of a 1920x1080 explainer reel. The image is a 2x2 collage of 4 frames, each labeled "#n t=seconds FLAG" in a strip below it. Frames are at 1/3 scale. Cyan dashed line = safe bottom (nothing may cross it; the progress bar sits below). Red boxes = flagged elements.
+    internal const val REVIEW_SYSTEM = """You review frames of a 1920x1080 explainer reel. The image is a 2x2 collage of 4 frames, each labeled "#n t=seconds FLAG" in a strip below it. Frames are at 1/3 scale. Cyan dashed line = safe bottom (nothing may cross it; the progress bar sits below). Red boxes = flagged elements.
 Report ONLY defects you can see or that the flag list states: clip (text/element cut at an edge), overlap (text or cards colliding), bar (content below the cyan line), blank (empty/black frame), contrast (low-contrast text or icon), broken (missing image).
 Reply with ONE JSON object, no prose:
 {"ok":false,"issues":[{"f":1,"type":"clip|overlap|bar|blank|contrast|broken","where":"max 8 words","sev":"high|med|low","fix":"max 12 words"}]}
 Max 6 issues. Omit clean frames. If everything is fine: {"ok":true,"issues":[]}."""
 
-    private const val PROMPT_C1_SYSTEM = """You patch a deterministic 1920x1080 HTML reel (everything is a pure function of t inside RAW.seek(t)).
+    internal const val PROMPT_C1_SYSTEM = """You patch a deterministic 1920x1080 HTML reel (everything is a pure function of t inside RAW.seek(t)).
 Rules of the renderer: safe area x120..1800, y70..930 (progress bar below 930). Columns: left x140..1040, right x1160..1760, full x140..1780. Card brackets extend 34px outside the card. Font size = floor(min(max, W/(chars*k))), k: Bebas/Anton/Oswald .45, Poppins/Montserrat/Inter/Space Grotesk .62 (.66 at 800-900), Playfair .58, JetBrains Mono .60. The last scene must use t<=end so t=duration is not blank.
 FORBIDDEN in any replacement: CSS transition/@keyframes/animation, requestAnimationFrame, setTimeout, setInterval, Date.now, performance.now, Math.random, video.play(), external URLs, innerHTML/append inside seek.
 Input: findings (what is wrong, with rects) and EXCERPT windows (verbatim code, no line numbers; "@@ window @@" separates windows).

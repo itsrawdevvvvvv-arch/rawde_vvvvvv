@@ -252,3 +252,45 @@ Use the prompts below in **Claude 3.7 Sonnet**, **GPT-4o**, or **DeepSeek-R1** t
 3. **Smart Content & Thinking Extraction**: `extractResponseText()` now checks `isNotBlank()` across `content`, `reasoning`, and `reasoning_content`, falling back to inner thought content if tags are stripped, preventing false "empty output" exceptions.
 4. **Quota Hardening**: `GroqLimiter.markReadyIfNotHardBlocked()` clears stale rate window blocks upon key re-testing, ensuring zero false-positive quota locks.
 
+---
+
+## 8. ZERO-DOWNTIME GOOGLE AI STUDIO GEMINI FREE-TIER API INTEGRATION
+
+### 8.1 4-Model Resilient Waterfall Architecture
+To eliminate HTTP 503 (`UNAVAILABLE` / high demand) and HTTP 429 (`RESOURCE_EXHAUSTED` / rate limits), `GeminiWaterfallRouter.kt` routes all JSON scene synthesis, contact sheet audits, and HTML patch loops through a priority cascade:
+- **`ROUTE_JSON_FAST` / `JSON_WORKHORSE`**: `["gemini-3.5-flash-lite", "gemini-3.1-flash-lite", "gemini-3.6-flash", "gemini-3.8-flash"]`
+  - Defaults to `gemini-3.5-flash-lite` (500 RPD, 15 RPM).
+- **`ROUTE_CREATIVE_FLASH`**: `["gemini-3.8-flash", "gemini-3.6-flash", "gemini-3.5-flash-lite", "gemini-3.1-flash-lite"]`
+  - High-reasoning creative script expansion starting with `gemini-3.8-flash` (20 RPD, 5 RPM).
+
+### 8.2 Zero-Thinking Budget & Latency Optimization
+Gemini 3.x models default to `medium` thinking budget, creating queue congestion and 503 drops during peak server load. All generation configs enforce:
+```json
+"thinkingConfig": { "thinkingBudget": 0 }
+```
+Eliminates internal deliberation token overhead and returns instant structured output.
+
+### 8.3 Quota-Dimension Ledger & Pacific Midnight Reset
+- Daily limits are tracked per model: `gemini-3.5-flash-lite` (500 RPD), `gemini-3.8-flash` (20 RPD).
+- Resets daily at Midnight Pacific Time (`America/Los_Angeles` / 1:30 PM IST).
+- 429 responses with `PerDay` or `limit: 0` immediately mark the specific model exhausted until midnight PT, cascading to the next waterfall model with 0 dropped calls.
+
+### 8.4 Auto-Hybrid Failover & Unified Provider Router
+`UnifiedAiRouter.kt` manages seamless provider switching:
+- **`GEMINI_FREE`**: Free-tier Gemini 4-model waterfall (1,040 combined RPD).
+- **`GROQ_CLOUD`**: Fast inference on Groq Cloud via Llama 3.3 70B & Llama 4 Vision.
+- **`AUTO_HYBRID`**: Primary route through Gemini Waterfall; instant automatic failover to Groq Cloud if all Gemini models are exhausted or congested.
+
+### 8.5 Monochrome EduWave Design Modal
+`AiQuotaDialog.kt` provides a unified UI matching EduWave design tokens (`#080808` canvas, `#161616` cards, `#242424` inputs, `#343434` borders, 24.dp corners, stadium pills):
+- Provider Segmented Switch: `Gemini Waterfall (Free)` | `Groq Cloud` | `Auto Hybrid`.
+- Masked API Key input with clipboard paste button and test connection probe.
+- Live Model Health & RPD Meter displaying live usage against the 500 RPD and 20 RPD caps.
+- Task Route Selector chips (`Balanced Auto`, `Max Quota Saver`, `Max Quality`).
+
+### 8.6 Companion Node.js Render Server (`raw_edit_server`)
+Companion backend in `scratch/raw_edit_server`:
+- `src/geminiRouter.js` using `@google/genai` with 90s timeout, jittered backoff, and 4-model waterfall.
+- `src/index.js` Express REST server exposing `/api/ai/generate` for zero-permission or server-rendered flows.
+
+

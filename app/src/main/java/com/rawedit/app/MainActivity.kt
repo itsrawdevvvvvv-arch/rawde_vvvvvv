@@ -40,12 +40,13 @@ import com.rawedit.app.ui.components.RawBottomNavBar
 import com.rawedit.app.ui.components.RawToastBanner
 import com.rawedit.app.ui.motion.RawScreenTransition
 import com.rawedit.app.ui.motion.RawTabMorphTransition
+import com.rawedit.app.domain.GeminiWaterfallRouter
 import com.rawedit.app.ui.screens.AddVoiceScreen
+import com.rawedit.app.ui.screens.AiQuotaDialog
 import com.rawedit.app.ui.screens.AssetLockerScreen
 import com.rawedit.app.ui.screens.CodePasteScreen
 import com.rawedit.app.ui.screens.CopyPromptScreen
 import com.rawedit.app.ui.screens.CreateHubScreen
-import com.rawedit.app.ui.screens.GroqKeyDialog
 import com.rawedit.app.ui.screens.HomeScreen
 import com.rawedit.app.ui.screens.KeyframeSheetScreen
 import com.rawedit.app.ui.screens.MyReelsScreen
@@ -639,6 +640,7 @@ private fun MainAuthenticatedHost(
                         KeyframeSheetScreen(
                             project = proj,
                             cacheManager = container.cacheManager,
+                            userProfile = userProfile,
                             apiKey = userProfile.groqApiKey,
                             modelPref = userProfile.groqModelPref,
                             quotaExhausted = userProfile.groqQuotaExhausted,
@@ -752,11 +754,14 @@ private fun MainAuthenticatedHost(
     }
 
     if (showGroqKeyDialog) {
-        GroqKeyDialog(
+        AiQuotaDialog(
             currentApiKey = userProfile.groqApiKey,
             currentModelPref = userProfile.groqModelPref,
             initialQuota = userProfile.toGroqQuotaReportOrNull(),
             startInSwitchMode = groqDialogSwitchMode,
+            currentGeminiKey = userProfile.geminiApiKey,
+            currentAiProvider = userProfile.aiProviderRoute,
+            currentGeminiTaskRoute = userProfile.geminiTaskRoute,
             onSaveKeySession = { apiKey, modelPref, quota ->
                 scope.launch {
                     GroqLimiter.reset()
@@ -775,12 +780,36 @@ private fun MainAuthenticatedHost(
                     container.userPreferences.saveGroqModelPref(modelPref)
                 }
             },
+            onSaveGeminiKey = { geminiKey ->
+                scope.launch {
+                    container.userPreferences.saveGeminiApiKey(geminiKey)
+                    showGroqKeyDialog = false
+                    hostToastMsg = "Gemini key saved (${GeminiWaterfallRouter.maskKey(geminiKey)})"
+                }
+            },
+            onSaveAiProvider = { providerId ->
+                scope.launch {
+                    container.userPreferences.saveAiProviderRoute(providerId)
+                }
+            },
+            onSaveGeminiTaskRoute = { taskRouteId ->
+                scope.launch {
+                    container.userPreferences.saveGeminiTaskRoute(taskRouteId)
+                }
+            },
             onClearKey = {
                 scope.launch {
                     GroqLimiter.reset()
                     container.userPreferences.clearGroqSession()
                     showGroqKeyDialog = false
                     hostToastMsg = "Groq API key cleared"
+                }
+            },
+            onClearGeminiKey = {
+                scope.launch {
+                    container.userPreferences.clearGeminiSession()
+                    showGroqKeyDialog = false
+                    hostToastMsg = "Gemini API key cleared"
                 }
             },
             onDismiss = { showGroqKeyDialog = false }
