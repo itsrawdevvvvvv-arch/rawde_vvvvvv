@@ -385,7 +385,7 @@ fun AssetLockerScreen(
                                             CircleActionButton(
                                                 icon = RawIconType.TRASH,
                                                 size = 36.dp,
-                                                isDanger = true,
+                                                iconTint = RawColors.ErrorCoral,
                                                 onClick = {
                                                     cacheManager.deleteCustomFont(fontFile.name)
                                                     customFontsList = cacheManager.listCustomFonts()

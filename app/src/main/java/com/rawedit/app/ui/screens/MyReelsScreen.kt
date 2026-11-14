@@ -268,7 +268,14 @@ fun MyReelsScreen(
                         CascadeSkewCard(index = idx) {
                             when (item) {
                                 is ProjectEntity -> {
-                                    val dismissState = rememberSwipeToDismissBoxState()
+                                    val dismissState = rememberSwipeToDismissBoxState(
+                                        confirmValueChange = { value ->
+                                            if (value == SwipeToDismissBoxValue.EndToStart) {
+                                                deleteProjectConfirmTarget = item
+                                                true
+                                            } else false
+                                        }
+                                    )
                                     LaunchedEffect(deleteProjectConfirmTarget) {
                                         if (deleteProjectConfirmTarget == null && dismissState.currentValue != SwipeToDismissBoxValue.Settled) {
                                             dismissState.reset()
@@ -277,11 +284,6 @@ fun MyReelsScreen(
                                     SwipeToDismissBox(
                                         state = dismissState,
                                         enableDismissFromStartToEnd = false,
-                                        onDismiss = { direction ->
-                                            if (direction == SwipeToDismissBoxValue.EndToStart) {
-                                                deleteProjectConfirmTarget = item
-                                            }
-                                        },
                                         backgroundContent = {
                                             Box(
                                                 modifier = Modifier
@@ -305,7 +307,14 @@ fun MyReelsScreen(
                                 }
 
                                 is VideoEntity -> {
-                                    val dismissState = rememberSwipeToDismissBoxState()
+                                    val dismissState = rememberSwipeToDismissBoxState(
+                                        confirmValueChange = { value ->
+                                            if (value == SwipeToDismissBoxValue.EndToStart) {
+                                                deleteVideoConfirmTarget = item
+                                                true
+                                            } else false
+                                        }
+                                    )
                                     LaunchedEffect(deleteVideoConfirmTarget) {
                                         if (deleteVideoConfirmTarget == null && dismissState.currentValue != SwipeToDismissBoxValue.Settled) {
                                             dismissState.reset()
@@ -314,11 +323,6 @@ fun MyReelsScreen(
                                     SwipeToDismissBox(
                                         state = dismissState,
                                         enableDismissFromStartToEnd = false,
-                                        onDismiss = { direction ->
-                                            if (direction == SwipeToDismissBoxValue.EndToStart) {
-                                                deleteVideoConfirmTarget = item
-                                            }
-                                        },
                                         backgroundContent = {
                                             Box(
                                                 modifier = Modifier

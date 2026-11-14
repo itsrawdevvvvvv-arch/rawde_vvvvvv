@@ -61,12 +61,6 @@ class GeminiWaterfallRouter(context: Context) {
     private val lastRequestTimeMs = mutableMapOf<String, Long>()
 
     companion object {
-        fun maskKey(key: String): String {
-            val k = key.trim()
-            if (k.length <= 8) return "\u2022\u2022\u2022\u2022"
-            return k.take(4) + "\u2022\u2022\u2022\u2022" + k.takeLast(4)
-        }
-
         val WORKHORSE_CHAIN = listOf(
             "gemini-3.5-flash-lite",
             "gemini-3.1-flash-lite",
@@ -93,12 +87,73 @@ class GeminiWaterfallRouter(context: Context) {
             else -> 12_000L                          // 5 RPM = 12s spacing
         }
 
+        fun dailyLimitForModel(modelId: String): Int = getDailyLimitForModel(modelId)
+
+        fun isValidApiKey(key: String): Boolean {
+            val clean = key.trim()
+            if (clean.startsWith("gsk_")) return false
+            if (clean.length < 20 || clean.length > 150) return false
+            return clean.startsWith("AIza") || clean.startsWith("AQ") || (clean.length >= 25 && !clean.contains(" "))
+        }
+
         fun maskApiKey(key: String): String {
             val clean = key.trim()
-            if (clean.length < 10) return "AIza...****"
+            if (clean.length < 10) return "••••"
             val prefix = clean.take(4)
             val suffix = clean.takeLast(4)
             return "$prefix...$suffix"
+        }
+
+        fun maskKey(key: String): String = maskApiKey(key)
+
+        fun computeNextPacificMidnightMs(nowMs: Long = System.currentTimeMillis()): Long {
+            val pacificZone = ZoneId.of("America/Los_Angeles")
+            val nowPacific = ZonedDateTime.ofInstant(java.time.Instant.ofEpochMilli(nowMs), pacificZone)
+            val nextMidnight = nowPacific.toLocalDate().plusDays(1).atStartOfDay(pacificZone)
+            return nextMidnight.toInstant().toEpochMilli()
+        }
+
+        fun buildGenerateContentPayload(
+            prompt: String,
+            systemInstruction: String? = null,
+            expectJson: Boolean = true,
+            images: List<GeminiImageInput> = emptyList()
+        ): String {
+            val userParts = JSONArray()
+            userParts.put(JSONObject().put("text", prompt))
+            for (img in images) {
+                userParts.put(
+                    JSONObject().put(
+                        "inlineData",
+                        JSONObject().apply {
+                            put("mimeType", img.mimeType)
+                            put("data", img.base64Data)
+                        }
+                    )
+                )
+            }
+
+            val payload = JSONObject().apply {
+                if (!systemInstruction.isNullOrBlank()) {
+                    put("systemInstruction", JSONObject().apply {
+                        put("parts", JSONArray().put(JSONObject().put("text", systemInstruction)))
+                    })
+                }
+                put("contents", JSONArray().put(
+                    JSONObject().apply {
+                        put("role", "user")
+                        put("parts", userParts)
+                    }
+                ))
+                put("generationConfig", JSONObject().apply {
+                    if (expectJson) {
+                        put("responseMimeType", "application/json")
+                    }
+                    // Minimal/zero thinking prevents 503 scheduling bottlenecks & timeouts
+                    put("thinkingConfig", JSONObject().put("thinkingBudget", 0))
+                })
+            }
+            return payload.toString()
         }
     }
 
@@ -106,12 +161,7 @@ class GeminiWaterfallRouter(context: Context) {
      * Computes epoch millis of the next Midnight Pacific Time (America/Los_Angeles) reset.
      * Corresponds to 1:30 PM Indian Standard Time (IST).
      */
-    fun getNextPacificMidnightMillis(): Long {
-        val pacificZone = ZoneId.of("America/Los_Angeles")
-        val nowPacific = ZonedDateTime.now(pacificZone)
-        val nextMidnight = nowPacific.toLocalDate().plusDays(1).atStartOfDay(pacificZone)
-        return nextMidnight.toInstant().toEpochMilli()
-    }
+    fun getNextPacificMidnightMillis(): Long = computeNextPacificMidnightMs()
 
     fun checkAndResetDailyCountersIfNeeded() {
         val now = System.currentTimeMillis()
@@ -167,9 +217,9 @@ class GeminiWaterfallRouter(context: Context) {
         images: List<GeminiImageInput> = emptyList()
     ): Result<GeminiGenerationResult> = withContext(Dispatchers.IO) {
         val cleanKey = apiKey.trim()
-        if (!cleanKey.startsWith("AIza") || cleanKey.length < 30) {
+        if (!isValidApiKey(cleanKey)) {
             return@withContext Result.failure(
-                IllegalArgumentException("Invalid Google AI Studio API Key format (must start with AIza).")
+                IllegalArgumentException("Invalid Google AI Studio API Key format (must start with AIza or AQ).")
             )
         }
 
@@ -208,44 +258,11 @@ class GeminiWaterfallRouter(context: Context) {
                     setRequestProperty("x-goog-api-key", cleanKey)
                 }
 
-                val userParts = JSONArray()
-                userParts.put(JSONObject().put("text", prompt))
-                for (img in images) {
-                    userParts.put(
-                        JSONObject().put(
-                            "inlineData",
-                            JSONObject().apply {
-                                put("mimeType", img.mimeType)
-                                put("data", img.base64Data)
-                            }
-                        )
-                    )
-                }
-
-                val payload = JSONObject().apply {
-                    if (!systemInstruction.isNullOrBlank()) {
-                        put("systemInstruction", JSONObject().apply {
-                            put("parts", JSONArray().put(JSONObject().put("text", systemInstruction)))
-                        })
-                    }
-                    put("contents", JSONArray().put(
-                        JSONObject().apply {
-                            put("role", "user")
-                            put("parts", userParts)
-                        }
-                    ))
-                    put("generationConfig", JSONObject().apply {
-                        if (expectJson) {
-                            put("responseMimeType", "application/json")
-                        }
-                        // Minimal/zero thinking prevents 503 scheduling bottlenecks & timeouts
-                        put("thinkingConfig", JSONObject().put("thinkingBudget", 0))
-                    })
-                }
+                val payloadString = buildGenerateContentPayload(prompt, systemInstruction, expectJson, images)
 
                 try {
                     conn.outputStream.use { os ->
-                        os.write(payload.toString().toByteArray(Charsets.UTF_8))
+                        os.write(payloadString.toByteArray(Charsets.UTF_8))
                     }
                     val status = conn.responseCode
 

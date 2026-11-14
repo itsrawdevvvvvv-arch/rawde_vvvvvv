@@ -155,8 +155,8 @@ fun KeyframeSheetScreen(
     val haptic = LocalHapticFeedback.current
     val scope = rememberCoroutineScope()
     val geminiRouter = remember { GeminiWaterfallRouter(context) }
-    val animEnabled = rememberAnimationsEnabled()
     val hasActiveAi = (userProfile?.hasActiveAiKey ?: false) || apiKey.isNotBlank()
+    val animEnabled = rememberAnimationsEnabled()
     val gridState = rememberLazyGridState()
 
     var resolvedHtml by remember(project.id) {

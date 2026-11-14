@@ -27,10 +27,15 @@ import android.view.ViewGroup
 import android.view.WindowManager
 import android.webkit.WebView
 import android.widget.FrameLayout
-import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.width
 import com.rawedit.app.data.CacheManager
 import com.rawedit.app.render.LocalAssetServer
+import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeoutOrNull
+import kotlinx.serialization.Serializable
+import kotlinx.serialization.json.Json
 import java.io.ByteArrayOutputStream
 import java.io.File
 import java.io.FileOutputStream
@@ -39,13 +44,6 @@ import java.util.zip.ZipEntry
 import java.util.zip.ZipOutputStream
 import kotlin.math.abs
 import kotlin.math.roundToInt
-import kotlinx.coroutines.CompletableDeferred
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.delay
-import kotlinx.coroutines.withContext
-import kotlinx.coroutines.withTimeoutOrNull
-import kotlinx.serialization.Serializable
-import kotlinx.serialization.json.Json
 
 enum class SheetSamplingMode(val label: String, val stepSec: Double, val maxFrames: Int) {
     STANDARD_05S("Every 0.5s", 0.5, 220),
@@ -613,7 +611,9 @@ $htmlSection
                 if (rect != null) sampleRects.add(rect)
                 addTokensFrom(msg, sel, s.timeSec)
                 val rectStr = if (rect != null) {
-                    "${rect.left.roundToInt()},${rect.top.roundToInt()},${rect.width().roundToInt()}x${rect.height().roundToInt()}"
+                    val w = (rect.right - rect.left).roundToInt()
+                    val h = (rect.bottom - rect.top).roundToInt()
+                    "${rect.left.roundToInt()},${rect.top.roundToInt()},${w}x${h}"
                 } else {
                     "0,0,0x0"
                 }

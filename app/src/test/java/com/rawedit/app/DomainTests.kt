@@ -6,6 +6,7 @@ import com.rawedit.app.domain.CodeValidator
 import com.rawedit.app.domain.CutoutAuditMath
 import com.rawedit.app.domain.CutoutAuditResult
 import com.rawedit.app.domain.CutoutPadRatios
+import com.rawedit.app.domain.GeminiImageInput
 import com.rawedit.app.domain.GeminiRouteMode
 import com.rawedit.app.domain.GeminiWaterfallRouter
 import com.rawedit.app.domain.GroqApiException
@@ -735,10 +736,13 @@ Enjoy!
 
         // 3. API Key Validation & Masking
         assertTrue(GeminiWaterfallRouter.isValidApiKey("AIzaSyB12345678901234567890123456789xQ2"))
+        assertTrue(GeminiWaterfallRouter.isValidApiKey("AQ1234567890123456789012345678901234xQ2"))
         assertFalse(GeminiWaterfallRouter.isValidApiKey("gsk_1234567890"))
         assertFalse(GeminiWaterfallRouter.isValidApiKey("AIzaShort"))
+        assertFalse(GeminiWaterfallRouter.isValidApiKey("AQShort"))
         assertEquals("AIza...9xQ2", GeminiWaterfallRouter.maskApiKey("AIzaSyB12345678901234567890123456789xQ2"))
         assertEquals("AIza...9xQ2", GeminiWaterfallRouter.maskKey("AIzaSyB12345678901234567890123456789xQ2"))
+        assertEquals("AQ12...4xQ2", GeminiWaterfallRouter.maskApiKey("AQ1234567890123456789012345678901234xQ2"))
 
         // 4. Pacific Midnight Computation (resets daily in future)
         val nowMs = System.currentTimeMillis()
@@ -752,7 +756,7 @@ Enjoy!
             prompt = "Test prompt",
             systemInstruction = "You are a helper",
             expectJson = true,
-            images = emptyList()
+            images = emptyList<GeminiImageInput>()
         )
         assertTrue(payload.contains("\"thinkingBudget\":0") || payload.contains("\"thinkingBudget\": 0"))
         assertTrue(payload.contains("application/json"))

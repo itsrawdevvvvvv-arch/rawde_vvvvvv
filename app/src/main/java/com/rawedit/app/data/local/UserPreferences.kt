@@ -46,7 +46,7 @@ data class UserProfile(
         get() = groqApiKey.isNotBlank()
 
     val hasGeminiKey: Boolean
-        get() = geminiApiKey.isNotBlank() && geminiApiKey.startsWith("AIza")
+        get() = geminiApiKey.isNotBlank() && (geminiApiKey.startsWith("AIza") || geminiApiKey.startsWith("AQ") || geminiApiKey.length >= 20)
 
     fun resolvedAiProvider(): AiProvider = when (aiProviderRoute) {
         AiProvider.GROQ_CLOUD.id -> AiProvider.GROQ_CLOUD

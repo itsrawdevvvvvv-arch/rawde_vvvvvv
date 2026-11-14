@@ -153,16 +153,16 @@ fun AiQuotaDialog(
 
     // Initial check of Gemini model health if key is present
     LaunchedEffect(currentGeminiKey) {
-        if (currentGeminiKey.isNotBlank() && currentGeminiKey.startsWith("AIza")) {
+        if (currentGeminiKey.isNotBlank() && GeminiWaterfallRouter.isValidApiKey(currentGeminiKey)) {
             geminiHealthList = geminiRouter.testApiKeyHealth(currentGeminiKey)
         }
     }
 
     fun runGeminiTestAndSave() {
         val clean = geminiKeyDraft.trim()
-        if (!clean.startsWith("AIza") || clean.length < 30) {
+        if (!GeminiWaterfallRouter.isValidApiKey(clean)) {
             isStatusError = true
-            statusMessage = "Gemini key must start with 'AIza' (get it free at aistudio.google.com)."
+            statusMessage = "Gemini key must start with 'AIza' or 'AQ' (get it free at aistudio.google.com)."
             return
         }
         geminiTesting = true
@@ -416,8 +416,8 @@ fun AiQuotaDialog(
                         singleLine = true,
                         visualTransformation = if (revealGeminiKey) VisualTransformation.None else PasswordVisualTransformation(),
                         keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Ascii),
-                        label = { Text("Gemini API Key (AIza...)", fontSize = 11.5.sp) },
-                        placeholder = { Text("AIzaSy...", color = EduWaveColors.TextMuted, fontSize = 13.sp) },
+                        label = { Text("Gemini API Key (AIza... / AQ...)", fontSize = 11.5.sp) },
+                        placeholder = { Text("AIzaSy... or AQ...", color = EduWaveColors.TextMuted, fontSize = 13.sp) },
                         trailingIcon = {
                             Row(verticalAlignment = Alignment.CenterVertically) {
                                 Box(
@@ -426,7 +426,7 @@ fun AiQuotaDialog(
                                         .background(EduWaveColors.CardBg)
                                         .clickable {
                                             val text = clipboardManager.getText()?.text.orEmpty().trim()
-                                            if (text.startsWith("AIza")) {
+                                            if (text.startsWith("AIza") || text.startsWith("AQ") || text.length >= 20) {
                                                 geminiKeyDraft = text
                                             }
                                         }

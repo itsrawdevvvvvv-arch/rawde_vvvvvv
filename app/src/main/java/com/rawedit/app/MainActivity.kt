@@ -784,7 +784,7 @@ private fun MainAuthenticatedHost(
                 scope.launch {
                     container.userPreferences.saveGeminiApiKey(geminiKey)
                     showGroqKeyDialog = false
-                    hostToastMsg = "Gemini key saved (${GeminiWaterfallRouter.maskKey(geminiKey)})"
+                    hostToastMsg = "Gemini key saved (${GeminiWaterfallRouter.maskApiKey(geminiKey)})"
                 }
             },
             onSaveAiProvider = { providerId ->

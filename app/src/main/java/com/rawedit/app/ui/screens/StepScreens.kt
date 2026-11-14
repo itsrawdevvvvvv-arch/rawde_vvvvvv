@@ -112,12 +112,12 @@ import com.rawedit.app.ui.theme.BricolageFamily
 import com.rawedit.app.ui.theme.JetBrainsMonoFamily
 import com.rawedit.app.ui.theme.RawColors
 import com.rawedit.app.ui.theme.RawTypography
-import java.io.File
-import java.util.zip.ZipInputStream
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import java.io.File
+import java.util.zip.ZipInputStream
 
 private const val LARGE_EDITOR_THRESHOLD = 15_000
 private const val HELPER_ENTRY_PATH = "kinetic-explainer-style/engine/raw-helpers.js"
@@ -991,7 +991,7 @@ fun CopyPromptScreen(
                             .background(if (isSel) RawColors.AccentSoft else RawColors.CardSurface)
                             .border(
                                 width = if (isSel) 2.dp else 1.dp,
-                                color = if (isSel) RawColors.Tan else RawColors.CardBorder,
+                                color = if (isSel) RawColors.Tan else RawColors.Divider,
                                 shape = RoundedCornerShape(18.dp)
                             )
                             .clickable {
