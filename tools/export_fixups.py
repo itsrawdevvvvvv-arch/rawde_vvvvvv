@@ -234,6 +234,48 @@ def fix_card_border_color():
         print("  RawColors.CardBorder added")
 
 
+
+def fix_ai_router_compat():
+    """New AI router files and their call sites drift apart every export."""
+    # maskKey helper used by MainActivity for the saved-key toast
+    p = root / "app/src/main/java/com/rawedit/app/domain/GeminiWaterfallRouter.kt"
+    s = read(p)
+    if s is not None and "fun maskKey" not in s:
+        s = s.replace("    companion object {", """    companion object {
+        fun maskKey(key: String): String {
+            val k = key.trim()
+            if (k.length <= 8) return "\\u2022\\u2022\\u2022\\u2022"
+            return k.take(4) + "\\u2022\\u2022\\u2022\\u2022" + k.takeLast(4)
+        }
+""", 1)
+        p.write_text(s)
+        print("  GeminiWaterfallRouter.maskKey added")
+
+    # hasActiveAi used outside the block that declares it
+    p = root / "app/src/main/java/com/rawedit/app/ui/screens/KeyframeSheetScreen.kt"
+    s = read(p)
+    if s is not None and "hasActiveAi" in s:
+        decl = "val hasActiveAi = (userProfile?.hasActiveAiKey ?: false) || apiKey.isNotBlank()"
+        hoisted = f"\n    {decl}"
+        if hoisted not in s:
+            anchor = "    val geminiRouter = remember { GeminiWaterfallRouter(context) }"
+            if anchor in s:
+                s = s.replace(anchor, anchor + hoisted, 1)
+                # drop the deeper duplicate declaration
+                s = re.sub(r'\n[ \t]{8,}' + re.escape(decl), '', s, count=1)
+                p.write_text(s)
+                print("  hasActiveAi hoisted to composable scope")
+
+    # UnifiedAiRouter.autoFixLoop exposes onRound, not onProgress
+    p = root / "app/src/main/java/com/rawedit/app/ui/screens/KeyframeSheetScreen.kt"
+    s = read(p)
+    if s is not None and "onProgress = { fixProgress = it }" in s:
+        s = s.replace("onProgress = { fixProgress = it }",
+                      'onRound = { round, issuesNow ->\n                                                                fixProgress = "Round $round: $issuesNow issues left"\n                                                            }', 1)
+        p.write_text(s)
+        print("  autoFixLoop onProgress -> onRound")
+
+
 STEPS = [
     fix_version,
     fix_navigation,
@@ -244,6 +286,7 @@ STEPS = [
     fix_assetlocker_context,
     fix_circle_button_danger,
     fix_card_border_color,
+    fix_ai_router_compat,
 ]
 
 for step in STEPS:

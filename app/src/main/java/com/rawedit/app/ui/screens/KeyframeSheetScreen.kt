@@ -156,6 +156,7 @@ fun KeyframeSheetScreen(
     val scope = rememberCoroutineScope()
     val geminiRouter = remember { GeminiWaterfallRouter(context) }
     val animEnabled = rememberAnimationsEnabled()
+    val hasActiveAi = (userProfile?.hasActiveAiKey ?: false) || apiKey.isNotBlank()
     val gridState = rememberLazyGridState()
 
     var resolvedHtml by remember(project.id) {
@@ -788,7 +789,6 @@ fun KeyframeSheetScreen(
                                             modifier = Modifier.weight(1f)
                                         ) {
                                             RawIcon(RawIconType.SPARK, size = 18.dp, tint = RawColors.Tan)
-                                            val hasActiveAi = (userProfile?.hasActiveAiKey ?: false) || apiKey.isNotBlank()
                                             Column {
                                                 Text(
                                                     text = "AI Frame Review & Auto-Fix",
@@ -969,7 +969,9 @@ fun KeyframeSheetScreen(
                                                                     cancelled = { isScreenDisposed }
                                                                 ).samples
                                                             },
-                                                            onProgress = { fixProgress = it }
+                                                            onRound = { round, issuesNow ->
+                                                                fixProgress = "Round $round: $issuesNow issues left"
+                                                            }
                                                         )
                                                     } else {
                                                         GroqClient.autoFixLoop(

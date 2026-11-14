@@ -61,6 +61,12 @@ class GeminiWaterfallRouter(context: Context) {
     private val lastRequestTimeMs = mutableMapOf<String, Long>()
 
     companion object {
+        fun maskKey(key: String): String {
+            val k = key.trim()
+            if (k.length <= 8) return "\u2022\u2022\u2022\u2022"
+            return k.take(4) + "\u2022\u2022\u2022\u2022" + k.takeLast(4)
+        }
+
         val WORKHORSE_CHAIN = listOf(
             "gemini-3.5-flash-lite",
             "gemini-3.1-flash-lite",
