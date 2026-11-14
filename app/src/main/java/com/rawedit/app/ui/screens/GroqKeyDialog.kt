@@ -159,7 +159,7 @@ fun AiQuotaDialog(
     }
 
     fun runGeminiTestAndSave() {
-        val clean = geminiKeyDraft.trim()
+        val clean = GeminiWaterfallRouter.sanitizeApiKey(geminiKeyDraft)
         if (!GeminiWaterfallRouter.isValidApiKey(clean)) {
             isStatusError = true
             statusMessage = "Gemini key must start with 'AIza' or 'AQ' (get it free at aistudio.google.com)."
@@ -180,9 +180,21 @@ fun AiQuotaDialog(
                 statusMessage = "Gemini Free Key Verified & Saved ($masked) • 1,040 RPD Waterfall Active"
             } else {
                 isStatusError = true
-                val errLabel = health.firstOrNull()?.statusLabel ?: "Verification failed."
+                val errLabel = health.firstOrNull { !it.isAvailable }?.statusLabel
+                    ?: health.firstOrNull()?.statusLabel
+                    ?: "Verification failed."
                 statusMessage = "Gemini Key verification failed: $errLabel"
             }
+        }
+    }
+
+    fun forceSaveGeminiKey() {
+        val clean = GeminiWaterfallRouter.sanitizeApiKey(geminiKeyDraft)
+        if (clean.isNotBlank()) {
+            onSaveGeminiKey(clean)
+            isStatusError = false
+            val masked = GeminiWaterfallRouter.maskApiKey(clean)
+            statusMessage = "Gemini Key Saved ($masked) • Free Waterfall Active"
         }
     }
 
@@ -425,9 +437,10 @@ fun AiQuotaDialog(
                                         .clip(CircleShape)
                                         .background(EduWaveColors.CardBg)
                                         .clickable {
-                                            val text = clipboardManager.getText()?.text.orEmpty().trim()
-                                            if (text.startsWith("AIza") || text.startsWith("AQ") || text.length >= 20) {
-                                                geminiKeyDraft = text
+                                            val text = clipboardManager.getText()?.text.orEmpty()
+                                            val sanitized = GeminiWaterfallRouter.sanitizeApiKey(text)
+                                            if (sanitized.startsWith("AIza") || sanitized.startsWith("AQ") || sanitized.length >= 20) {
+                                                geminiKeyDraft = sanitized
                                             }
                                         }
                                         .padding(horizontal = 8.dp, vertical = 4.dp)
@@ -560,6 +573,16 @@ fun AiQuotaDialog(
                         enabled = !geminiTesting && !groqTesting,
                         onClick = { runGeminiTestAndSave() }
                     )
+
+                    // Fallback button if Google API check had a transient error or propagation delay
+                    if (isStatusError && geminiKeyDraft.isNotBlank() && !geminiTesting) {
+                        RawSecondaryButton(
+                            text = "Save Key Anyway (Skip Verification)",
+                            height = 38.dp,
+                            enabled = !geminiTesting,
+                            onClick = { forceSaveGeminiKey() }
+                        )
+                    }
 
                     if (hasExistingGeminiKey) {
                         RawSecondaryButton(

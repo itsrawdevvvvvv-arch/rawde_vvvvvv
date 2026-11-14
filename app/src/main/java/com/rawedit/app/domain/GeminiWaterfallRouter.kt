@@ -87,17 +87,27 @@ class GeminiWaterfallRouter(context: Context) {
             else -> 12_000L                          // 5 RPM = 12s spacing
         }
 
+        fun sanitizeApiKey(raw: String): String {
+            return raw.trim()
+                .removeSurrounding("\"")
+                .removeSurrounding("'")
+                .replace("\u200B", "") // zero-width space
+                .replace("\uFEFF", "") // zero-width BOM
+                .replace("\u00A0", "") // non-breaking space
+                .filter { !it.isWhitespace() }
+        }
+
         fun dailyLimitForModel(modelId: String): Int = getDailyLimitForModel(modelId)
 
         fun isValidApiKey(key: String): Boolean {
-            val clean = key.trim()
+            val clean = sanitizeApiKey(key)
             if (clean.startsWith("gsk_")) return false
             if (clean.length < 20 || clean.length > 150) return false
             return clean.startsWith("AIza") || clean.startsWith("AQ") || (clean.length >= 25 && !clean.contains(" "))
         }
 
         fun maskApiKey(key: String): String {
-            val clean = key.trim()
+            val clean = sanitizeApiKey(key)
             if (clean.length < 10) return "••••"
             val prefix = clean.take(4)
             val suffix = clean.takeLast(4)
@@ -216,7 +226,7 @@ class GeminiWaterfallRouter(context: Context) {
         expectJson: Boolean = true,
         images: List<GeminiImageInput> = emptyList()
     ): Result<GeminiGenerationResult> = withContext(Dispatchers.IO) {
-        val cleanKey = apiKey.trim()
+        val cleanKey = sanitizeApiKey(apiKey)
         if (!isValidApiKey(cleanKey)) {
             return@withContext Result.failure(
                 IllegalArgumentException("Invalid Google AI Studio API Key format (must start with AIza or AQ).")
@@ -247,8 +257,11 @@ class GeminiWaterfallRouter(context: Context) {
                 }
                 if (waitMs > 0L) delay(waitMs)
 
+                val encodedKey = try {
+                    java.net.URLEncoder.encode(cleanKey, "UTF-8")
+                } catch (_: Exception) { cleanKey }
                 val endpoint =
-                    "https://generativelanguage.googleapis.com/v1beta/models/$model:generateContent"
+                    "https://generativelanguage.googleapis.com/v1beta/models/$model:generateContent?key=$encodedKey"
                 val conn = (URL(endpoint).openConnection() as HttpURLConnection).apply {
                     requestMethod = "POST"
                     connectTimeout = 20_000
@@ -343,34 +356,38 @@ class GeminiWaterfallRouter(context: Context) {
     }
 
     /**
-     * Lightweight 5-token health & key verification ping for the Profile Tab Modal.
+     * Lightweight health & key verification ping for the Profile Tab Modal.
+     * Uses minimal payload to prevent 400 errors from unsupported generationConfig fields.
      */
     suspend fun testApiKeyHealth(apiKey: String): List<ModelHealthStatus> = withContext(Dispatchers.IO) {
-        val testModels = listOf("gemini-3.5-flash-lite", "gemini-3.8-flash")
+        val cleanKey = sanitizeApiKey(apiKey)
+        val testModels = listOf("gemini-2.5-flash", "gemini-3.5-flash-lite", "gemini-3.8-flash")
         val results = mutableListOf<ModelHealthStatus>()
 
         for (model in testModels) {
             val limit = getDailyLimitForModel(model)
             val used = getUsedToday(model)
+            val encodedKey = try {
+                java.net.URLEncoder.encode(cleanKey, "UTF-8")
+            } catch (_: Exception) { cleanKey }
+
             val endpoint =
-                "https://generativelanguage.googleapis.com/v1beta/models/$model:generateContent"
+                "https://generativelanguage.googleapis.com/v1beta/models/$model:generateContent?key=$encodedKey"
             val conn = (URL(endpoint).openConnection() as HttpURLConnection).apply {
                 requestMethod = "POST"
                 connectTimeout = 12_000
                 readTimeout = 20_000
                 doOutput = true
                 setRequestProperty("Content-Type", "application/json; charset=UTF-8")
-                setRequestProperty("x-goog-api-key", apiKey.trim())
+                setRequestProperty("x-goog-api-key", cleanKey)
             }
 
+            // Minimal payload without thinkingConfig or maxOutputTokens
+            // so all Gemini models accept the request without 400 INVALID_ARGUMENT
             val pingPayload = JSONObject().apply {
                 put("contents", JSONArray().put(
-                    JSONObject().put("parts", JSONArray().put(JSONObject().put("text", "Reply OK")))
+                    JSONObject().put("parts", JSONArray().put(JSONObject().put("text", "ping")))
                 ))
-                put("generationConfig", JSONObject().apply {
-                    put("maxOutputTokens", 5)
-                    put("thinkingConfig", JSONObject().put("thinkingBudget", 0))
-                })
             }
 
             try {
@@ -380,13 +397,30 @@ class GeminiWaterfallRouter(context: Context) {
                     conn.errorStream?.bufferedReader()?.use { it.readText() }.orEmpty()
                 } else ""
 
+                val errJson = try { JSONObject(err) } catch (_: Exception) { null }
+                val errMsg = errJson?.optJSONObject("error")?.optString("message").orEmpty()
+                val errReason = errJson?.optJSONObject("error")
+                    ?.optJSONArray("details")
+                    ?.optJSONObject(0)
+                    ?.optString("reason").orEmpty()
+
+                val isKeyInvalid = code == 400 && (
+                    errReason == "API_KEY_INVALID" ||
+                    errMsg.contains("API key not valid", ignoreCase = true) ||
+                    errMsg.contains("API_KEY_INVALID", ignoreCase = true) ||
+                    err.contains("API_KEY_INVALID")
+                )
+
                 val statusLabel = when {
                     code == 200 -> "READY"
                     code == 503 -> "503 HIGH DEMAND (AUTO-FALLBACK READY)"
                     code == 429 && (err.contains("PerDay") || err.contains("limit: 0")) ->
                         "DAILY QUOTA FULL (RESETS 1:30 PM IST)"
                     code == 429 -> "RPM BUSY (WAIT 10S)"
-                    code == 400 && err.contains("API_KEY_INVALID") -> "INVALID API KEY"
+                    isKeyInvalid -> "INVALID KEY (Check Google AI Studio)"
+                    code == 403 && errMsg.contains("disabled", ignoreCase = true) ->
+                        "API NOT ENABLED IN GCP"
+                    errMsg.isNotBlank() -> errMsg.take(65)
                     else -> "HTTP $code"
                 }
 
