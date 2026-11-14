@@ -42,6 +42,21 @@ class RawEditRepository(
         projectDao.update(project.copy(updatedAt = System.currentTimeMillis()))
     }
 
+    suspend fun insertProject(project: ProjectEntity): Long {
+        return projectDao.insert(project)
+    }
+
+    suspend fun updateHtmlCode(projectId: Long, html: String) {
+        val proj = projectDao.getById(projectId) ?: return
+        val stored = cacheManager.persistHtmlCode(projectId, html)
+        projectDao.update(
+            proj.copy(
+                code = stored,
+                updatedAt = System.currentTimeMillis()
+            )
+        )
+    }
+
     suspend fun deleteProject(project: ProjectEntity) {
         if (project.audioUri.isNotBlank()) {
             runCatching { File(project.audioUri).delete() }

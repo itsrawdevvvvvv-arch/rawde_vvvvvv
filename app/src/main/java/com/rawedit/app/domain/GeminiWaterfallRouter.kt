@@ -155,7 +155,8 @@ class GeminiWaterfallRouter(context: Context) {
             prompt: String,
             systemInstruction: String? = null,
             expectJson: Boolean = true,
-            images: List<GeminiImageInput> = emptyList()
+            images: List<GeminiImageInput> = emptyList(),
+            maxOutputTokens: Int? = null
         ): String {
             val userParts = JSONArray()
             userParts.put(JSONObject().put("text", prompt))
@@ -186,6 +187,9 @@ class GeminiWaterfallRouter(context: Context) {
                 put("generationConfig", JSONObject().apply {
                     if (expectJson) {
                         put("responseMimeType", "application/json")
+                    }
+                    if (maxOutputTokens != null && maxOutputTokens > 0) {
+                        put("maxOutputTokens", maxOutputTokens)
                     }
                     // Minimal/zero thinking prevents 503 scheduling bottlenecks & timeouts
                     put("thinkingConfig", JSONObject().put("thinkingBudget", 0))
@@ -252,7 +256,8 @@ class GeminiWaterfallRouter(context: Context) {
         systemInstruction: String? = null,
         routeMode: GeminiRouteMode = GeminiRouteMode.JSON_WORKHORSE,
         expectJson: Boolean = true,
-        images: List<GeminiImageInput> = emptyList()
+        images: List<GeminiImageInput> = emptyList(),
+        maxOutputTokens: Int? = null
     ): Result<GeminiGenerationResult> = withContext(Dispatchers.IO) {
         val cleanKey = sanitizeApiKey(apiKey)
         if (!isValidApiKey(cleanKey)) {
@@ -299,7 +304,13 @@ class GeminiWaterfallRouter(context: Context) {
                     setRequestProperty("x-goog-api-key", cleanKey)
                 }
 
-                val payloadString = buildGenerateContentPayload(prompt, systemInstruction, expectJson, images)
+                val payloadString = buildGenerateContentPayload(
+                    prompt = prompt,
+                    systemInstruction = systemInstruction,
+                    expectJson = expectJson,
+                    images = images,
+                    maxOutputTokens = maxOutputTokens
+                )
 
                 try {
                     conn.outputStream.use { os ->
@@ -731,13 +742,15 @@ class GeminiWaterfallRouter(context: Context) {
             }
 
             val prompt = """
-                You are a professional audio subtitler.
-                Transcribe the spoken words in this audio into standard SubRip (.srt) subtitle format.
-                Requirements:
-                1. Every entry MUST have a sequential cue number (1, 2, 3...), timestamp line (HH:MM:SS,mmm --> HH:MM:SS,mmm), and the spoken words.
-                2. Keep cues short: 1 to 4 words per cue for kinetic typography pacing.
-                3. The timing must match the audio timestamps accurately.
-                4. Output ONLY the raw SRT text, no explanations, no markdown fences.
+                You are a master audio subtitler and speech-to-text expert.
+                Transcribe 100% of all spoken words across the ENTIRE duration of this audio file into standard SubRip (.srt) subtitle format.
+
+                CRITICAL INSTRUCTIONS FOR FULL 100% COMPLETION:
+                1. FULL DURATION: Transcribe the complete recording from the very first spoken second (00:00:00,000) to the absolute end timestamp of the audio.
+                2. NEVER TRUNCATE: Do NOT stop halfway, do NOT summarize, do NOT omit any words or sentences. Transcribe every single spoken beat until the audio finishes.
+                3. SEQUENTIAL CUES: Every entry MUST have a sequential cue number (1, 2, 3...), timestamp line (HH:MM:SS,mmm --> HH:MM:SS,mmm), and the exact spoken text.
+                4. KINETIC PACING: Keep cues short (1 to 4 words per cue) with accurate start and end timestamps matching the spoken cadence.
+                5. RAW OUTPUT ONLY: Output ONLY the raw SRT text, no explanations, no commentary, no markdown fences.
             """.trimIndent()
 
             val res = generate(
@@ -745,7 +758,8 @@ class GeminiWaterfallRouter(context: Context) {
                 prompt = prompt,
                 routeMode = GeminiRouteMode.JSON_WORKHORSE,
                 expectJson = false,
-                images = listOf(GeminiImageInput(base64Data = b64, mimeType = mime))
+                images = listOf(GeminiImageInput(base64Data = b64, mimeType = mime)),
+                maxOutputTokens = 8192
             ).getOrThrow()
 
             val rawSrt = res.text

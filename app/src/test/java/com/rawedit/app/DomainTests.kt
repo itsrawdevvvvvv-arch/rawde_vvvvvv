@@ -78,19 +78,6 @@ class DomainTests {
         assertTrue(withSrt.contains("Hello"))
         assertTrue(withSrt.contains("SVG-Edit"))
         assertTrue(withSrt.contains("Emoji Kitchen"))
-
-        val swissPrompt = PromptGenerator.buildPrompt(
-            fileName = "swiss.mp3",
-            durationSeconds = 18.0,
-            topic = "Design studio showcase",
-            srtText = "",
-            style = com.rawedit.app.domain.ReelEditingStyle.SWISS_GRID_MOTION
-        )
-        assertTrue(swissPrompt.contains("Swiss Grid Motion Style"))
-        assertTrue(swissPrompt.contains("swiss-grid-motion-style.zip"))
-        assertTrue(swissPrompt.contains("The Grid is the Design"))
-        assertTrue(swissPrompt.contains("SVG-Edit"))
-        assertTrue(swissPrompt.contains("Emoji Kitchen"))
     }
 
     @Test

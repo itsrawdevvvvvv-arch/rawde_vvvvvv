@@ -79,6 +79,7 @@ import com.rawedit.app.ui.motion.RawEasings
 import com.rawedit.app.ui.motion.TiltedAccentPill
 import com.rawedit.app.ui.motion.rememberAnimationsEnabled
 import com.rawedit.app.ui.theme.BricolageFamily
+import com.rawedit.app.ui.theme.JetBrainsMonoFamily
 import com.rawedit.app.ui.theme.RawColors
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -118,7 +119,8 @@ private fun Modifier.vhRise(
 fun HomeScreen(
     userProfile: UserProfile,
     reelsCount: Int,
-    onStartNewReel: (Offset) -> Unit
+    onStartNewReel: (Offset) -> Unit,
+    onOpenChatbot: () -> Unit = {}
 ) {
     val animEnabled = rememberAnimationsEnabled()
     val scrollState = rememberScrollState()
@@ -360,7 +362,57 @@ fun HomeScreen(
                     )
                 }
 
-                Spacer(modifier = Modifier.height(6.dp))
+                Spacer(modifier = Modifier.height(10.dp))
+
+                // AI Chatbot Quick Action
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(20.dp))
+                        .background(RawColors.CardSurface)
+                        .clickable(onClick = onOpenChatbot)
+                        .padding(horizontal = 14.dp, vertical = 11.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(10.dp)
+                    ) {
+                        RawPixelMascot(kind = PixelMascotKind.LENS_BOT, size = 26.dp)
+                        Column {
+                            Text(
+                                text = "RawEdit Copilot",
+                                fontFamily = BricolageFamily,
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 14.5.sp,
+                                color = RawColors.TextPrimary
+                            )
+                            Text(
+                                text = "Brainstorm reel ideas, tweak prompts & GitHub tools",
+                                fontFamily = JetBrainsMonoFamily,
+                                fontSize = 11.sp,
+                                color = RawColors.TextMuted
+                            )
+                        }
+                    }
+                    Box(
+                        modifier = Modifier
+                            .clip(CircleShape)
+                            .background(RawColors.AccentSoft)
+                            .padding(horizontal = 10.dp, vertical = 5.dp)
+                    ) {
+                        Text(
+                            text = "Chat AI",
+                            fontFamily = JetBrainsMonoFamily,
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 11.sp,
+                            color = RawColors.Tan
+                        )
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(10.dp))
 
                 // Interactive slide-to-start bar (#eslide + #eknob)
                 HomeSlideCreateBar(

@@ -68,11 +68,15 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.zIndex
 import androidx.core.content.FileProvider
+import android.content.Intent
 import com.rawedit.app.BuildConfig
 import com.rawedit.app.data.CacheManager
+import com.rawedit.app.data.local.UserPreferences
 import com.rawedit.app.data.local.UserProfile
 import com.rawedit.app.data.local.VideoEntity
+import com.rawedit.app.data.repository.RawEditRepository
 import com.rawedit.app.domain.AiProvider
+import com.rawedit.app.domain.BackupRestoreManager
 import com.rawedit.app.domain.GeminiTaskRoute
 import com.rawedit.app.domain.GroqCodec
 import com.rawedit.app.ui.components.BigPrimaryButton
@@ -108,7 +112,10 @@ fun ProfileScreen(
     onUpdatePhoto: (String?) -> Unit,
     onOpenGroqKey: () -> Unit,
     onSwitchGroqKey: () -> Unit,
-    onRefreshGroqQuota: () -> Unit
+    onRefreshGroqQuota: () -> Unit,
+    onUpdateGithubToken: (String) -> Unit = {},
+    repository: RawEditRepository? = null,
+    userPreferences: UserPreferences? = null
 ) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
@@ -122,8 +129,51 @@ fun ProfileScreen(
     var pendingCropBitmap by remember { mutableStateOf<Bitmap?>(null) }
     var cameraTempUri by remember { mutableStateOf<Uri?>(null) }
 
-    var cacheSizeBytes by remember { mutableLongStateOf(0L) }
+    var githubTokenDraft by remember(userProfile.githubAccessToken) { mutableStateOf(userProfile.githubAccessToken) }
+    var editingGithubToken by remember { mutableStateOf(false) }
+    var customFontsList by remember { mutableStateOf(cacheManager.listCustomFonts()) }
+    var backupBusy by remember { mutableStateOf(false) }
     var toastMsg by remember { mutableStateOf<String?>(null) }
+
+    val fontPickerLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.OpenDocument()
+    ) { uri: Uri? ->
+        if (uri != null) {
+            val res = cacheManager.importCustomFont(uri)
+            res.onSuccess { f ->
+                customFontsList = cacheManager.listCustomFonts()
+                toastMsg = "Imported font: ${f.name}"
+            }.onFailure { err ->
+                toastMsg = err.message ?: "Failed to import font."
+            }
+        }
+    }
+
+    val backupImportLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.OpenDocument()
+    ) { uri: Uri? ->
+        if (uri != null && repository != null && userPreferences != null) {
+            backupBusy = true
+            scope.launch {
+                val res = BackupRestoreManager.importBackup(
+                    context = context,
+                    backupUri = uri,
+                    repository = repository,
+                    userPreferences = userPreferences,
+                    cacheManager = cacheManager
+                )
+                backupBusy = false
+                res.onSuccess { stats ->
+                    toastMsg = "Restored ${stats.projectCount} project(s), ${stats.fontCount} font(s)!"
+                    customFontsList = cacheManager.listCustomFonts()
+                }.onFailure { err ->
+                    toastMsg = err.message ?: "Failed to restore backup."
+                }
+            }
+        }
+    }
+
+    var cacheSizeBytes by remember { mutableLongStateOf(0L) }
 
     LaunchedEffect(toastMsg) {
         if (toastMsg != null) {
@@ -680,6 +730,356 @@ fun ProfileScreen(
                                 fontSize = 12.sp,
                                 color = RawColors.TextMuted
                             )
+                        }
+                    }
+                }
+            }
+
+            // GitHub Developer Access Token Card
+            item {
+                Spacer(modifier = Modifier.height(4.dp))
+                val hasGh = userProfile.hasGithubToken
+                val cardShape = RoundedCornerShape(28.dp)
+                Column(
+                    modifier = Modifier
+                        .padding(horizontal = 18.dp)
+                        .fillMaxWidth()
+                        .clip(cardShape)
+                        .background(RawColors.CardSurface)
+                        .padding(18.dp),
+                    verticalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Row(
+                            modifier = Modifier.weight(1f).padding(end = 10.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(12.dp)
+                        ) {
+                            Box(
+                                modifier = Modifier
+                                    .size(42.dp)
+                                    .clip(CircleShape)
+                                    .background(if (hasGh) RawColors.AccentSoft else RawColors.RaisedCard),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                RawIcon(
+                                    type = RawIconType.CODE,
+                                    size = 19.dp,
+                                    tint = if (hasGh) RawColors.Tan else RawColors.TextMuted
+                                )
+                            }
+                            Column {
+                                Text(
+                                    text = "GitHub Access Token",
+                                    fontFamily = BricolageFamily,
+                                    fontWeight = FontWeight.Bold,
+                                    fontSize = 18.sp,
+                                    color = RawColors.TextPrimary
+                                )
+                                Spacer(modifier = Modifier.height(2.dp))
+                                Text(
+                                    text = if (hasGh) "Active \u2022 Copilot can fetch tools & skills" else "Optional \u2022 Personal Access Token",
+                                    fontFamily = JetBrainsMonoFamily,
+                                    fontWeight = FontWeight.Medium,
+                                    fontSize = 12.sp,
+                                    color = if (hasGh) RawColors.Tan else RawColors.TextMuted
+                                )
+                            }
+                        }
+
+                        RawSecondaryButton(
+                            text = if (editingGithubToken) "Close" else if (hasGh) "Edit" else "Add Token",
+                            height = 42.dp,
+                            fillWidth = false,
+                            onClick = { editingGithubToken = !editingGithubToken }
+                        )
+                    }
+
+                    if (editingGithubToken) {
+                        Column(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clip(RoundedCornerShape(18.dp))
+                                .background(RawColors.RaisedCard)
+                                .padding(14.dp),
+                            verticalArrangement = Arrangement.spacedBy(10.dp)
+                        ) {
+                            Text(
+                                text = "Paste GitHub Personal Access Token (PAT) to enable fetching skills, styles, and tools directly into the app:",
+                                fontFamily = BricolageFamily,
+                                fontSize = 13.sp,
+                                color = RawColors.TextMuted
+                            )
+                            OutlinedTextField(
+                                value = githubTokenDraft,
+                                onValueChange = { githubTokenDraft = it },
+                                placeholder = {
+                                    Text("ghp_xxxxxxxxxxxxxxxxxxxx", fontFamily = JetBrainsMonoFamily, fontSize = 12.sp, color = RawColors.TextMuted)
+                                },
+                                textStyle = TextStyle(fontFamily = JetBrainsMonoFamily, fontSize = 13.sp, color = RawColors.TextPrimary),
+                                shape = RoundedCornerShape(16.dp),
+                                colors = OutlinedTextFieldDefaults.colors(
+                                    focusedBorderColor = RawColors.Tan,
+                                    unfocusedBorderColor = RawColors.Divider,
+                                    focusedContainerColor = RawColors.BgPrimary,
+                                    unfocusedContainerColor = RawColors.BgPrimary,
+                                    cursorColor = RawColors.Tan
+                                ),
+                                modifier = Modifier.fillMaxWidth()
+                            )
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                BigPrimaryButton(
+                                    text = "Save GitHub Token",
+                                    height = 44.dp,
+                                    leadingIcon = RawIconType.CHECK,
+                                    containerColor = RawColors.Tan,
+                                    contentColor = RawColors.Ink,
+                                    onClick = {
+                                        onUpdateGithubToken(githubTokenDraft)
+                                        editingGithubToken = false
+                                        toastMsg = "GitHub token saved"
+                                    },
+                                    modifier = Modifier.weight(1f)
+                                )
+                                if (hasGh) {
+                                    RawSecondaryButton(
+                                        text = "Clear",
+                                        height = 44.dp,
+                                        fillWidth = false,
+                                        onClick = {
+                                            githubTokenDraft = ""
+                                            onUpdateGithubToken("")
+                                            editingGithubToken = false
+                                            toastMsg = "GitHub token cleared"
+                                        }
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            // App Data Backup & Restore Card
+            item {
+                Spacer(modifier = Modifier.height(4.dp))
+                val cardShape = RoundedCornerShape(28.dp)
+                Column(
+                    modifier = Modifier
+                        .padding(horizontal = 18.dp)
+                        .fillMaxWidth()
+                        .clip(cardShape)
+                        .background(RawColors.CardSurface)
+                        .padding(18.dp),
+                    verticalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Row(
+                            modifier = Modifier.weight(1f).padding(end = 10.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(12.dp)
+                        ) {
+                            Box(
+                                modifier = Modifier
+                                    .size(42.dp)
+                                    .clip(CircleShape)
+                                    .background(RawColors.RaisedCard),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                RawIcon(
+                                    type = RawIconType.DOWNLOAD,
+                                    size = 19.dp,
+                                    tint = RawColors.Tan
+                                )
+                            }
+                            Column {
+                                Text(
+                                    text = "Backup & Restore Data",
+                                    fontFamily = BricolageFamily,
+                                    fontWeight = FontWeight.Bold,
+                                    fontSize = 18.sp,
+                                    color = RawColors.TextPrimary
+                                )
+                                Spacer(modifier = Modifier.height(2.dp))
+                                Text(
+                                    text = "Projects \u2022 Assets \u2022 Custom Fonts \u2022 Palettes",
+                                    fontFamily = JetBrainsMonoFamily,
+                                    fontWeight = FontWeight.Medium,
+                                    fontSize = 12.sp,
+                                    color = RawColors.TextMuted
+                                )
+                            }
+                        }
+                    }
+
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(10.dp)
+                    ) {
+                        RawSecondaryButton(
+                            text = if (backupBusy) "Exporting..." else "Export Backup (.zip)",
+                            height = 46.dp,
+                            leadingIcon = RawIconType.SHARE,
+                            enabled = !backupBusy && repository != null && userPreferences != null,
+                            onClick = {
+                                if (repository != null && userPreferences != null) {
+                                    backupBusy = true
+                                    scope.launch {
+                                        val res = BackupRestoreManager.exportBackup(
+                                            context = context,
+                                            repository = repository,
+                                            userPreferences = userPreferences,
+                                            cacheManager = cacheManager
+                                        )
+                                        backupBusy = false
+                                        res.onSuccess { stats ->
+                                            val uri = FileProvider.getUriForFile(
+                                                context,
+                                                "${context.packageName}.fileprovider",
+                                                stats.backupFile
+                                            )
+                                            val shareIntent = Intent(Intent.ACTION_SEND).apply {
+                                                type = "application/zip"
+                                                putExtra(Intent.EXTRA_STREAM, uri)
+                                                putExtra(Intent.EXTRA_SUBJECT, stats.backupFile.name)
+                                                addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                                            }
+                                            context.startActivity(Intent.createChooser(shareIntent, "Share Backup Archive"))
+                                            toastMsg = "Backup created: ${stats.projectCount} projects, ${stats.assetCount} assets!"
+                                        }.onFailure { err ->
+                                            toastMsg = err.message ?: "Failed to create backup."
+                                        }
+                                    }
+                                }
+                            },
+                            modifier = Modifier.weight(1f)
+                        )
+
+                        RawSecondaryButton(
+                            text = if (backupBusy) "Restoring..." else "Import Backup (.zip)",
+                            height = 46.dp,
+                            leadingIcon = RawIconType.DOWNLOAD,
+                            enabled = !backupBusy && repository != null && userPreferences != null,
+                            onClick = {
+                                backupImportLauncher.launch(arrayOf("application/zip", "*/*"))
+                            },
+                            modifier = Modifier.weight(1f)
+                        )
+                    }
+                }
+            }
+
+            // Custom Fonts Manager Card
+            item {
+                Spacer(modifier = Modifier.height(4.dp))
+                val cardShape = RoundedCornerShape(28.dp)
+                Column(
+                    modifier = Modifier
+                        .padding(horizontal = 18.dp)
+                        .fillMaxWidth()
+                        .clip(cardShape)
+                        .background(RawColors.CardSurface)
+                        .padding(18.dp),
+                    verticalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Row(
+                            modifier = Modifier.weight(1f).padding(end = 10.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(12.dp)
+                        ) {
+                            Box(
+                                modifier = Modifier
+                                    .size(42.dp)
+                                    .clip(CircleShape)
+                                    .background(RawColors.RaisedCard),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                RawIcon(
+                                    type = RawIconType.CODE,
+                                    size = 19.dp,
+                                    tint = RawColors.Tan
+                                )
+                            }
+                            Column {
+                                Text(
+                                    text = "Custom Fonts (${customFontsList.size})",
+                                    fontFamily = BricolageFamily,
+                                    fontWeight = FontWeight.Bold,
+                                    fontSize = 18.sp,
+                                    color = RawColors.TextPrimary
+                                )
+                                Spacer(modifier = Modifier.height(2.dp))
+                                Text(
+                                    text = ".ttf \u2022 .otf \u2022 .woff2 typography for video engine",
+                                    fontFamily = JetBrainsMonoFamily,
+                                    fontSize = 12.sp,
+                                    color = RawColors.TextMuted
+                                )
+                            }
+                        }
+
+                        RawSecondaryButton(
+                            text = "Import Font",
+                            height = 42.dp,
+                            leadingIcon = RawIconType.PLUS,
+                            fillWidth = false,
+                            onClick = {
+                                fontPickerLauncher.launch(arrayOf("*/*"))
+                            }
+                        )
+                    }
+
+                    if (customFontsList.isNotEmpty()) {
+                        Column(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clip(RoundedCornerShape(18.dp))
+                                .background(RawColors.RaisedCard)
+                                .padding(12.dp),
+                            verticalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            customFontsList.forEach { fontFile ->
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Text(
+                                        text = fontFile.name,
+                                        fontFamily = JetBrainsMonoFamily,
+                                        fontSize = 13.sp,
+                                        color = RawColors.TextPrimary,
+                                        modifier = Modifier.weight(1f)
+                                    )
+                                    CircleActionButton(
+                                        icon = RawIconType.TRASH,
+                                        size = 32.dp,
+                                        backgroundColor = RawColors.ErrorSoft,
+                                        iconTint = RawColors.ErrorCoral,
+                                        onClick = {
+                                            cacheManager.deleteCustomFont(fontFile.name)
+                                            customFontsList = cacheManager.listCustomFonts()
+                                            toastMsg = "Deleted font: ${fontFile.name}"
+                                        }
+                                    )
+                                }
+                            }
                         }
                     }
                 }

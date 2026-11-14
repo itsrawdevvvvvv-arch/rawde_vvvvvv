@@ -45,6 +45,7 @@ import com.rawedit.app.domain.GeminiWaterfallRouter
 import com.rawedit.app.ui.screens.AddVoiceScreen
 import com.rawedit.app.ui.screens.AiQuotaDialog
 import com.rawedit.app.ui.screens.AssetLockerScreen
+import com.rawedit.app.ui.screens.ChatbotScreen
 import com.rawedit.app.ui.screens.CodePasteScreen
 import com.rawedit.app.ui.screens.CopyPromptScreen
 import com.rawedit.app.ui.screens.CreateHubScreen
@@ -83,6 +84,7 @@ private sealed interface AppRoute {
     data class KeyframeSheet(val projectId: Long) : AppRoute
     data class Rendering(val projectId: Long) : AppRoute
     data class Result(val videoId: Long, val celebrate: Boolean) : AppRoute
+    data class Chatbot(val projectId: Long? = null) : AppRoute
 }
 
 class MainActivity : ComponentActivity() {
@@ -363,6 +365,9 @@ private fun MainAuthenticatedHost(
                                                     }
                                                 }
                                             }
+                                        },
+                                        onOpenChatbot = {
+                                            pushRoute(AppRoute.Chatbot())
                                         }
                                     )
                                 }
@@ -414,7 +419,12 @@ private fun MainAuthenticatedHost(
                                     },
                                     onOpenGroqKey = { openGroqDialog(switchMode = false) },
                                     onSwitchGroqKey = { openGroqDialog(switchMode = true) },
-                                    onRefreshGroqQuota = { refreshGroqQuota(silent = false) }
+                                    onRefreshGroqQuota = { refreshGroqQuota(silent = false) },
+                                    onUpdateGithubToken = { token ->
+                                        scope.launch { container.userPreferences.saveGithubAccessToken(token) }
+                                    },
+                                    repository = container.repository,
+                                    userPreferences = container.userPreferences
                                 )
                             }
                         }
@@ -737,6 +747,31 @@ private fun MainAuthenticatedHost(
                             }
                         )
                     }
+                }
+
+                is AppRoute.Chatbot -> {
+                    val activeProject = route.projectId?.let { id ->
+                        projects.firstOrNull { it.id == id }
+                    } ?: projects.firstOrNull { it.state == ProjectEntity.STATE_IN_PROGRESS } ?: projects.firstOrNull()
+
+                    ChatbotScreen(
+                        userProfile = userProfile,
+                        project = activeProject,
+                        allAssets = allAssets,
+                        activePalette = activePalette,
+                        cacheManager = container.cacheManager,
+                        geminiRouter = geminiRouter,
+                        onBack = ::popRoute,
+                        onOpenApiKey = { openGroqDialog(switchMode = false) },
+                        onApplyHtmlPatch = { newHtml ->
+                            activeProject?.let { p ->
+                                scope.launch {
+                                    container.repository.updateHtmlCode(p.id, newHtml)
+                                    hostToastMsg = "Applied HTML patch to ${p.title.ifBlank { "Reel" }}"
+                                }
+                            }
+                        }
+                    )
                 }
             }
         }

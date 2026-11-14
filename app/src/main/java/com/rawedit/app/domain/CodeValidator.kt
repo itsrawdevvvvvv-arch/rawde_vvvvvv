@@ -23,6 +23,10 @@ data class CodeValidationResult(
     val summaryMessage: String
 )
 
+data class CodeMetadata(
+    val durationSec: Double = 0.0
+)
+
 @Serializable
 private data class DryRunPayload(
     val ok: Boolean = false,
@@ -32,6 +36,12 @@ private data class DryRunPayload(
 )
 
 object CodeValidator {
+
+    fun extractMetadata(html: String): CodeMetadata {
+        val match = Regex("""(?:PROJECT_DURATION|durationSec|duration)\s*[:=]\s*([0-9.]+)""", RegexOption.IGNORE_CASE).find(html)
+        val dur = match?.groupValues?.get(1)?.toDoubleOrNull() ?: 0.0
+        return CodeMetadata(durationSec = dur)
+    }
 
     private const val DRY_RUN_TIMEOUT_MS = 20_000L
 

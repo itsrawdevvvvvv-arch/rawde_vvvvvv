@@ -40,8 +40,11 @@ data class UserProfile(
     val paletteJson: String = "",
     val geminiApiKey: String = "",
     val aiProviderRoute: String = AiProvider.GEMINI_FREE.id,
-    val geminiTaskRoute: String = GeminiTaskRoute.BALANCED_AUTO.id
+    val geminiTaskRoute: String = GeminiTaskRoute.BALANCED_AUTO.id,
+    val githubAccessToken: String = ""
 ) {
+    val hasGithubToken: Boolean
+        get() = githubAccessToken.isNotBlank()
     val hasGroqKey: Boolean
         get() = groqApiKey.isNotBlank()
 
@@ -161,6 +164,7 @@ class UserPreferences(private val context: Context) {
         val GEMINI_API_KEY = stringPreferencesKey("gemini_api_key")
         val AI_PROVIDER_ROUTE = stringPreferencesKey("ai_provider_route")
         val GEMINI_TASK_ROUTE = stringPreferencesKey("gemini_task_route")
+        val GITHUB_ACCESS_TOKEN = stringPreferencesKey("github_access_token")
     }
 
     val userProfile: Flow<UserProfile> = context.dataStore.data.map { prefs ->
@@ -186,8 +190,20 @@ class UserPreferences(private val context: Context) {
             paletteJson = prefs[Keys.PALETTE_JSON] ?: "",
             geminiApiKey = prefs[Keys.GEMINI_API_KEY] ?: "",
             aiProviderRoute = prefs[Keys.AI_PROVIDER_ROUTE] ?: AiProvider.GEMINI_FREE.id,
-            geminiTaskRoute = prefs[Keys.GEMINI_TASK_ROUTE] ?: GeminiTaskRoute.BALANCED_AUTO.id
+            geminiTaskRoute = prefs[Keys.GEMINI_TASK_ROUTE] ?: GeminiTaskRoute.BALANCED_AUTO.id,
+            githubAccessToken = prefs[Keys.GITHUB_ACCESS_TOKEN] ?: ""
         )
+    }
+
+    suspend fun saveGithubAccessToken(token: String) {
+        val clean = token.trim()
+        context.dataStore.edit { prefs ->
+            if (clean.isEmpty()) {
+                prefs.remove(Keys.GITHUB_ACCESS_TOKEN)
+            } else {
+                prefs[Keys.GITHUB_ACCESS_TOKEN] = clean
+            }
+        }
     }
 
     suspend fun completeOnboardingAndProfile(name: String, photoPath: String?) {

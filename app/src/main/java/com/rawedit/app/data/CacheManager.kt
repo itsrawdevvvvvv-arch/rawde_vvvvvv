@@ -49,6 +49,9 @@ class CacheManager(private val context: Context) {
     val projectAssetsDir: File
         get() = File(context.filesDir, "project_assets").apply { mkdirs() }
 
+    val assetsDir: File
+        get() = projectAssetsDir
+
     val assetThumbsDir: File
         get() = File(projectAssetsDir, "thumbs").apply { mkdirs() }
 
@@ -93,6 +96,19 @@ class CacheManager(private val context: Context) {
         val fileName = stored.removePrefix(CODE_FILE_PREFIX)
         val file = File(codeStoreDir, fileName)
         return if (file.exists()) runCatching { file.readText(Charsets.UTF_8) }.getOrDefault("") else ""
+    }
+
+    fun resolveProjectHtml(stored: String): String = resolveHtmlCode(stored)
+
+    fun formatFileSize(bytes: Long): String {
+        if (bytes <= 0L) return "0 KB"
+        val kb = bytes / 1024.0
+        val mb = kb / 1024.0
+        return if (mb >= 1.0) {
+            String.format(Locale.US, "%.1f MB", mb)
+        } else {
+            String.format(Locale.US, "%.0f KB", kb)
+        }
     }
 
     fun persistTopicText(projectId: Long, topic: String): String {
@@ -850,8 +866,8 @@ class CacheManager(private val context: Context) {
         val (displayName, _) = queryDisplayNameAndSize(uri)
         val rawName = displayName.ifBlank { "CustomFont_${System.currentTimeMillis()}.ttf" }
         val ext = rawName.substringAfterLast('.', "ttf").lowercase(Locale.US)
-        if (ext != "ttf" && ext != "otf") {
-            throw IllegalArgumentException("Only .ttf and .otf font files are supported.")
+        if (ext != "ttf" && ext != "otf" && ext != "woff" && ext != "woff2") {
+            throw IllegalArgumentException("Only .ttf, .otf, and .woff/.woff2 font files are supported.")
         }
         val base = rawName.substringBeforeLast('.').replace(Regex("[^A-Za-z0-9_-]"), "_").trim('_')
         val cleanName = "${base.ifBlank { "font" }}.$ext"
@@ -875,6 +891,39 @@ class CacheManager(private val context: Context) {
         return if (f.exists()) f.delete() else false
     }
 
+    val chatbotUploadsDir: File
+        get() = File(context.filesDir, "chatbot_uploads").apply { mkdirs() }
+
+    val githubToolsDir: File
+        get() = File(context.filesDir, "github_tools").apply { mkdirs() }
+
+    fun importChatbotUpload(uri: Uri): Result<File> = runCatching {
+        val (displayName, sizeBytes) = queryDisplayNameAndSize(uri)
+        if (sizeBytes > MAX_CHATBOT_UPLOAD_BYTES) {
+            throw IllegalArgumentException("File size exceeds 500 MB limit (${formatFileSize(sizeBytes)}).")
+        }
+        val rawName = displayName.ifBlank { "upload_${System.currentTimeMillis()}.bin" }
+        val ext = rawName.substringAfterLast('.', "").lowercase(Locale.US)
+        val base = rawName.substringBeforeLast('.').replace(Regex("[^A-Za-z0-9_-]"), "_").trim('_')
+        val cleanName = if (ext.isNotEmpty()) "${base.ifBlank { "file" }}.$ext" else base.ifBlank { "file" }
+        var dest = File(chatbotUploadsDir, cleanName)
+        var counter = 1
+        while (dest.exists()) {
+            dest = if (ext.isNotEmpty()) {
+                File(chatbotUploadsDir, "${base}_$counter.$ext")
+            } else {
+                File(chatbotUploadsDir, "${base}_$counter")
+            }
+            counter++
+        }
+        context.contentResolver.openInputStream(uri)?.use { input ->
+            dest.outputStream().use { output ->
+                input.copyTo(output)
+            }
+        } ?: throw IllegalStateException("Could not read uploaded file stream.")
+        dest
+    }
+
     companion object {
         val ASSET_FILENAME_REGEX = Regex("^[A-Za-z0-9._-]{1,80}\\.(png|jpg|jpeg|webp|mp4|mov|webm)$")
         private val ALLOWED_AUDIO_EXT = setOf("mp3", "m4a", "wav", "aac", "ogg")
@@ -882,12 +931,12 @@ class CacheManager(private val context: Context) {
         private const val MAX_AUDIO_SEC = 20.0 * 60.0
         private const val MAX_IMAGE_BYTES = 15L * 1024L * 1024L
         private const val MAX_VIDEO_BYTES = 150L * 1024L * 1024L
+        const val MAX_CHATBOT_UPLOAD_BYTES = 500L * 1024L * 1024L
         private const val MAX_LOCKER_IMAGE_DIM = 1920
         const val CODE_FILE_PREFIX = "@rawfile:"
         const val TOPIC_FILE_PREFIX = "@rawtxt:"
         const val SRT_FILE_PREFIX = "@rawsrt:"
         const val STYLE_PACK_KINETIC = "kinetic-explainer-style.zip"
-        const val STYLE_PACK_SWISS = "swiss-grid-motion-style.zip"
         const val STYLE_PACK_ASSET_NAME = STYLE_PACK_KINETIC
     }
 }

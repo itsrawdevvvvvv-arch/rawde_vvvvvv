@@ -4,10 +4,11 @@ import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
 import android.content.Intent
+import android.graphics.BitmapFactory
 import android.os.Build
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
-import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.animateFloat
@@ -19,6 +20,7 @@ import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -36,11 +38,8 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.lazy.grid.GridCells
-import androidx.compose.foundation.lazy.grid.GridItemSpan
-import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
-import androidx.compose.foundation.lazy.grid.itemsIndexed
-import androidx.compose.foundation.lazy.grid.rememberLazyGridState
+import androidx.compose.foundation.pager.HorizontalPager
+import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -48,17 +47,19 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
+import androidx.compose.material3.Slider
+import androidx.compose.material3.SliderDefaults
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.State
-import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableStateListOf
+import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
@@ -89,43 +90,29 @@ import com.rawedit.app.data.CacheManager
 import com.rawedit.app.data.local.ProjectEntity
 import com.rawedit.app.data.local.UserProfile
 import com.rawedit.app.domain.CodeValidator
+import com.rawedit.app.domain.GeminiRouteMode
 import com.rawedit.app.domain.GeminiWaterfallRouter
-import com.rawedit.app.domain.GroqAutoFixStatus
-import com.rawedit.app.domain.GroqClient
 import com.rawedit.app.domain.GroqCodec
-import com.rawedit.app.domain.GroqCooldownException
-import com.rawedit.app.domain.GroqHardLimitException
-import com.rawedit.app.domain.GroqLimitKind
-import com.rawedit.app.domain.GroqLimiter
-import com.rawedit.app.domain.GroqPromptTooLargeException
-import com.rawedit.app.domain.GroqReviewResult
-import com.rawedit.app.domain.GroqUi
-import com.rawedit.app.domain.UnifiedAiRouter
-import com.rawedit.app.domain.HtmlVersionStore
 import com.rawedit.app.domain.KeyframeSample
 import com.rawedit.app.domain.KeyframeSheetGenerator
 import com.rawedit.app.domain.KeyframeSheetResult
-import com.rawedit.app.domain.SheetReviewResult
 import com.rawedit.app.domain.SheetSamplingMode
 import com.rawedit.app.ui.components.BigPrimaryButton
 import com.rawedit.app.ui.components.CircleActionButton
 import com.rawedit.app.ui.components.MorphingFilterChips
 import com.rawedit.app.ui.components.RawSecondaryButton
 import com.rawedit.app.ui.components.RawToastBanner
+import com.rawedit.app.ui.motion.RawPressButton
 import com.rawedit.app.ui.icons.PixelMascotKind
 import com.rawedit.app.ui.icons.RawIcon
 import com.rawedit.app.ui.icons.RawIconType
 import com.rawedit.app.ui.icons.RawPixelMascot
-import com.rawedit.app.ui.motion.FeatheredScrollEdges
 import com.rawedit.app.ui.motion.KineticHeading
-import com.rawedit.app.ui.motion.RawEasings
-import com.rawedit.app.ui.motion.RawPressButton
 import com.rawedit.app.ui.motion.rememberAnimationsEnabled
 import com.rawedit.app.ui.theme.BricolageFamily
 import com.rawedit.app.ui.theme.JetBrainsMonoFamily
 import com.rawedit.app.ui.theme.RawColors
 import com.rawedit.app.ui.theme.RawTypography
-import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
@@ -134,67 +121,63 @@ import kotlinx.coroutines.withContext
 import java.io.File
 import java.util.Locale
 
+enum class SheetDisplayMode(val label: String) {
+    CONTACT_SHEET("Contact Sheet"),
+    SCENES("Scenes & AI Fix")
+}
+
+data class SceneGroupInfo(
+    val index: Int,
+    val label: String,
+    val startSec: Double,
+    val endSec: Double,
+    val sample: KeyframeSample?
+)
+
 @Composable
 fun KeyframeSheetScreen(
     project: ProjectEntity,
     cacheManager: CacheManager,
-    apiKey: String,
-    modelPref: String,
-    quotaExhausted: Boolean,
-    quotaBadgeText: String,
-    userProfile: UserProfile? = null,
     onBack: () -> Unit,
     onEditCode: () -> Unit,
-    onApplyFixedHtml: (String, Double) -> Unit,
-    onOpenGroqKey: () -> Unit,
-    onSwitchGroqKey: () -> Unit,
-    onRefreshGroqQuota: () -> Unit,
-    onRenderNow: () -> Unit
+    onRenderNow: () -> Unit,
+    onApplyFixedHtml: (newHtml: String, newDurationSec: Double) -> Unit,
+    userProfile: UserProfile? = null,
+    apiKey: String = userProfile?.activeAiKey().orEmpty(),
+    modelPref: String = "",
+    quotaExhausted: Boolean = false,
+    quotaBadgeText: String = "",
+    onOpenGroqKey: () -> Unit = {},
+    onSwitchGroqKey: () -> Unit = onOpenGroqKey,
+    onRefreshGroqQuota: () -> Unit = {}
 ) {
     val context = LocalContext.current
-    val haptic = LocalHapticFeedback.current
     val scope = rememberCoroutineScope()
-    val geminiRouter = remember { GeminiWaterfallRouter(context) }
-    val hasActiveAi = (userProfile?.hasActiveAiKey ?: false) || apiKey.isNotBlank()
+    val haptic = LocalHapticFeedback.current
     val animEnabled = rememberAnimationsEnabled()
-    val gridState = rememberLazyGridState()
 
-    var resolvedHtml by remember(project.id) {
-        mutableStateOf(if (project.code.startsWith(CacheManager.CODE_FILE_PREFIX)) "" else project.code)
-    }
-    var htmlReady by remember(project.id) {
-        mutableStateOf(!project.code.startsWith(CacheManager.CODE_FILE_PREFIX))
-    }
+    val geminiRouter = remember { GeminiWaterfallRouter(context) }
+
+    var resolvedHtml by remember(project.id) { mutableStateOf<String>(project.code) }
+    var durationSec by remember(project.id) { mutableStateOf(project.audioDurationSec.coerceAtLeast(0.5)) }
+    var htmlReady by remember(project.id) { mutableStateOf(false) }
+
     LaunchedEffect(project.id, project.code) {
-        if (project.code.startsWith(CacheManager.CODE_FILE_PREFIX)) {
-            resolvedHtml = withContext(Dispatchers.IO) { cacheManager.resolveHtmlCode(project.code) }
-            htmlReady = true
-        } else {
-            resolvedHtml = project.code
-            htmlReady = true
+        val loaded = cacheManager.resolveHtmlCode(project.code)
+        resolvedHtml = loaded
+        val meta = CodeValidator.extractMetadata(loaded)
+        if (meta.durationSec > 0.0) {
+            durationSec = meta.durationSec
         }
-    }
-
-    val durationSec = remember(project.codeDurationSec, project.audioDurationSec) {
-        when {
-            project.codeDurationSec > 0.2 -> project.codeDurationSec
-            project.audioDurationSec > 0.2 -> project.audioDurationSec
-            else -> 10.0
-        }
-    }
-    val safeFileBase = remember(project.title, project.id) {
-        project.title.ifBlank { "raw_edit_reel" }
-            .replace(Regex("[^A-Za-z0-9_\\-]"), "_")
-            .trim('_')
-            .ifBlank { "raw_edit_${project.id}" }
+        htmlReady = true
     }
 
     var selectedModeIndex by remember { mutableIntStateOf(0) }
     val selectedMode = SheetSamplingMode.entries[selectedModeIndex]
-    var captureGen by remember { mutableIntStateOf(1) }
-    var flaggedOnly by remember { mutableStateOf(false) }
+    var selectedDisplayMode by remember { mutableStateOf(SheetDisplayMode.CONTACT_SHEET) }
 
-    var capturing by remember { mutableStateOf(true) }
+    var captureGen by remember { mutableIntStateOf(1) }
+    var capturing by remember { mutableStateOf(false) }
     var progressDone by remember { mutableIntStateOf(0) }
     var progressTotal by remember { mutableIntStateOf(0) }
     var progressTimeSec by remember { mutableStateOf(0.0) }
@@ -202,53 +185,18 @@ fun KeyframeSheetScreen(
     var sheetResult by remember { mutableStateOf<KeyframeSheetResult?>(null) }
     var captureError by remember { mutableStateOf<String?>(null) }
 
+    // User OK / FLAGGED toggle overrides & annotated drawings
+    val userFlaggedMap = remember { mutableStateMapOf<Int, Boolean>() }
+    val annotatedMap = remember { mutableStateMapOf<Int, String>() }
+    var drawingAnnotationForIndex by remember { mutableStateOf<Int?>(null) }
     var inspectingIndex by remember { mutableStateOf<Int?>(null) }
+    var flaggedOnly by remember { mutableStateOf(false) }
 
-    var aiBusy by remember { mutableStateOf(false) }
-    var aiAction by remember { mutableStateOf("") }
-    var fixProgress by remember { mutableStateOf("") }
-    var undoTick by remember { mutableIntStateOf(0) }
-    val versions = remember(resolvedHtml.hashCode(), undoTick) { HtmlVersionStore.list(context, project.id) }
-    var reviewResult by remember { mutableStateOf<SheetReviewResult?>(null) }
-    var lastReview by remember(project.id, resolvedHtml.hashCode()) { mutableStateOf<GroqReviewResult?>(null) }
-    var needsStructuralPrompt by remember { mutableStateOf(false) }
-    var aiError by remember { mutableStateOf<String?>(null) }
-
-    val groqUi by GroqLimiter.ui.collectAsState()
-    val limiterNow by produceState(System.currentTimeMillis(), groqUi) {
-        while (groqUi !is GroqUi.Ready) {
-            value = System.currentTimeMillis()
-            delay(1000)
-        }
-    }
-    val (limiterLabel, canTapAi) = when (val s = groqUi) {
-        GroqUi.Ready -> {
-            if (quotaExhausted) "Daily limit \u2022 Switch key" to false else "AI ready" to true
-        }
-        is GroqUi.Cooling -> {
-            val sec = ((s.untilMs - limiterNow) / 1000L).coerceAtLeast(0L)
-            if (sec == 0L) {
-                GroqLimiter.markReadyIfNotHardBlocked()
-                "AI ready" to true
-            } else {
-                "Cooling ${sec}s" to false
-            }
-        }
-        is GroqUi.HardBlocked -> {
-            if (s.untilMs <= limiterNow) {
-                GroqLimiter.currentHardBlock(limiterNow)
-                "AI ready" to true
-            } else {
-                val msg = if (s.kind == GroqLimitKind.CREDITS) {
-                    "Credits out \u2022 Switch key"
-                } else {
-                    "Daily limit \u2022 resets ${GroqCodec.formatDurationShort(s.untilMs - limiterNow)}"
-                }
-                msg to false
-            }
-        }
-    }
-    val isHardBlockedUi = groqUi is GroqUi.HardBlocked || (quotaExhausted && groqUi is GroqUi.Ready)
+    // Scenes & Inline AI Chatbot State
+    var selectedSceneIndex by remember { mutableIntStateOf(0) }
+    var sceneChatInput by remember { mutableStateOf("") }
+    var sceneChatBusy by remember { mutableStateOf(false) }
+    val sceneChatLog = remember { mutableStateListOf<ChatMessage>() }
 
     var exportBusy by remember { mutableStateOf(false) }
     var toastMsg by remember { mutableStateOf<String?>(null) }
@@ -262,9 +210,13 @@ fun KeyframeSheetScreen(
 
     LaunchedEffect(toastMsg) {
         if (toastMsg != null) {
-            delay(1900)
+            delay(2000)
             toastMsg = null
         }
+    }
+
+    val safeFileBase = remember(project.title) {
+        project.title.trim().replace(Regex("[^A-Za-z0-9_-]"), "_").ifBlank { "reel" }
     }
 
     val pdfSaveLauncher = rememberLauncherForActivityResult(
@@ -322,9 +274,6 @@ fun KeyframeSheetScreen(
         capturing = true
         captureError = null
         sheetResult = null
-        reviewResult = null
-        needsStructuralPrompt = false
-        aiError = null
         progressDone = 0
         progressTotal = 0
         progressTimeSec = 0.0
@@ -349,13 +298,23 @@ fun KeyframeSheetScreen(
                 cancelled = { isScreenDisposed || !this@LaunchedEffect.isActive }
             )
             sheetResult = result
+        } catch (ce: kotlinx.coroutines.CancellationException) {
+            throw ce
+        } catch (e: Exception) {
+            captureError = e.message ?: "Capture failed"
+        } finally {
             capturing = false
-        } catch (_: CancellationException) {
-        } catch (t: Throwable) {
-            if (!isScreenDisposed) {
-                capturing = false
-                captureError = t.message ?: "Could not capture keyframe contact sheet."
-            }
+        }
+    }
+
+    // Helper to get samples updated with user overrides
+    fun getEffectiveSamples(): List<KeyframeSample> {
+        val raw = sheetResult?.samples ?: emptyList()
+        return raw.map { s ->
+            s.copy(
+                isUserFlagged = userFlaggedMap[s.index],
+                annotatedThumbPath = annotatedMap[s.index] ?: s.annotatedThumbPath
+            )
         }
     }
 
@@ -368,7 +327,7 @@ fun KeyframeSheetScreen(
                 val outName = "${safeFileBase}_contact_sheet.pdf"
                 val outFile = File(cacheManager.sharedPacksDir, outName)
                 KeyframeSheetGenerator.buildPdfContactSheet(
-                    samples = result.samples,
+                    samples = getEffectiveSamples(),
                     title = project.title.ifBlank { "Untitled Reel" },
                     outPdfFile = outFile
                 )
@@ -376,11 +335,7 @@ fun KeyframeSheetScreen(
             }.onSuccess { (pdfFile, fileName) ->
                 if (share) {
                     exportBusy = false
-                    val uri = FileProvider.getUriForFile(
-                        context,
-                        "${context.packageName}.fileprovider",
-                        pdfFile
-                    )
+                    val uri = FileProvider.getUriForFile(context, "${context.packageName}.fileprovider", pdfFile)
                     val intent = Intent(Intent.ACTION_SEND).apply {
                         type = "application/pdf"
                         putExtra(Intent.EXTRA_STREAM, uri)
@@ -388,13 +343,13 @@ fun KeyframeSheetScreen(
                         clipData = ClipData.newRawUri(fileName, uri)
                         addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
                     }
-                    context.startActivity(Intent.createChooser(intent, "Share PDF Contact Sheet"))
+                    context.startActivity(Intent.createChooser(intent, "Share Contact Sheet PDF"))
                 } else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
                     val dlRes = cacheManager.saveFileToDownloads(pdfFile, fileName, "application/pdf")
                     exportBusy = false
                     dlRes.onSuccess {
                         haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-                        toastMsg = "contact-sheet.pdf saved"
+                        toastMsg = "contact_sheet.pdf saved"
                     }.onFailure {
                         pendingPdfFile = pdfFile
                         pdfSaveLauncher.launch(fileName)
@@ -420,7 +375,7 @@ fun KeyframeSheetScreen(
                 val outName = "${safeFileBase}_contact_sheet.zip"
                 val outFile = File(cacheManager.sharedPacksDir, outName)
                 KeyframeSheetGenerator.buildContactSheetZip(
-                    samples = result.samples,
+                    samples = getEffectiveSamples(),
                     title = project.title.ifBlank { "Untitled Reel" },
                     durationSec = result.durationSec,
                     outZipFile = outFile
@@ -429,11 +384,7 @@ fun KeyframeSheetScreen(
             }.onSuccess { (zipFile, fileName) ->
                 if (share) {
                     exportBusy = false
-                    val uri = FileProvider.getUriForFile(
-                        context,
-                        "${context.packageName}.fileprovider",
-                        zipFile
-                    )
+                    val uri = FileProvider.getUriForFile(context, "${context.packageName}.fileprovider", zipFile)
                     val intent = Intent(Intent.ACTION_SEND).apply {
                         type = "application/zip"
                         putExtra(Intent.EXTRA_STREAM, uri)
@@ -464,6 +415,40 @@ fun KeyframeSheetScreen(
         }
     }
 
+    // Build scene groupings for Scenes mode
+    val sceneGroups = remember(sheetResult, userFlaggedMap.size, annotatedMap.size) {
+        val samples = getEffectiveSamples()
+        val labels = samples.map { it.sceneLabel.ifBlank { "S01" } }.distinct()
+        if (labels.isNotEmpty()) {
+            labels.mapIndexed { idx, label ->
+                val sceneSamples = samples.filter { (it.sceneLabel.ifBlank { "S01" }) == label }
+                val startT = sceneSamples.minOfOrNull { it.timeSec } ?: (idx * 2.5)
+                val endT = sceneSamples.maxOfOrNull { it.timeSec } ?: ((idx + 1) * 2.5)
+                SceneGroupInfo(
+                    index = idx,
+                    label = label,
+                    startSec = startT,
+                    endSec = endT,
+                    sample = sceneSamples.firstOrNull()
+                )
+            }
+        } else {
+            val totalSec = sheetResult?.durationSec ?: 15.0
+            val count = maxOf(1, (totalSec / 3.0).toInt())
+            (0 until count).map { i ->
+                val s = i * 3.0
+                val e = minOf(totalSec, (i + 1) * 3.0)
+                SceneGroupInfo(
+                    index = i,
+                    label = String.format(Locale.US, "S%02d", i + 1),
+                    startSec = s,
+                    endSec = e,
+                    sample = null
+                )
+            }
+        }
+    }
+
     Box(
         modifier = Modifier
             .fillMaxSize()
@@ -476,6 +461,7 @@ fun KeyframeSheetScreen(
                 .padding(horizontal = 18.dp),
             verticalArrangement = Arrangement.spacedBy(10.dp)
         ) {
+            // Header Row
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -488,17 +474,43 @@ fun KeyframeSheetScreen(
             }
 
             KineticHeading(
-                words = listOf("Contact", "sheet"),
+                words = listOf("Visual", "Inspector"),
                 style = RawTypography.headlineLarge,
                 highlightLastWord = true
             )
 
-            Text(
-                text = "Live DOM auto-fit ran on every frame, fully on-device. Zero API cost.",
-                style = RawTypography.bodyLarge.copy(fontSize = 15.5.sp),
-                color = RawColors.TextMuted
-            )
+            // Segmented Tab Row: Contact Sheet (Carousel) vs Scenes (Full Scene + AI Fix)
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(20.dp))
+                    .background(RawColors.CardSurface)
+                    .padding(4.dp),
+                horizontalArrangement = Arrangement.spacedBy(6.dp)
+            ) {
+                SheetDisplayMode.entries.forEach { mode ->
+                    val isSelected = selectedDisplayMode == mode
+                    Box(
+                        modifier = Modifier
+                            .weight(1f)
+                            .clip(RoundedCornerShape(16.dp))
+                            .background(if (isSelected) RawColors.Tan else Color.Transparent)
+                            .clickable { selectedDisplayMode = mode }
+                            .padding(vertical = 10.dp),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Text(
+                            text = mode.label,
+                            fontFamily = BricolageFamily,
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 13.5.sp,
+                            color = if (isSelected) RawColors.Ink else RawColors.TextMuted
+                        )
+                    }
+                }
+            }
 
+            // Sampling Mode Chips
             MorphingFilterChips(
                 options = SheetSamplingMode.entries.map { it.label },
                 selectedIndex = selectedModeIndex,
@@ -509,6 +521,7 @@ fun KeyframeSheetScreen(
                 }
             )
 
+            // Main Content Area
             Box(modifier = Modifier.weight(1f).fillMaxWidth()) {
                 when {
                     capturing -> {
@@ -531,9 +544,8 @@ fun KeyframeSheetScreen(
                                 animationSpec = infiniteRepeatable(tween(1500, easing = LinearEasing), RepeatMode.Restart),
                                 label = "scan_pos"
                             )
-                        } else {
-                            null
-                        }
+                        } else null
+
                         val thumb = livePreviewPath
                         val thumbExists = remember(thumb) { thumb != null && File(thumb).exists() }
 
@@ -622,9 +634,9 @@ fun KeyframeSheetScreen(
                                 ) {
                                     Text(
                                         text = if (progressTotal > 0) {
-                                            "Capturing & auto-fitting $progressDone / $progressTotal"
+                                            "Capturing $progressDone / $progressTotal frames"
                                         } else {
-                                            "Preparing bundled fonts & auto-fit..."
+                                            "Preparing stage..."
                                         },
                                         style = RawTypography.labelMedium
                                     )
@@ -673,8 +685,6 @@ fun KeyframeSheetScreen(
                                 fontFamily = BricolageFamily,
                                 fontWeight = FontWeight.Bold,
                                 fontSize = 30.sp,
-                                lineHeight = 32.sp,
-                                letterSpacing = (-0.8).sp,
                                 color = RawColors.TextPrimary
                             )
                             Text(
@@ -694,498 +704,330 @@ fun KeyframeSheetScreen(
                     }
 
                     sheetResult != null -> {
-                        val res = sheetResult!!
-                        val flaggedSamples = remember(res.samples) {
-                            res.samples.filter { it.warnings.isNotEmpty() || it.autoFitCount > 0 }
-                        }
-                        val visibleSamples = if (flaggedOnly) flaggedSamples else res.samples
+                        val allEffectiveSamples = getEffectiveSamples()
+                        val flaggedSamples = allEffectiveSamples.filter { it.isFlagged }
+                        val activeSamples = if (flaggedOnly) flaggedSamples else allEffectiveSamples
 
-                        LazyVerticalGrid(
-                            state = gridState,
-                            columns = GridCells.Fixed(2),
-                            modifier = Modifier.fillMaxSize(),
-                            contentPadding = PaddingValues(top = 4.dp, bottom = 118.dp),
-                            verticalArrangement = Arrangement.spacedBy(10.dp),
-                            horizontalArrangement = Arrangement.spacedBy(10.dp)
-                        ) {
-                            // Summary & Flagged Filter Header
-                            item(span = { GridItemSpan(2) }) {
-                                Column(
+                        if (selectedDisplayMode == SheetDisplayMode.CONTACT_SHEET) {
+                            // Instagram-style Carousel View
+                            Column(
+                                modifier = Modifier
+                                    .fillMaxSize()
+                                    .verticalScroll(rememberScrollState())
+                                    .padding(bottom = 118.dp),
+                                verticalArrangement = Arrangement.spacedBy(14.dp)
+                            ) {
+                                // Summary Bar
+                                Row(
                                     modifier = Modifier
                                         .fillMaxWidth()
-                                        .clip(RoundedCornerShape(28.dp))
+                                        .clip(RoundedCornerShape(22.dp))
                                         .background(RawColors.CardSurface)
-                                        .padding(18.dp),
-                                    verticalArrangement = Arrangement.spacedBy(12.dp)
+                                        .padding(horizontal = 16.dp, vertical = 12.dp),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.CenterVertically
                                 ) {
-                                    Row(
-                                        modifier = Modifier.fillMaxWidth(),
-                                        horizontalArrangement = Arrangement.SpaceBetween,
-                                        verticalAlignment = Alignment.CenterVertically
-                                    ) {
+                                    Column {
                                         Text(
-                                            text = "${res.samples.size} frames  \u2022  ${String.format(Locale.US, "%.1fs", res.durationSec)}",
+                                            text = "${allEffectiveSamples.size} frames \u2022 ${String.format(Locale.US, "%.1fs", durationSec)}",
                                             fontFamily = BricolageFamily,
                                             fontWeight = FontWeight.Bold,
-                                            fontSize = 20.sp,
+                                            fontSize = 17.sp,
                                             color = RawColors.TextPrimary
                                         )
-                                        val isClean = res.warningCount == 0 && res.totalAutoFits == 0
-                                        val badgeLabel = when {
-                                            res.warningCount > 0 -> "${res.warningCount} WARN"
-                                            res.totalAutoFits > 0 -> "${res.totalAutoFits} AUTO-FIT"
-                                            else -> "CLEAN"
-                                        }
-                                        Box(
-                                            modifier = Modifier
-                                                .clip(CircleShape)
-                                                .background(if (isClean) RawColors.AccentSoft else RawColors.RaisedCard)
-                                                .padding(horizontal = 12.dp, vertical = 6.dp)
-                                        ) {
-                                            Text(
-                                                text = badgeLabel,
-                                                fontFamily = JetBrainsMonoFamily,
-                                                fontWeight = FontWeight.SemiBold,
-                                                fontSize = 11.5.sp,
-                                                style = TextStyle(fontFeatureSettings = "tnum"),
-                                                color = if (isClean) RawColors.Tan else RawColors.TextMuted
-                                            )
-                                        }
+                                        Text(
+                                            text = "${flaggedSamples.size} FLAGGED \u2022 ${allEffectiveSamples.size - flaggedSamples.size} OK",
+                                            fontFamily = JetBrainsMonoFamily,
+                                            fontSize = 12.sp,
+                                            color = if (flaggedSamples.isNotEmpty()) RawColors.ErrorCoral else RawColors.Tan
+                                        )
                                     }
 
-                                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                                        SheetTogglePill(
-                                            label = "All (${res.samples.size})",
+                                    Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                        FilterToggleChip(
+                                            label = "All (${allEffectiveSamples.size})",
                                             selected = !flaggedOnly,
                                             onClick = { flaggedOnly = false }
                                         )
-                                        SheetTogglePill(
+                                        FilterToggleChip(
                                             label = "Flagged (${flaggedSamples.size})",
                                             selected = flaggedOnly,
                                             onClick = { flaggedOnly = true }
                                         )
                                     }
                                 }
-                            }
 
-                            // Groq Two-Stage AI Frame Inspector Card (optional)
-                            item(span = { GridItemSpan(2) }) {
-                                Column(
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .clip(RoundedCornerShape(28.dp))
-                                        .background(RawColors.CardSurface)
-                                        .padding(18.dp),
-                                    verticalArrangement = Arrangement.spacedBy(10.dp)
-                                ) {
-                                    Row(
-                                        modifier = Modifier.fillMaxWidth(),
-                                        horizontalArrangement = Arrangement.SpaceBetween,
-                                        verticalAlignment = Alignment.CenterVertically
+                                if (activeSamples.isEmpty()) {
+                                    Column(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .clip(RoundedCornerShape(24.dp))
+                                            .background(RawColors.CardSurface)
+                                            .padding(28.dp),
+                                        horizontalAlignment = Alignment.CenterHorizontally,
+                                        verticalArrangement = Arrangement.spacedBy(10.dp)
                                     ) {
-                                            Row(
-                                            verticalAlignment = Alignment.CenterVertically,
-                                            horizontalArrangement = Arrangement.spacedBy(8.dp),
-                                            modifier = Modifier.weight(1f)
-                                        ) {
-                                            RawIcon(RawIconType.SPARK, size = 18.dp, tint = RawColors.Tan)
-                                            Column {
-                                                Text(
-                                                    text = "AI Frame Review & Auto-Fix",
-                                                    fontFamily = BricolageFamily,
-                                                    fontWeight = FontWeight.Bold,
-                                                    fontSize = 18.sp,
-                                                    color = RawColors.TextPrimary
-                                                )
-                                                Text(
-                                                    text = when {
-                                                        !hasActiveAi -> "Optional \u2022 Add AI key"
-                                                        userProfile != null -> userProfile.quotaSummaryText()
-                                                        groqUi is GroqUi.Cooling -> "$limiterLabel \u2022 $quotaBadgeText"
-                                                        isHardBlockedUi -> limiterLabel
-                                                        else -> "$limiterLabel \u2022 $quotaBadgeText"
-                                                    },
-                                                    style = RawTypography.labelMedium,
-                                                    color = when {
-                                                        isHardBlockedUi && userProfile?.hasGeminiKey != true -> RawColors.ErrorCoral
-                                                        groqUi is GroqUi.Cooling -> RawColors.Tan
-                                                        else -> RawColors.TextMuted
-                                                    }
-                                                )
-                                            }
-                                        }
-                                        if (isHardBlockedUi && userProfile?.hasGeminiKey != true) {
-                                            Box(
-                                                modifier = Modifier
-                                                    .clip(CircleShape)
-                                                    .background(RawColors.ErrorSoft)
-                                                    .border(1.dp, RawColors.ErrorBorder, CircleShape)
-                                                    .clickable(onClick = onSwitchGroqKey)
-                                                    .padding(horizontal = 12.dp, vertical = 7.dp)
-                                            ) {
-                                                Text(
-                                                    text = "Switch",
-                                                    fontFamily = BricolageFamily,
-                                                    fontWeight = FontWeight.Bold,
-                                                    fontSize = 12.5.sp,
-                                                    color = RawColors.ErrorCoral
-                                                )
-                                            }
-                                        } else {
-                                            CircleActionButton(
-                                                icon = RawIconType.KEY,
-                                                size = 38.dp,
-                                                backgroundColor = if (apiKey.isNotBlank()) RawColors.AccentSoft else RawColors.RaisedCard,
-                                                iconTint = if (apiKey.isNotBlank()) RawColors.Tan else RawColors.TextMuted,
-                                                onClick = onOpenGroqKey
-                                            )
-                                        }
-                                    }
-
-                                    Row(
-                                        modifier = Modifier.fillMaxWidth(),
-                                        horizontalArrangement = Arrangement.spacedBy(10.dp)
-                                    ) {
-                                        RawSecondaryButton(
-                                            text = if (aiBusy && aiAction == "review") "Reviewing..." else "AI review",
-                                            height = 48.dp,
-                                            enabled = !aiBusy && (!hasActiveAi || canTapAi || isHardBlockedUi || userProfile?.hasGeminiKey == true),
-                                            leadingIcon = RawIconType.LENS,
-                                            onClick = {
-                                                if (!hasActiveAi) {
-                                                    onOpenGroqKey()
-                                                    return@RawSecondaryButton
-                                                }
-                                                if (isHardBlockedUi && userProfile?.hasGeminiKey != true) {
-                                                    onSwitchGroqKey()
-                                                    return@RawSecondaryButton
-                                                }
-                                                if (!canTapAi && userProfile?.hasGeminiKey != true) {
-                                                    toastMsg = limiterLabel
-                                                    return@RawSecondaryButton
-                                                }
-                                                aiBusy = true
-                                                aiAction = "review"
-                                                aiError = null
-                                                needsStructuralPrompt = false
-                                                scope.launch {
-                                                    val profile = userProfile ?: UserProfile(geminiApiKey = apiKey)
-                                                    val review = UnifiedAiRouter.reviewContactSheet(
-                                                        geminiRouter = geminiRouter,
-                                                        userProfile = profile,
-                                                        samples = res.samples,
-                                                        durationSec = res.durationSec,
-                                                        htmlHash = resolvedHtml.hashCode()
-                                                    )
-                                                    aiBusy = false
-                                                    aiAction = ""
-                                                    review.onSuccess { r ->
-                                                        onRefreshGroqQuota()
-                                                        lastReview = r.cachedReview
-                                                        reviewResult = r
-                                                        toastMsg = if (r.issues.isEmpty()) r.summary else "Found ${r.issues.size} visual issue(s)"
-                                                    }.onFailure { err ->
-                                                        when (err) {
-                                                            is GroqCooldownException -> {
-                                                                val msg = "Rate window full \u2014 retry in ${err.waitSec}s"
-                                                                aiError = msg
-                                                                toastMsg = msg
-                                                            }
-                                                            is GroqHardLimitException -> {
-                                                                aiError = err.message
-                                                            }
-                                                            is GroqPromptTooLargeException -> {
-                                                                aiError = "Too many flags to send; fix the top ones first."
-                                                                toastMsg = "Too many flags to send; fix the top ones first"
-                                                            }
-                                                            else -> {
-                                                                aiError = err.message ?: "AI inspection failed."
-                                                            }
-                                                        }
-                                                    }
-                                                }
-                                            },
-                                            modifier = Modifier.weight(1f)
+                                        RawPixelMascot(kind = PixelMascotKind.LENS_BOT, size = 48.dp)
+                                        Text(
+                                            text = "No flagged frames",
+                                            fontFamily = BricolageFamily,
+                                            fontWeight = FontWeight.Bold,
+                                            fontSize = 18.sp,
+                                            color = RawColors.Tan
                                         )
-
-                                        BigPrimaryButton(
-                                            text = if (aiBusy && aiAction == "fix") fixProgress.ifBlank { "Patching..." } else "Auto-fix",
-                                            height = 48.dp,
-                                            enabled = !aiBusy && (!hasActiveAi || canTapAi || isHardBlockedUi || userProfile?.hasGeminiKey == true),
-                                            leadingIcon = RawIconType.SPARK,
-                                            containerColor = RawColors.Tan,
-                                            contentColor = RawColors.Ink,
-                                            onClick = {
-                                                if (!hasActiveAi) {
-                                                    onOpenGroqKey()
-                                                    return@BigPrimaryButton
-                                                }
-                                                if (isHardBlockedUi && userProfile?.hasGeminiKey != true) {
-                                                    onSwitchGroqKey()
-                                                    return@BigPrimaryButton
-                                                }
-                                                if (!canTapAi && userProfile?.hasGeminiKey != true) {
-                                                    toastMsg = limiterLabel
-                                                    return@BigPrimaryButton
-                                                }
-                                                aiBusy = true
-                                                aiAction = "fix"
-                                                aiError = null
-                                                needsStructuralPrompt = false
-                                                scope.launch {
-                                                    val htmlBeforeFix = resolvedHtml
-                                                    fixProgress = "Patching..."
-                                                    val profile = userProfile ?: UserProfile(geminiApiKey = apiKey)
-                                                    val outcomeRes = UnifiedAiRouter.autoFixLoop(
-                                                        geminiRouter = geminiRouter,
-                                                        userProfile = profile,
-                                                        samples = res.samples,
-                                                        htmlCode = htmlBeforeFix,
-                                                        durationSec = res.durationSec,
-                                                        lastReview = lastReview,
-                                                        maxRounds = 3,
-                                                        validator = { candidateHtml ->
-                                                            CodeValidator.validateFull(context, cacheManager, candidateHtml)
-                                                        },
-                                                        recapture = { candidateHtml ->
-                                                            fixProgress = "Verifying..."
-                                                            KeyframeSheetGenerator.captureKeyframes(
-                                                                context = context,
-                                                                cacheManager = cacheManager,
-                                                                projectId = project.id,
-                                                                rawHtml = candidateHtml,
-                                                                durationSec = res.durationSec,
-                                                                mode = selectedMode,
-                                                                onProgress = { _, _, _, _ -> },
-                                                                cancelled = { isScreenDisposed }
-                                                            ).samples
-                                                        },
-                                                        onRound = { round, issuesNow ->
-                                                            fixProgress = "Round $round: $issuesNow issues left"
-                                                        }
-                                                    )
-                                                    aiBusy = false
-                                                    aiAction = ""
-                                                    fixProgress = ""
-                                                    outcomeRes.onSuccess { outcome ->
-                                                        onRefreshGroqQuota()
-                                                        when (outcome.status) {
-                                                            GroqAutoFixStatus.APPLIED -> {
-                                                                val validated = outcome.validation
-                                                                if (validated != null) {
-                                                                    HtmlVersionStore.save(context, project.id, htmlBeforeFix, "Before AI fix")
-                                                                    resolvedHtml = validated.cleanedHtml
-                                                                    onApplyFixedHtml(validated.cleanedHtml, validated.durationSec)
-                                                                    undoTick++
-                                                                }
-                                                                reviewResult = null
-                                                                lastReview = null
-                                                                aiError = null
-                                                                needsStructuralPrompt = false
-                                                                toastMsg = "Fixed: ${outcome.issuesBefore} \u2192 ${outcome.issuesAfter} issues in ${outcome.roundsRun} round(s), ${outcome.editsApplied} edits"
-                                                            }
-                                                            GroqAutoFixStatus.NOTHING_TO_FIX -> {
-                                                                aiError = null
-                                                                needsStructuralPrompt = false
-                                                                toastMsg = outcome.failureSummary.ifBlank { "No issues found." }
-                                                            }
-                                                            GroqAutoFixStatus.STRUCTURAL -> {
-                                                                needsStructuralPrompt = true
-                                                                aiError = outcome.failureSummary.ifBlank {
-                                                                    "Needs structural changes. Copy the targeted Cloud AI fix prompt below."
-                                                                }
-                                                            }
-                                                            GroqAutoFixStatus.NOTHING_MATCHED -> {
-                                                                needsStructuralPrompt = false
-                                                                aiError = "No patches applied: ${outcome.failureSummary}".trim()
-                                                            }
-                                                        }
-                                                        if (outcome.roundsRun > 0) captureGen++
-                                                    }.onFailure { err ->
-                                                        when (err) {
-                                                            is GroqCooldownException -> {
-                                                                val msg = "Rate window full \u2014 retry in ${err.waitSec}s"
-                                                                aiError = msg
-                                                                toastMsg = msg
-                                                            }
-                                                            is GroqHardLimitException -> {
-                                                                aiError = err.message
-                                                            }
-                                                            is GroqPromptTooLargeException -> {
-                                                                aiError = "Too many flags to send; fix the top ones first."
-                                                                toastMsg = "Too many flags to send; fix the top ones first"
-                                                            }
-                                                            else -> {
-                                                                aiError = err.message ?: "Groq AI auto-fix failed (HTML kept safe)."
-                                                            }
-                                                        }
-                                                    }
-                                                }
-                                            },
-                                            modifier = Modifier.weight(1f)
+                                        Text(
+                                            text = "All frames are marked OK. Tap 'Show all' to view all frames.",
+                                            style = RawTypography.bodyMedium
                                         )
-                                    }
-
-                                    if (versions.isNotEmpty() && !aiBusy) {
                                         RawSecondaryButton(
-                                            text = "Undo last AI fix",
+                                            text = "Show all frames",
                                             height = 44.dp,
-                                            leadingIcon = RawIconType.UNDO,
-                                            onClick = {
-                                                val v = versions.firstOrNull() ?: return@RawSecondaryButton
-                                                scope.launch {
-                                                    val prevHtml = HtmlVersionStore.readHtml(v)
-                                                    val vr = CodeValidator.validateFull(context, cacheManager, prevHtml)
-                                                    if (vr.isValid) {
-                                                        HtmlVersionStore.save(context, project.id, resolvedHtml, "Before undo")
-                                                        HtmlVersionStore.remove(v)
-                                                        resolvedHtml = vr.cleanedHtml
-                                                        onApplyFixedHtml(vr.cleanedHtml, vr.durationSec)
-                                                        reviewResult = null
-                                                        lastReview = null
-                                                        undoTick++
-                                                        captureGen++
-                                                        toastMsg = "Restored previous version"
-                                                    } else {
-                                                        toastMsg = "Could not restore: ${vr.summaryMessage}"
-                                                    }
-                                                }
-                                            }
+                                            fillWidth = false,
+                                            onClick = { flaggedOnly = false }
                                         )
                                     }
+                                } else {
+                                    val pagerState = rememberPagerState(pageCount = { activeSamples.size })
 
-                                    aiError?.let { msg ->
+                                    // Instagram-style Carousel Pager
+                                    HorizontalPager(
+                                        state = pagerState,
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .height(440.dp),
+                                        pageSpacing = 12.dp
+                                    ) { page ->
+                                        val sample = activeSamples[page]
+                                        val isFlagged = sample.isFlagged
+                                        val hasAnnotation = sample.annotatedThumbPath != null
+
                                         Column(
                                             modifier = Modifier
-                                                .fillMaxWidth()
-                                                .clip(RoundedCornerShape(16.dp))
-                                                .background(RawColors.ErrorSoft)
-                                                .padding(12.dp),
-                                            verticalArrangement = Arrangement.spacedBy(8.dp)
+                                                .fillMaxSize()
+                                                .clip(RoundedCornerShape(26.dp))
+                                                .background(RawColors.CardSurface)
+                                                .border(
+                                                    width = 1.5.dp,
+                                                    color = if (isFlagged) RawColors.ErrorCoral.copy(alpha = 0.6f) else RawColors.Divider,
+                                                    shape = RoundedCornerShape(26.dp)
+                                                )
+                                                .padding(14.dp),
+                                            verticalArrangement = Arrangement.spacedBy(10.dp)
                                         ) {
-                                            Text(
-                                                text = msg,
-                                                fontFamily = BricolageFamily,
-                                                fontWeight = FontWeight.SemiBold,
-                                                fontSize = 13.5.sp,
-                                                color = RawColors.ErrorCoral
-                                            )
-                                            if (needsStructuralPrompt) {
-                                                RawSecondaryButton(
-                                                    text = if (promptCopied) "Copied fix prompt!" else "Copy Cloud AI fix prompt",
-                                                    height = 42.dp,
-                                                    leadingIcon = if (promptCopied) RawIconType.CHECK else RawIconType.COPY,
-                                                    onClick = {
-                                                        val fixPrompt = KeyframeSheetGenerator.buildFixPrompt(
-                                                            samples = res.samples,
-                                                            title = project.title.ifBlank { "Untitled Reel" },
-                                                            durationSec = res.durationSec,
-                                                            htmlCode = resolvedHtml
-                                                        )
-                                                        val cb = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
-                                                        cb.setPrimaryClip(ClipData.newPlainText("raw_edit fix prompt", fixPrompt))
-                                                        haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-                                                        promptCopied = true
-                                                        toastMsg = "Prompt B + HTML copied"
-                                                        scope.launch {
-                                                            delay(2000)
-                                                            promptCopied = false
-                                                        }
-                                                    }
-                                                )
-                                            }
-                                            if (isHardBlockedUi) {
-                                                RawSecondaryButton(
-                                                    text = "Gemini API Settings",
-                                                    height = 42.dp,
-                                                    leadingIcon = RawIconType.KEY,
-                                                    onClick = onSwitchGroqKey
-                                                )
-                                            }
-                                        }
-                                    }
-
-                                    reviewResult?.let { rev ->
-                                        Text(
-                                            text = rev.summary,
-                                            fontFamily = BricolageFamily,
-                                            fontWeight = FontWeight.SemiBold,
-                                            fontSize = 14.sp,
-                                            color = RawColors.TextPrimary
-                                        )
-                                        rev.issues.forEach { issue ->
+                                            // Frame Header & OK/FLAGGED Toggle Chip
                                             Row(
-                                                modifier = Modifier
-                                                    .fillMaxWidth()
-                                                    .clip(RoundedCornerShape(18.dp))
-                                                    .background(RawColors.RaisedCard)
-                                                    .clickable {
-                                                        val idxFromSample = issue.sampleIndex.takeIf { it in res.samples.indices }
-                                                        val frameNum = Regex("\\d+").find(issue.frame)?.value?.toIntOrNull()
-                                                        if (idxFromSample != null) {
-                                                            inspectingIndex = idxFromSample
-                                                        } else if (frameNum != null && res.samples.isNotEmpty()) {
-                                                            inspectingIndex = (frameNum - 1).coerceIn(0, res.samples.lastIndex)
-                                                        }
-                                                    }
-                                                    .padding(12.dp),
-                                                verticalAlignment = Alignment.CenterVertically,
-                                                horizontalArrangement = Arrangement.spacedBy(10.dp)
+                                                modifier = Modifier.fillMaxWidth(),
+                                                horizontalArrangement = Arrangement.SpaceBetween,
+                                                verticalAlignment = Alignment.CenterVertically
                                             ) {
-                                                Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                                                Column {
                                                     Text(
-                                                        text = "${issue.frame}  \u2022  ${issue.time}",
+                                                        text = String.format(
+                                                            Locale.US,
+                                                            "Frame #%02d \u2022 t=%.2fs",
+                                                            sample.index + 1,
+                                                            sample.timeSec
+                                                        ),
+                                                        fontFamily = JetBrainsMonoFamily,
+                                                        fontWeight = FontWeight.Bold,
+                                                        fontSize = 14.5.sp,
+                                                        color = RawColors.TextPrimary
+                                                    )
+                                                    Text(
+                                                        text = sample.sceneLabel.ifBlank { "Scene" },
+                                                        fontFamily = BricolageFamily,
+                                                        fontSize = 12.sp,
+                                                        color = RawColors.TextMuted
+                                                    )
+                                                }
+
+                                                // Full user control OK / FLAGGED toggle button
+                                                Row(
+                                                    modifier = Modifier
+                                                        .clip(CircleShape)
+                                                        .background(if (isFlagged) RawColors.ErrorSoft else RawColors.AccentSoft)
+                                                        .border(
+                                                            width = 1.dp,
+                                                            color = if (isFlagged) RawColors.ErrorBorder else Color.Transparent,
+                                                            shape = CircleShape
+                                                        )
+                                                        .clickable {
+                                                            userFlaggedMap[sample.index] = !isFlagged
+                                                            haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                                                        }
+                                                        .padding(horizontal = 14.dp, vertical = 7.dp),
+                                                    verticalAlignment = Alignment.CenterVertically,
+                                                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                                                ) {
+                                                    Box(
+                                                        modifier = Modifier
+                                                            .size(8.dp)
+                                                            .clip(CircleShape)
+                                                            .background(if (isFlagged) RawColors.ErrorCoral else RawColors.Tan)
+                                                    )
+                                                    Text(
+                                                        text = if (isFlagged) "FLAGGED" else "OK",
                                                         fontFamily = JetBrainsMonoFamily,
                                                         fontWeight = FontWeight.Bold,
                                                         fontSize = 12.sp,
-                                                        color = RawColors.Tan
+                                                        color = if (isFlagged) RawColors.ErrorCoral else RawColors.Tan
                                                     )
-                                                    if (issue.problem.isNotBlank()) {
+                                                }
+                                            }
+
+                                            // 16:9 Image Box
+                                            Box(
+                                                modifier = Modifier
+                                                    .fillMaxWidth()
+                                                    .aspectRatio(16f / 9f)
+                                                    .clip(RoundedCornerShape(18.dp))
+                                                    .background(Color.Black)
+                                                    .clickable { inspectingIndex = sample.index }
+                                            ) {
+                                                val imageFile = File(sample.effectiveImagePath)
+                                                AsyncImage(
+                                                    model = ImageRequest.Builder(context)
+                                                        .data(imageFile)
+                                                        .size(960, 540)
+                                                        .memoryCachePolicy(CachePolicy.DISABLED)
+                                                        .diskCachePolicy(CachePolicy.DISABLED)
+                                                        .build(),
+                                                    contentDescription = "Frame ${sample.index + 1}",
+                                                    contentScale = ContentScale.Crop,
+                                                    modifier = Modifier.fillMaxSize()
+                                                )
+
+                                                if (hasAnnotation) {
+                                                    Box(
+                                                        modifier = Modifier
+                                                            .align(Alignment.TopEnd)
+                                                            .padding(10.dp)
+                                                            .clip(CircleShape)
+                                                            .background(RawColors.ErrorCoral)
+                                                            .padding(horizontal = 9.dp, vertical = 4.dp)
+                                                    ) {
                                                         Text(
-                                                            text = issue.problem,
-                                                            fontFamily = BricolageFamily,
-                                                            fontWeight = FontWeight.SemiBold,
-                                                            fontSize = 13.5.sp,
-                                                            color = RawColors.TextPrimary
-                                                        )
-                                                    }
-                                                    if (issue.fix.isNotBlank()) {
-                                                        Text(
-                                                            text = "Fix: ${issue.fix}",
-                                                            fontFamily = BricolageFamily,
-                                                            fontWeight = FontWeight.Medium,
-                                                            fontSize = 12.5.sp,
-                                                            color = RawColors.TextMuted
+                                                            text = "Circled Defect",
+                                                            fontFamily = JetBrainsMonoFamily,
+                                                            fontWeight = FontWeight.Bold,
+                                                            fontSize = 10.5.sp,
+                                                            color = RawColors.Ink
                                                         )
                                                     }
                                                 }
-                                                RawIcon(RawIconType.CHEVRON_RIGHT, size = 16.dp, tint = RawColors.TextMuted)
+                                            }
+
+                                            // Circle defect button & details
+                                            Row(
+                                                modifier = Modifier.fillMaxWidth(),
+                                                horizontalArrangement = Arrangement.SpaceBetween,
+                                                verticalAlignment = Alignment.CenterVertically
+                                            ) {
+                                                if (isFlagged) {
+                                                    RawSecondaryButton(
+                                                        text = if (hasAnnotation) "Edit Circled Defect" else "Circle Defect Area",
+                                                        height = 42.dp,
+                                                        leadingIcon = RawIconType.EDIT,
+                                                        fillWidth = false,
+                                                        onClick = {
+                                                            drawingAnnotationForIndex = sample.index
+                                                        }
+                                                    )
+                                                } else {
+                                                    Text(
+                                                        text = "Frame is marked clean (OK)",
+                                                        fontFamily = JetBrainsMonoFamily,
+                                                        fontSize = 11.5.sp,
+                                                        color = RawColors.TextMuted
+                                                    )
+                                                }
+
+                                                Text(
+                                                    text = "${page + 1} of ${activeSamples.size}",
+                                                    fontFamily = JetBrainsMonoFamily,
+                                                    fontSize = 12.sp,
+                                                    color = RawColors.TextMuted
+                                                )
+                                            }
+
+                                            if (sample.warnings.isNotEmpty() || sample.autoFitCount > 0) {
+                                                Text(
+                                                    text = (sample.warnings + sample.autoFitNotes).joinToString("; ").take(90),
+                                                    fontFamily = BricolageFamily,
+                                                    fontSize = 12.sp,
+                                                    color = RawColors.TextMuted,
+                                                    maxLines = 1,
+                                                    overflow = TextOverflow.Ellipsis
+                                                )
                                             }
                                         }
                                     }
-                                }
-                            }
 
-                            // Offline Cloud AI Export Card (.tiles)
-                            item(span = { GridItemSpan(2) }) {
+                                    // Quick Slider to Jump to any Frame
+                                    if (activeSamples.size > 1) {
+                                        Column(
+                                            modifier = Modifier
+                                                .fillMaxWidth()
+                                                .clip(RoundedCornerShape(18.dp))
+                                                .background(RawColors.CardSurface)
+                                                .padding(horizontal = 16.dp, vertical = 10.dp)
+                                        ) {
+                                            Row(
+                                                modifier = Modifier.fillMaxWidth(),
+                                                horizontalArrangement = Arrangement.SpaceBetween
+                                            ) {
+                                                Text(
+                                                    text = "Jump to Frame",
+                                                    fontFamily = JetBrainsMonoFamily,
+                                                    fontSize = 11.5.sp,
+                                                    color = RawColors.TextMuted
+                                                )
+                                                Text(
+                                                    text = "Frame #${activeSamples[pagerState.currentPage].index + 1}",
+                                                    fontFamily = JetBrainsMonoFamily,
+                                                    fontWeight = FontWeight.Bold,
+                                                    fontSize = 11.5.sp,
+                                                    color = RawColors.Tan
+                                                )
+                                            }
+                                            Slider(
+                                                value = pagerState.currentPage.toFloat(),
+                                                onValueChange = { targetPage ->
+                                                    scope.launch {
+                                                        pagerState.scrollToPage(targetPage.toInt().coerceIn(0, activeSamples.lastIndex))
+                                                    }
+                                                },
+                                                valueRange = 0f..activeSamples.lastIndex.toFloat(),
+                                                steps = (activeSamples.size - 2).coerceAtLeast(0),
+                                                colors = SliderDefaults.colors(
+                                                    thumbColor = RawColors.Tan,
+                                                    activeTrackColor = RawColors.Tan,
+                                                    inactiveTrackColor = RawColors.RaisedCard
+                                                )
+                                            )
+                                        }
+                                    }
+                                }
+
+                                // Offline Export Card (PDF / ZIP with circled images / Prompt)
                                 Column(
                                     modifier = Modifier
                                         .fillMaxWidth()
-                                        .clip(RoundedCornerShape(28.dp))
+                                        .clip(RoundedCornerShape(26.dp))
                                         .background(RawColors.CardSurface)
                                         .padding(18.dp),
                                     verticalArrangement = Arrangement.spacedBy(10.dp)
                                 ) {
                                     Column {
                                         Text(
-                                            text = "Export sheet for Cloud AI",
+                                            text = "Export for Cloud AI Tools",
                                             fontFamily = BricolageFamily,
                                             fontWeight = FontWeight.Bold,
                                             fontSize = 19.sp,
                                             color = RawColors.TextPrimary
                                         )
                                         Text(
-                                            text = "0 API cost",
+                                            text = "ZIP & PDF bundles contain all circled defect frames \u2022 0 API cost",
                                             style = RawTypography.labelMedium
                                         )
                                     }
@@ -1194,17 +1036,17 @@ fun KeyframeSheetScreen(
                                         modifier = Modifier.fillMaxWidth(),
                                         horizontalArrangement = Arrangement.spacedBy(10.dp)
                                     ) {
-                                        ExportTileButton(
+                                        ExportPillButton(
                                             text = "Download PDF",
-                                            enabled = !exportBusy,
                                             icon = RawIconType.DOWNLOAD,
+                                            enabled = !exportBusy,
                                             onClick = { exportPdf(share = false) },
                                             modifier = Modifier.weight(1f)
                                         )
-                                        ExportTileButton(
+                                        ExportPillButton(
                                             text = "Share PDF",
-                                            enabled = !exportBusy,
                                             icon = RawIconType.SHARE,
+                                            enabled = !exportBusy,
                                             onClick = { exportPdf(share = true) },
                                             modifier = Modifier.weight(1f)
                                         )
@@ -1214,38 +1056,38 @@ fun KeyframeSheetScreen(
                                         modifier = Modifier.fillMaxWidth(),
                                         horizontalArrangement = Arrangement.spacedBy(10.dp)
                                     ) {
-                                        ExportTileButton(
+                                        ExportPillButton(
                                             text = "Download ZIP",
-                                            enabled = !exportBusy,
                                             icon = RawIconType.DOWNLOAD,
+                                            enabled = !exportBusy,
                                             onClick = { exportZip(share = false) },
                                             modifier = Modifier.weight(1f)
                                         )
-                                        ExportTileButton(
+                                        ExportPillButton(
                                             text = "Share ZIP",
-                                            enabled = !exportBusy,
                                             icon = RawIconType.SHARE,
+                                            enabled = !exportBusy,
                                             onClick = { exportZip(share = true) },
                                             modifier = Modifier.weight(1f)
                                         )
                                     }
 
                                     BigPrimaryButton(
-                                        text = if (promptCopied) "Copied fix prompt!" else "Copy targeted AI fix prompt",
-                                        height = 50.dp,
+                                        text = if (promptCopied) "Copied targeted fix prompt!" else "Copy targeted AI fix prompt",
+                                        height = 48.dp,
                                         leadingIcon = if (promptCopied) RawIconType.CHECK else RawIconType.COPY,
                                         onClick = {
                                             val fixPrompt = KeyframeSheetGenerator.buildFixPrompt(
-                                                samples = res.samples,
+                                                samples = getEffectiveSamples(),
                                                 title = project.title.ifBlank { "Untitled Reel" },
-                                                durationSec = res.durationSec,
+                                                durationSec = durationSec,
                                                 htmlCode = resolvedHtml
                                             )
                                             val cb = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
                                             cb.setPrimaryClip(ClipData.newPlainText("raw_edit fix prompt", fixPrompt))
                                             haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
                                             promptCopied = true
-                                            toastMsg = "Prompt B + HTML copied"
+                                            toastMsg = "Targeted prompt & HTML copied!"
                                             scope.launch {
                                                 delay(2000)
                                                 promptCopied = false
@@ -1264,63 +1106,323 @@ fun KeyframeSheetScreen(
                                     )
                                 }
                             }
+                        } else {
+                            // Scenes Mode with Inline Scene AI Chatbot
+                            Column(
+                                modifier = Modifier
+                                    .fillMaxSize()
+                                    .verticalScroll(rememberScrollState())
+                                    .padding(bottom = 118.dp),
+                                verticalArrangement = Arrangement.spacedBy(14.dp)
+                            ) {
+                                // Scene Selector Row
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .horizontalScroll(rememberScrollState()),
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                ) {
+                                    sceneGroups.forEachIndexed { idx, sc ->
+                                        val isSel = idx == selectedSceneIndex
+                                        Box(
+                                            modifier = Modifier
+                                                .clip(RoundedCornerShape(16.dp))
+                                                .background(if (isSel) RawColors.Tan else RawColors.CardSurface)
+                                                .border(1.dp, if (isSel) RawColors.Tan else RawColors.Divider, RoundedCornerShape(16.dp))
+                                                .clickable { selectedSceneIndex = idx }
+                                                .padding(horizontal = 14.dp, vertical = 9.dp)
+                                        ) {
+                                            Text(
+                                                text = "${sc.label} (${String.format(Locale.US, "%.1f", sc.startSec)}s)",
+                                                fontFamily = JetBrainsMonoFamily,
+                                                fontWeight = FontWeight.Bold,
+                                                fontSize = 12.sp,
+                                                color = if (isSel) RawColors.Ink else RawColors.TextPrimary
+                                            )
+                                        }
+                                    }
+                                }
 
-                            if (flaggedOnly && flaggedSamples.isEmpty()) {
-                                item(span = { GridItemSpan(2) }) {
+                                val currentScene = sceneGroups.getOrNull(selectedSceneIndex) ?: sceneGroups.firstOrNull()
+
+                                // Full Scene Preview Card
+                                if (currentScene != null) {
                                     Column(
                                         modifier = Modifier
                                             .fillMaxWidth()
-                                            .clip(RoundedCornerShape(28.dp))
+                                            .clip(RoundedCornerShape(26.dp))
                                             .background(RawColors.CardSurface)
-                                            .border(1.dp, RawColors.AccentBorder, RoundedCornerShape(28.dp))
-                                            .padding(20.dp),
-                                        horizontalAlignment = Alignment.CenterHorizontally,
-                                        verticalArrangement = Arrangement.spacedBy(8.dp)
+                                            .padding(14.dp),
+                                        verticalArrangement = Arrangement.spacedBy(10.dp)
                                     ) {
-                                        RawPixelMascot(kind = PixelMascotKind.LENS_BOT, size = 48.dp)
-                                        Text(
-                                            text = "All ${res.samples.size} frames look clean",
-                                            style = RawTypography.titleMedium,
-                                            color = RawColors.Tan
-                                        )
-                                        Text(
-                                            text = "No edge clips or auto-fit resizes were flagged.",
-                                            style = RawTypography.bodyMedium
-                                        )
-                                        Spacer(modifier = Modifier.height(4.dp))
-                                        RawSecondaryButton(
-                                            text = "Show all frames",
-                                            height = 46.dp,
-                                            fillWidth = false,
-                                            onClick = { flaggedOnly = false }
-                                        )
+                                        Row(
+                                            modifier = Modifier.fillMaxWidth(),
+                                            horizontalArrangement = Arrangement.SpaceBetween,
+                                            verticalAlignment = Alignment.CenterVertically
+                                        ) {
+                                            Text(
+                                                text = "Scene: ${currentScene.label} (${String.format(Locale.US, "%.2fs - %.2fs", currentScene.startSec, currentScene.endSec)})",
+                                                fontFamily = BricolageFamily,
+                                                fontWeight = FontWeight.Bold,
+                                                fontSize = 17.sp,
+                                                color = RawColors.TextPrimary
+                                            )
+                                            Box(
+                                                modifier = Modifier
+                                                    .clip(CircleShape)
+                                                    .background(RawColors.AccentSoft)
+                                                    .padding(horizontal = 10.dp, vertical = 4.dp)
+                                            ) {
+                                                Text(
+                                                    text = "FULL SCENE",
+                                                    fontFamily = JetBrainsMonoFamily,
+                                                    fontSize = 10.5.sp,
+                                                    color = RawColors.Tan
+                                                )
+                                            }
+                                        }
+
+                                        Box(
+                                            modifier = Modifier
+                                                .fillMaxWidth()
+                                                .aspectRatio(16f / 9f)
+                                                .clip(RoundedCornerShape(18.dp))
+                                                .background(Color.Black)
+                                        ) {
+                                            val scSample = currentScene.sample
+                                            if (scSample != null) {
+                                                AsyncImage(
+                                                    model = ImageRequest.Builder(context)
+                                                        .data(File(scSample.effectiveImagePath))
+                                                        .size(960, 540)
+                                                        .memoryCachePolicy(CachePolicy.DISABLED)
+                                                        .diskCachePolicy(CachePolicy.DISABLED)
+                                                        .build(),
+                                                    contentDescription = currentScene.label,
+                                                    contentScale = ContentScale.Crop,
+                                                    modifier = Modifier.fillMaxSize()
+                                                )
+                                            } else {
+                                                Box(
+                                                    modifier = Modifier.fillMaxSize(),
+                                                    contentAlignment = Alignment.Center
+                                                ) {
+                                                    Text(
+                                                        text = "Scene preview at t=${String.format(Locale.US, "%.2fs", currentScene.startSec)}",
+                                                        fontFamily = JetBrainsMonoFamily,
+                                                        color = RawColors.TextMuted,
+                                                        fontSize = 13.sp
+                                                    )
+                                                }
+                                            }
+                                        }
                                     }
-                                }
-                            } else {
-                                itemsIndexed(
-                                    items = visibleSamples,
-                                    key = { _, item -> "${captureGen}_${item.index}" }
-                                ) { _, sample ->
-                                    ContactSheetFrameTile(
-                                        sample = sample,
-                                        cacheKeyTag = "${captureGen}_${selectedMode.name}",
-                                        onClick = { inspectingIndex = sample.index }
-                                    )
+
+                                    // Inline Scene AI Chatbot
+                                    Column(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .clip(RoundedCornerShape(26.dp))
+                                            .background(RawColors.CardSurface)
+                                            .padding(16.dp),
+                                        verticalArrangement = Arrangement.spacedBy(10.dp)
+                                    ) {
+                                        Row(
+                                            verticalAlignment = Alignment.CenterVertically,
+                                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                        ) {
+                                            RawPixelMascot(kind = PixelMascotKind.CODE_BOT, size = 26.dp)
+                                            Column {
+                                                Text(
+                                                    text = "SCENE AI FIX CHATBOT",
+                                                    fontFamily = JetBrainsMonoFamily,
+                                                    fontWeight = FontWeight.Bold,
+                                                    fontSize = 11.sp,
+                                                    letterSpacing = 0.8.sp,
+                                                    color = RawColors.Tan
+                                                )
+                                                Text(
+                                                    text = "Tell the chatbot what to fix in ${currentScene.label}",
+                                                    fontFamily = BricolageFamily,
+                                                    fontSize = 13.sp,
+                                                    color = RawColors.TextMuted
+                                                )
+                                            }
+                                        }
+
+                                        // Quick suggestions
+                                        Row(
+                                            modifier = Modifier
+                                                .fillMaxWidth()
+                                                .horizontalScroll(rememberScrollState()),
+                                            horizontalArrangement = Arrangement.spacedBy(6.dp)
+                                        ) {
+                                            ScenePromptPill("Fix overlapping text in ${currentScene.label}") {
+                                                sceneChatInput = "Fix overlapping text in ${currentScene.label} and ensure clear spacing."
+                                            }
+                                            ScenePromptPill("Make headline bigger in ${currentScene.label}") {
+                                                sceneChatInput = "Increase headline font size in ${currentScene.label} by 20% and make it punchier."
+                                            }
+                                            ScenePromptPill("Fix clipped edges in ${currentScene.label}") {
+                                                sceneChatInput = "Ensure no text or cards clip outside the 1920x1080 stage in ${currentScene.label}."
+                                            }
+                                        }
+
+                                        // Chat log messages
+                                        sceneChatLog.takeLast(4).forEach { msg ->
+                                            Box(
+                                                modifier = Modifier
+                                                    .fillMaxWidth()
+                                                    .clip(RoundedCornerShape(14.dp))
+                                                    .background(if (msg.isUser) RawColors.AccentSoft else RawColors.RaisedCard)
+                                                    .padding(10.dp)
+                                            ) {
+                                                Text(
+                                                    text = (if (msg.isUser) "You: " else "AI: ") + msg.text,
+                                                    fontFamily = BricolageFamily,
+                                                    fontSize = 13.sp,
+                                                    color = if (msg.isUser) RawColors.TextPrimary else RawColors.Tan
+                                                )
+                                            }
+                                        }
+
+                                        // Chat Input Row
+                                        Row(
+                                            modifier = Modifier.fillMaxWidth(),
+                                            verticalAlignment = Alignment.CenterVertically,
+                                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                        ) {
+                                            OutlinedTextField(
+                                                value = sceneChatInput,
+                                                onValueChange = { sceneChatInput = it },
+                                                placeholder = {
+                                                    Text(
+                                                        text = "E.g. Fix title overlap, make subtitle bold...",
+                                                        fontSize = 12.5.sp,
+                                                        color = RawColors.TextMuted
+                                                    )
+                                                },
+                                                modifier = Modifier.weight(1f),
+                                                shape = RoundedCornerShape(20.dp),
+                                                colors = OutlinedTextFieldDefaults.colors(
+                                                    focusedBorderColor = RawColors.Tan,
+                                                    unfocusedBorderColor = RawColors.Divider,
+                                                    focusedContainerColor = RawColors.BgPrimary,
+                                                    unfocusedContainerColor = RawColors.BgPrimary,
+                                                    cursorColor = RawColors.Tan
+                                                ),
+                                                textStyle = RawTypography.bodyMedium.copy(fontSize = 13.sp)
+                                            )
+
+                                            CircleActionButton(
+                                                icon = RawIconType.SPARK,
+                                                size = 44.dp,
+                                                backgroundColor = if (sceneChatInput.isNotBlank() && !sceneChatBusy) RawColors.Tan else RawColors.RaisedCard,
+                                                iconTint = if (sceneChatInput.isNotBlank() && !sceneChatBusy) RawColors.Ink else RawColors.TextMuted,
+                                                onClick = {
+                                                    val promptToSend = sceneChatInput.trim()
+                                                    if (promptToSend.isEmpty() || sceneChatBusy) return@CircleActionButton
+                                                    val userKey = userProfile?.geminiApiKey ?: apiKey
+                                                    if (userKey.isBlank()) {
+                                                        toastMsg = "Add your Gemini API key in Profile first."
+                                                        onOpenGroqKey()
+                                                        return@CircleActionButton
+                                                    }
+
+                                                    sceneChatBusy = true
+                                                    sceneChatLog.add(ChatMessage(isUser = true, text = promptToSend))
+                                                    sceneChatInput = ""
+
+                                                    scope.launch {
+                                                        try {
+                                                            val fixSysPrompt = """
+You are an expert HTML5 motion code engineer for raw_edit.
+The user wants to fix Scene ${currentScene.label} (t = ${currentScene.startSec}s to ${currentScene.endSec}s).
+Instructions: ${promptToSend}
+
+Output targeted patches in <<<SEARCH ... ===REPLACE ... >>> format, OR the full updated HTML if structural redesign is needed.
+Spend tokens on fixing code, not talking.
+                                                            """.trimIndent()
+
+                                                            val res = geminiRouter.generate(
+                                                                apiKey = userKey,
+                                                                prompt = "Current HTML:\n$resolvedHtml\n\nFix scene ${currentScene.label}: $promptToSend",
+                                                                systemInstruction = fixSysPrompt,
+                                                                routeMode = GeminiRouteMode.JSON_WORKHORSE,
+                                                                expectJson = false
+                                                            )
+
+                                                            sceneChatBusy = false
+                                                            res.onSuccess { genRes ->
+                                                                val outputText = genRes.text
+                                                                val patches = GroqCodec.parseClaudeSearchReplacePatches(outputText)
+                                                                if (patches.isNotEmpty()) {
+                                                                    val outcome = GroqCodec.applyExactOnceEdits(resolvedHtml, patches)
+                                                                    if (outcome.appliedCount > 0) {
+                                                                        val validation = CodeValidator.validateFull(context, cacheManager, outcome.updatedHtml)
+                                                                        if (validation.isValid) {
+                                                                            resolvedHtml = validation.cleanedHtml
+                                                                            onApplyFixedHtml(validation.cleanedHtml, validation.durationSec)
+                                                                            captureGen++
+                                                                            sceneChatLog.add(ChatMessage(isUser = false, text = "Applied fix to ${currentScene.label} (${outcome.appliedCount} patches). Recapturing frames..."))
+                                                                            toastMsg = "Fixed ${currentScene.label}!"
+                                                                        } else {
+                                                                            sceneChatLog.add(ChatMessage(isUser = false, text = "Validation issue: ${validation.summaryMessage}"))
+                                                                        }
+                                                                    } else {
+                                                                        sceneChatLog.add(ChatMessage(isUser = false, text = "Could not match patch target in HTML. Try a different instruction."))
+                                                                    }
+                                                                } else if (outputText.contains("<!DOCTYPE html", ignoreCase = true)) {
+                                                                    val fullHtml = outputText.substringAfter("<!DOCTYPE html").let { "<!DOCTYPE html$it" }.substringBeforeLast("</html>") + "</html>"
+                                                                    val validation = CodeValidator.validateFull(context, cacheManager, fullHtml)
+                                                                    if (validation.isValid) {
+                                                                        resolvedHtml = validation.cleanedHtml
+                                                                        onApplyFixedHtml(validation.cleanedHtml, validation.durationSec)
+                                                                        captureGen++
+                                                                        sceneChatLog.add(ChatMessage(isUser = false, text = "Applied full HTML update for ${currentScene.label}!"))
+                                                                        toastMsg = "Scene updated!"
+                                                                    } else {
+                                                                        sceneChatLog.add(ChatMessage(isUser = false, text = "Validation failed: ${validation.summaryMessage}"))
+                                                                    }
+                                                                } else {
+                                                                    sceneChatLog.add(ChatMessage(isUser = false, text = outputText.take(200)))
+                                                                }
+                                                            }.onFailure { err ->
+                                                                sceneChatLog.add(ChatMessage(isUser = false, text = "Gemini Error: ${err.message}"))
+                                                            }
+                                                        } catch (e: Exception) {
+                                                            sceneChatBusy = false
+                                                            sceneChatLog.add(ChatMessage(isUser = false, text = "Error: ${e.message}"))
+                                                        }
+                                                    }
+                                                }
+                                            )
+                                        }
+
+                                        if (sceneChatBusy) {
+                                            Row(
+                                                verticalAlignment = Alignment.CenterVertically,
+                                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                            ) {
+                                                CircularProgressIndicator(modifier = Modifier.size(14.dp), color = RawColors.Tan, strokeWidth = 2.dp)
+                                                Text(
+                                                    text = "Applying fix with Gemini...",
+                                                    fontFamily = JetBrainsMonoFamily,
+                                                    fontSize = 11.5.sp,
+                                                    color = RawColors.TextMuted
+                                                )
+                                            }
+                                        }
+                                    }
                                 }
                             }
                         }
-
-                        FeatheredScrollEdges(
-                            gridState = gridState,
-                            topHeight = 34.dp,
-                            bottomHeight = 112.dp,
-                            alwaysShowBottom = true
-                        )
                     }
                 }
             }
         }
 
+        // Bottom Action Bar
         Box(
             modifier = Modifier
                 .align(Alignment.BottomCenter)
@@ -1358,12 +1460,13 @@ fun KeyframeSheetScreen(
         )
     }
 
-    // Zoom Inspection Modal (.pn.mdl)
+    // Zoom Inspection Modal
     val activeIdx = inspectingIndex
     val samplesList = sheetResult?.samples
     if (activeIdx != null && samplesList != null) {
         val sample = samplesList.getOrNull(activeIdx)
         if (sample != null) {
+            val effectivePath = annotatedMap[sample.index] ?: sample.effectiveImagePath
             Dialog(
                 onDismissRequest = { inspectingIndex = null },
                 properties = DialogProperties(usePlatformDefaultWidth = false)
@@ -1385,16 +1488,14 @@ fun KeyframeSheetScreen(
                         Text(
                             text = String.format(
                                 Locale.US,
-                                "Frame #%02d  \u2022  t=%.2fs  \u2022  %s",
+                                "Frame #%02d \u2022 t=%.2fs \u2022 %s",
                                 sample.index + 1,
                                 sample.timeSec,
                                 sample.sceneLabel.ifBlank { "SCENE" }
                             ),
                             fontFamily = BricolageFamily,
                             fontWeight = FontWeight.Bold,
-                            fontSize = 24.sp,
-                            lineHeight = 28.sp,
-                            letterSpacing = (-0.6).sp,
+                            fontSize = 22.sp,
                             color = RawColors.TextPrimary,
                             maxLines = 1,
                             overflow = TextOverflow.Ellipsis,
@@ -1416,104 +1517,21 @@ fun KeyframeSheetScreen(
                             .background(Color.Black)
                             .border(
                                 1.5.dp,
-                                when {
-                                    sample.warnings.isNotEmpty() -> RawColors.ErrorCoral
-                                    sample.autoFitCount > 0 -> RawColors.Tan.copy(alpha = 0.65f)
-                                    else -> RawColors.Divider
-                                },
+                                if (sample.isFlagged) RawColors.ErrorCoral else RawColors.Tan.copy(alpha = 0.5f),
                                 RoundedCornerShape(24.dp)
                             )
                     ) {
                         AsyncImage(
                             model = ImageRequest.Builder(context)
-                                .data(File(sample.thumbPath))
-                                .size(960, 540)
-                                .memoryCacheKey("${sample.thumbPath}_zoom_${captureGen}_${selectedMode.name}")
+                                .data(File(effectivePath))
+                                .size(1920, 1080)
+                                .memoryCachePolicy(CachePolicy.DISABLED)
                                 .diskCachePolicy(CachePolicy.DISABLED)
                                 .build(),
-                            contentDescription = "Zoomed keyframe",
+                            contentDescription = "Zoom frame",
                             contentScale = ContentScale.Fit,
                             modifier = Modifier.fillMaxSize()
                         )
-                    }
-
-                    Column(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .heightIn(max = 180.dp)
-                            .verticalScroll(rememberScrollState()),
-                        verticalArrangement = Arrangement.spacedBy(8.dp)
-                    ) {
-                        sample.warnings.forEach { w ->
-                            Box(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .clip(RoundedCornerShape(16.dp))
-                                    .background(RawColors.ErrorSoft)
-                                    .padding(horizontal = 12.dp, vertical = 10.dp)
-                            ) {
-                                Text(
-                                    text = "WARNING: $w",
-                                    fontFamily = JetBrainsMonoFamily,
-                                    fontWeight = FontWeight.Medium,
-                                    fontSize = 13.sp,
-                                    lineHeight = 20.sp,
-                                    style = TextStyle(fontFeatureSettings = "tnum"),
-                                    color = RawColors.ErrorCoral
-                                )
-                            }
-                        }
-                        sample.autoFitNotes.forEach { note ->
-                            Box(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .clip(RoundedCornerShape(16.dp))
-                                    .background(RawColors.RaisedCard)
-                                    .padding(horizontal = 12.dp, vertical = 10.dp)
-                            ) {
-                                Text(
-                                    text = "AUTO-FIT: $note",
-                                    fontFamily = JetBrainsMonoFamily,
-                                    fontWeight = FontWeight.Medium,
-                                    fontSize = 13.sp,
-                                    lineHeight = 20.sp,
-                                    style = TextStyle(fontFeatureSettings = "tnum"),
-                                    color = RawColors.Tan
-                                )
-                            }
-                        }
-                        Box(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .clip(RoundedCornerShape(16.dp))
-                                .background(RawColors.RaisedCard)
-                                .padding(horizontal = 12.dp, vertical = 10.dp)
-                        ) {
-                            Text(
-                                text = "OK - all other text inside margins",
-                                fontFamily = JetBrainsMonoFamily,
-                                fontWeight = FontWeight.Medium,
-                                fontSize = 13.sp,
-                                style = TextStyle(fontFeatureSettings = "tnum"),
-                                color = RawColors.TextMuted
-                            )
-                        }
-                        Box(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .clip(RoundedCornerShape(16.dp))
-                                .background(RawColors.RaisedCard)
-                                .padding(horizontal = 12.dp, vertical = 10.dp)
-                        ) {
-                            Text(
-                                text = "OK - no external resources requested",
-                                fontFamily = JetBrainsMonoFamily,
-                                fontWeight = FontWeight.Medium,
-                                fontSize = 13.sp,
-                                style = TextStyle(fontFeatureSettings = "tnum"),
-                                color = RawColors.TextMuted
-                            )
-                        }
                     }
 
                     Row(
@@ -1522,39 +1540,47 @@ fun KeyframeSheetScreen(
                     ) {
                         RawSecondaryButton(
                             text = "Prev frame",
-                            height = 56.dp,
+                            height = 52.dp,
                             leadingIcon = RawIconType.CHEVRON_LEFT,
                             onClick = {
                                 inspectingIndex = (sample.index - 1 + samplesList.size) % samplesList.size
                             },
                             modifier = Modifier.weight(1f)
                         )
-                        RawPressButton(
+                        RawSecondaryButton(
+                            text = "Next frame",
+                            height = 52.dp,
+                            leadingIcon = RawIconType.CHEVRON_RIGHT,
                             onClick = {
                                 inspectingIndex = (sample.index + 1) % samplesList.size
                             },
                             modifier = Modifier.weight(1f)
-                        ) {
-                            Row(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .height(56.dp)
-                                    .clip(CircleShape)
-                                    .background(RawColors.RaisedCard),
-                                horizontalArrangement = Arrangement.Center,
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                Text("Next frame", style = RawTypography.labelLarge)
-                                Spacer(modifier = Modifier.width(6.dp))
-                                RawIcon(RawIconType.CHEVRON_RIGHT, size = 18.dp, tint = RawColors.TextPrimary)
-                            }
-                        }
+                        )
                     }
                 }
             }
         }
     }
 
+    // Circle Drawing Dialog
+    val drawIdx = drawingAnnotationForIndex
+    if (drawIdx != null && sheetResult != null) {
+        val sampleToDraw = sheetResult!!.samples.getOrNull(drawIdx)
+        if (sampleToDraw != null) {
+            KeyframeCircleDrawingDialog(
+                sample = sampleToDraw,
+                onDismiss = { drawingAnnotationForIndex = null },
+                onSaveAnnotation = { savedPath ->
+                    annotatedMap[sampleToDraw.index] = savedPath
+                    userFlaggedMap[sampleToDraw.index] = true
+                    drawingAnnotationForIndex = null
+                    toastMsg = "Saved issue circle for Frame #${sampleToDraw.index + 1}!"
+                }
+            )
+        }
+    }
+
+    // Paste AI Patch Dialog
     if (showPatchDialog) {
         Dialog(
             onDismissRequest = { if (!patchBusy) showPatchDialog = false },
@@ -1590,7 +1616,7 @@ fun KeyframeSheetScreen(
                                 color = RawColors.TextPrimary
                             )
                             Text(
-                                text = "Paste Claude Option A blocks (<<<SEARCH ... ===REPLACE ... >>>).",
+                                text = "Paste AI patch blocks (<<<SEARCH ... ===REPLACE ... >>>)",
                                 style = RawTypography.labelMedium,
                                 color = RawColors.TextMuted
                             )
@@ -1686,8 +1712,6 @@ fun KeyframeSheetScreen(
                                     if (validation.isValid) {
                                         resolvedHtml = validation.cleanedHtml
                                         onApplyFixedHtml(validation.cleanedHtml, validation.durationSec)
-                                        reviewResult = null
-                                        aiError = null
                                         showPatchDialog = false
                                         patchDraft = ""
                                         toastMsg = "Applied ${applyOutcome.appliedCount} patch(es) \u2014 re-capturing"
@@ -1707,173 +1731,78 @@ fun KeyframeSheetScreen(
 }
 
 @Composable
-private fun ContactSheetFrameTile(
-    sample: KeyframeSample,
-    cacheKeyTag: String,
+private fun FilterToggleChip(
+    label: String,
+    selected: Boolean,
     onClick: () -> Unit
 ) {
-    val context = LocalContext.current
-    val hasWarn = sample.warnings.isNotEmpty()
-    val hasFit = sample.autoFitCount > 0
-    val frameBorder = when {
-        hasWarn -> RawColors.ErrorCoral
-        hasFit -> RawColors.Tan.copy(alpha = 0.65f)
-        else -> Color.Transparent
-    }
-    val (statusLabel, statusBg, statusFg) = when {
-        hasWarn -> Triple("WARN", RawColors.ErrorSoft, RawColors.ErrorCoral)
-        hasFit -> Triple("FIT", RawColors.AccentSoft, RawColors.Tan)
-        else -> Triple("OK", RawColors.PillGrey, RawColors.TextMuted)
-    }
-
-    RawPressButton(onClick = onClick) {
-        Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .clip(RoundedCornerShape(24.dp))
-                .background(RawColors.CardSurface)
-                .padding(10.dp),
-            verticalArrangement = Arrangement.spacedBy(7.dp)
-        ) {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Text(
-                    text = String.format(Locale.US, "#%02d t=%.2fs", sample.index + 1, sample.timeSec),
-                    fontFamily = JetBrainsMonoFamily,
-                    fontWeight = FontWeight.Medium,
-                    fontSize = 11.5.sp,
-                    style = TextStyle(fontFeatureSettings = "tnum"),
-                    color = RawColors.TextMuted,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                    modifier = Modifier.weight(1f)
-                )
-                Box(
-                    modifier = Modifier
-                        .clip(CircleShape)
-                        .background(statusBg)
-                        .padding(horizontal = 8.dp, vertical = 3.dp)
-                ) {
-                    Text(
-                        text = statusLabel,
-                        fontFamily = JetBrainsMonoFamily,
-                        fontWeight = FontWeight.SemiBold,
-                        fontSize = 10.5.sp,
-                        style = TextStyle(fontFeatureSettings = "tnum"),
-                        color = statusFg
-                    )
-                }
-            }
-
-            Box(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .aspectRatio(16f / 9f)
-                    .clip(RoundedCornerShape(16.dp))
-                    .background(Color.Black)
-                    .then(
-                        if (frameBorder != Color.Transparent) {
-                            Modifier.border(1.5.dp, frameBorder, RoundedCornerShape(16.dp))
-                        } else Modifier
-                    )
-            ) {
-                val tileReq = remember(sample.thumbPath, cacheKeyTag) {
-                    ImageRequest.Builder(context)
-                        .data(File(sample.thumbPath))
-                        .size(480, 270)
-                        .memoryCacheKey("${sample.thumbPath}_$cacheKeyTag")
-                        .diskCachePolicy(CachePolicy.DISABLED)
-                        .build()
-                }
-                AsyncImage(
-                    model = tileReq,
-                    contentDescription = "Frame ${sample.index + 1}",
-                    contentScale = ContentScale.Crop,
-                    modifier = Modifier.fillMaxSize()
-                )
-            }
-
-            Text(
-                text = if (sample.sceneLabel.isNotBlank()) sample.sceneLabel else String.format(Locale.US, "%.2fs", sample.timeSec),
-                fontFamily = JetBrainsMonoFamily,
-                fontWeight = FontWeight.Medium,
-                fontSize = 11.5.sp,
-                style = TextStyle(fontFeatureSettings = "tnum"),
-                color = RawColors.TextMuted,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis
-            )
-        }
+    Box(
+        modifier = Modifier
+            .clip(CircleShape)
+            .background(if (selected) RawColors.Tan else RawColors.RaisedCard)
+            .clickable(onClick = onClick)
+            .padding(horizontal = 12.dp, vertical = 6.dp)
+    ) {
+        Text(
+            text = label,
+            fontFamily = JetBrainsMonoFamily,
+            fontWeight = FontWeight.SemiBold,
+            fontSize = 11.sp,
+            color = if (selected) RawColors.Ink else RawColors.TextMuted
+        )
     }
 }
 
 @Composable
-private fun ExportTileButton(
+private fun ExportPillButton(
     text: String,
     icon: RawIconType,
     enabled: Boolean,
     onClick: () -> Unit,
     modifier: Modifier = Modifier
 ) {
-    RawPressButton(
-        onClick = onClick,
-        enabled = enabled,
+    Box(
         modifier = modifier
+            .clip(RoundedCornerShape(16.dp))
+            .background(RawColors.RaisedCard)
+            .clickable(enabled = enabled, onClick = onClick)
+            .padding(vertical = 12.dp),
+        contentAlignment = Alignment.Center
     ) {
         Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .height(48.dp)
-                .clip(CircleShape)
-                .background(RawColors.RaisedCard)
-                .padding(horizontal = 8.dp),
-            horizontalArrangement = Arrangement.Center,
-            verticalAlignment = Alignment.CenterVertically
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(6.dp)
         ) {
-            RawIcon(type = icon, size = 15.dp, tint = RawColors.TextPrimary)
-            Spacer(modifier = Modifier.width(6.dp))
+            RawIcon(type = icon, size = 15.dp, tint = RawColors.Tan)
             Text(
                 text = text,
                 fontFamily = BricolageFamily,
-                fontWeight = FontWeight.Bold,
-                fontSize = 14.sp,
-                color = RawColors.TextPrimary,
-                maxLines = 1,
-                softWrap = false
+                fontWeight = FontWeight.SemiBold,
+                fontSize = 13.sp,
+                color = RawColors.TextPrimary
             )
         }
     }
 }
 
 @Composable
-private fun SheetTogglePill(
+private fun ScenePromptPill(
     label: String,
-    selected: Boolean,
     onClick: () -> Unit
 ) {
-    val bg by animateColorAsState(
-        targetValue = if (selected) RawColors.Tan else RawColors.RaisedCard,
-        animationSpec = tween(200, easing = RawEasings.Morph),
-        label = "sh_tog_bg"
-    )
     Box(
         modifier = Modifier
-            .height(40.dp)
             .clip(CircleShape)
-            .background(bg)
+            .background(RawColors.RaisedCard)
+            .border(1.dp, RawColors.Divider, CircleShape)
             .clickable(onClick = onClick)
-            .padding(horizontal = 16.dp),
-        contentAlignment = Alignment.Center
+            .padding(horizontal = 11.dp, vertical = 6.dp)
     ) {
         Text(
             text = label,
             fontFamily = BricolageFamily,
-            fontWeight = FontWeight.Bold,
-            fontSize = 14.sp,
-            color = if (selected) RawColors.Ink else RawColors.TextMuted
+            fontSize = 11.5.sp,
+            color = RawColors.TextMuted
         )
     }
 }

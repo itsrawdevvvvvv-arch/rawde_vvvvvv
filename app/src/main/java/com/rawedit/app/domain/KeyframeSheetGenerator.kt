@@ -73,8 +73,16 @@ data class KeyframeSample(
     val thumbPath: String,
     val autoFitCount: Int,
     val autoFitNotes: List<String>,
-    val warnings: List<String>
-)
+    val warnings: List<String>,
+    val isUserFlagged: Boolean? = null,
+    val annotatedThumbPath: String? = null
+) {
+    val isFlagged: Boolean
+        get() = isUserFlagged ?: (warnings.isNotEmpty() || autoFitCount > 0)
+
+    val effectiveImagePath: String
+        get() = annotatedThumbPath?.takeIf { File(it).exists() } ?: thumbPath
+}
 
 data class KeyframeSheetResult(
     val samples: List<KeyframeSample>,
@@ -932,6 +940,18 @@ $htmlSection
                 val report = buildTextReport(samples, title, durationSec)
                 zos.write(report.toByteArray(Charsets.UTF_8))
                 zos.closeEntry()
+
+                // Include individual frames (with circled/annotated images for flagged frames)
+                samples.forEach { s ->
+                    val imgFile = File(s.effectiveImagePath)
+                    if (imgFile.exists()) {
+                        val folder = if (s.isFlagged) "flagged_frames" else "frames"
+                        val entry = "$folder/frame_${String.format(Locale.US, "%03d", s.index + 1)}_t${String.format(Locale.US, "%.2f", s.timeSec)}s.jpg"
+                        zos.putNextEntry(ZipEntry(entry))
+                        imgFile.inputStream().use { it.copyTo(zos) }
+                        zos.closeEntry()
+                    }
+                }
             }
             outZipFile
         } finally {
@@ -1102,10 +1122,10 @@ $htmlSection
                 if (sample.sceneLabel.isNotBlank()) "  ${sample.sceneLabel}" else ""
             canvas.drawText(headStr, left + 12f, top + 27f, p.badgeTextPaint)
 
-            val (stLabel, stPaint) = when {
-                sample.warnings.isNotEmpty() -> "WARN" to p.statusWarnPaint
-                sample.autoFitCount > 0 -> "FIT" to p.statusFitPaint
-                else -> "OK" to p.statusOkPaint
+            val (stLabel, stPaint) = if (sample.isFlagged) {
+                "FLAGGED" to p.statusWarnPaint
+            } else {
+                "OK" to p.statusOkPaint
             }
             val stW = stPaint.measureText(stLabel)
             canvas.drawText(stLabel, left + cardW - stW - 12f, top + 27f, stPaint)
@@ -1119,7 +1139,7 @@ $htmlSection
             val imgTop = top + thumbHeaderH + (availH - targetH) * 0.5f
             imgRect.set(imgLeft, imgTop, imgLeft + targetW, imgTop + targetH)
 
-            val thumb = runCatching { BitmapFactory.decodeFile(sample.thumbPath) }.getOrNull()
+            val thumb = runCatching { BitmapFactory.decodeFile(sample.effectiveImagePath) }.getOrNull()
             if (thumb != null) {
                 canvas.drawBitmap(thumb, null, imgRect, p.imgPaint)
                 thumb.recycle()
@@ -1131,11 +1151,7 @@ $htmlSection
             canvas.drawRoundRect(pillRect, 6f, 6f, p.pillBgPaint)
             canvas.drawText(overlayLabel, imgLeft + 12f, imgTop + targetH - 11f, p.badgeTextPaint)
 
-            val borderPaint = when {
-                sample.warnings.isNotEmpty() -> p.borderWarn
-                sample.autoFitCount > 0 -> p.borderFit
-                else -> p.borderDefault
-            }
+            val borderPaint = if (sample.isFlagged) p.borderWarn else p.borderDefault
             canvas.drawRoundRect(cardRect, 14f, 14f, borderPaint)
         }
     }
