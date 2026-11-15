@@ -1134,16 +1134,16 @@ private fun ChatBubbleRow(
                 }
             }
             if (effectivePreviewPath.isNotBlank()) {
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .clip(RoundedCornerShape(14.dp))
-                        .background(RawColors.Tan)
-                        .clickable { onPreviewWebsite(effectivePreviewPath) }
-                        .padding(horizontal = 14.dp, vertical = 10.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.SpaceBetween
-                ) {
+                RawPressButton(onClick = { onPreviewWebsite(effectivePreviewPath) }) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(14.dp))
+                            .background(RawColors.Tan)
+                            .padding(horizontal = 14.dp, vertical = 12.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
                     Row(
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.spacedBy(8.dp)
@@ -1157,7 +1157,8 @@ private fun ChatBubbleRow(
                             color = RawColors.Ink
                         )
                     }
-                    RawIcon(RawIconType.ARROW_RIGHT, size = 14.dp, tint = RawColors.Ink)
+                        RawIcon(RawIconType.ARROW_RIGHT, size = 14.dp, tint = RawColors.Ink)
+                    }
                 }
             }
 
@@ -1215,44 +1216,46 @@ private fun ChatBubbleRow(
             // Select & Full Message Copy Row
             Row(
                 modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(6.dp, Alignment.End)
+                horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.End)
             ) {
-                Box(
-                    modifier = Modifier
-                        .clip(CircleShape)
-                        .background(if (isUser) Color.Black.copy(alpha = 0.12f) else RawColors.RaisedCard)
-                        .clickable { onSelectText() }
-                        .padding(horizontal = 10.dp, vertical = 5.dp)
-                ) {
-                    Text(
-                        text = "Select",
-                        fontFamily = JetBrainsMonoFamily,
-                        fontWeight = FontWeight.Bold,
-                        fontSize = 10.5.sp,
-                        color = if (isUser) RawColors.Ink else RawColors.TextMuted
-                    )
+                RawPressButton(onClick = onSelectText) {
+                    Box(
+                        modifier = Modifier
+                            .clip(CircleShape)
+                            .background(if (isUser) Color.Black.copy(alpha = 0.14f) else RawColors.RaisedCard)
+                            .padding(horizontal = 12.dp, vertical = 7.dp)
+                    ) {
+                        Text(
+                            text = "Select",
+                            fontFamily = JetBrainsMonoFamily,
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 11.sp,
+                            color = if (isUser) RawColors.Ink else RawColors.TextPrimary
+                        )
+                    }
                 }
-                Row(
-                    modifier = Modifier
-                        .clip(CircleShape)
-                        .background(if (isUser) Color.Black.copy(alpha = 0.12f) else RawColors.RaisedCard)
-                        .clickable { onCopyFull() }
-                        .padding(horizontal = 10.dp, vertical = 5.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(4.dp)
-                ) {
-                    RawIcon(
-                        type = RawIconType.COPY,
-                        size = 11.dp,
-                        tint = if (isUser) RawColors.Ink else RawColors.TextMuted
-                    )
-                    Text(
-                        text = "Copy",
-                        fontFamily = JetBrainsMonoFamily,
-                        fontWeight = FontWeight.Bold,
-                        fontSize = 10.5.sp,
-                        color = if (isUser) RawColors.Ink else RawColors.TextMuted
-                    )
+                RawPressButton(onClick = onCopyFull) {
+                    Row(
+                        modifier = Modifier
+                            .clip(CircleShape)
+                            .background(if (isUser) Color.Black.copy(alpha = 0.14f) else RawColors.RaisedCard)
+                            .padding(horizontal = 12.dp, vertical = 7.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(5.dp)
+                    ) {
+                        RawIcon(
+                            type = RawIconType.COPY,
+                            size = 12.dp,
+                            tint = if (isUser) RawColors.Ink else RawColors.Tan
+                        )
+                        Text(
+                            text = "Copy",
+                            fontFamily = JetBrainsMonoFamily,
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 11.sp,
+                            color = if (isUser) RawColors.Ink else RawColors.TextPrimary
+                        )
+                    }
                 }
             }
         }
