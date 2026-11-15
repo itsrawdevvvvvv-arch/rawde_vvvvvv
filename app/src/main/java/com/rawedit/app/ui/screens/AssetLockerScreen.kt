@@ -6,6 +6,7 @@ import android.content.Context
 import android.graphics.Bitmap
 import android.net.Uri
 import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
@@ -128,7 +129,7 @@ fun AssetLockerScreen(
     }
 
     val imagePicker = rememberLauncherForActivityResult(
-        contract = ActivityResultContracts.OpenDocument()
+        contract = ActivityResultContracts.PickVisualMedia()
     ) { uri ->
         if (uri != null) {
             onImportAsset(uri, false)
@@ -137,7 +138,7 @@ fun AssetLockerScreen(
     }
 
     val videoPicker = rememberLauncherForActivityResult(
-        contract = ActivityResultContracts.OpenDocument()
+        contract = ActivityResultContracts.PickVisualMedia()
     ) { uri ->
         if (uri != null) {
             onImportAsset(uri, true)
@@ -216,14 +217,14 @@ fun AssetLockerScreen(
                                     text = "Pick Image",
                                     height = 50.dp,
                                     leadingIcon = RawIconType.IMAGE,
-                                    onClick = { imagePicker.launch(arrayOf("image/*")) },
+                                    onClick = { imagePicker.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)) },
                                     modifier = Modifier.weight(1f)
                                 )
                                 RawSecondaryButton(
                                     text = "Pick Video",
                                     height = 50.dp,
                                     leadingIcon = RawIconType.FILM,
-                                    onClick = { videoPicker.launch(arrayOf("video/*")) },
+                                    onClick = { videoPicker.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.VideoOnly)) },
                                     modifier = Modifier.weight(1f)
                                 )
                             }
@@ -474,7 +475,11 @@ fun AssetLockerScreen(
                                             }
                                         }
                                     },
-                                    onEditNote = { editingNoteTarget = asset }
+                                    onEditNote = { editingNoteTarget = asset }.onFailure { err ->
+                                                toastMsg = err.message ?: "Could not load image for cutout"
+                                            }
+                                        }
+                                    }
                                 )
                             }
                         }
@@ -858,6 +863,15 @@ private fun AssetLockerCard(
                 enabled = !describing,
                 onClick = onEditNote,
                 modifier = Modifier.weight(1f)
+            )
+        }
+        if (!isClip) {
+            RawSecondaryButton(
+                text = if (isCutout) "Refine PNG Cutout (AI)" else "Make PNG Cutout (AI)",
+                height = 42.dp,
+                leadingIcon = RawIconType.CUTOUT,
+                enabled = !describing,
+                onClick = onMakeCutout
             )
         }
     }

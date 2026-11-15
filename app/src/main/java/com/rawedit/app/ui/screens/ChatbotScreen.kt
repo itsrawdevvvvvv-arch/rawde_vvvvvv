@@ -6,6 +6,17 @@ import android.content.Context
 import android.annotation.SuppressLint
 import android.os.Build
 import android.webkit.WebView
+import android.webkit.CookieManager
+import android.webkit.WebResourceRequest
+import androidx.activity.result.PickVisualMediaRequest
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.mutableIntStateOf
+import com.rawedit.app.domain.ChatbotBackgroundManager
+import android.webkit.WebChromeClient
+import androidx.compose.foundation.text.BasicTextField
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.platform.LocalClipboardManager
+import androidx.compose.ui.platform.LocalHapticFeedback
 import android.webkit.WebViewClient
 import androidx.compose.ui.viewinterop.AndroidView
 import com.rawedit.app.domain.ChatbotFileTools
@@ -120,6 +131,8 @@ fun RawChatbotScreen(
     onBack: () -> Unit
 ) {
     val context = LocalContext.current
+    val localClipboard = LocalClipboardManager.current
+    val haptic = LocalHapticFeedback.current
     val scope = rememberCoroutineScope()
     val listState = rememberLazyListState()
 
@@ -131,11 +144,22 @@ fun RawChatbotScreen(
     var currentSessionId by remember {
         mutableStateOf(sessions.firstOrNull()?.id ?: "chat_${System.currentTimeMillis()}")
     }
-    var messages by remember(currentSessionId) {
+    var messages by remember(currentSessionId, bgUpdateTick) {
         mutableStateOf(ChatbotEngine.loadChatHistory(cacheManager, currentSessionId))
+    }
+    LaunchedEffect(bgUpdateTick) {
+        messages = ChatbotEngine.loadChatHistory(cacheManager, currentSessionId)
+        sessions = ChatbotEngine.listChatSessions(cacheManager)
+    }
+    LaunchedEffect(bgToast) {
+        if (bgToast != null) {
+            toastMsg = bgToast
+            ChatbotBackgroundManager.clearToast()
+        }
     }
     var showHistoryDialog by remember { mutableStateOf(false) }
     var viewingFile by remember { mutableStateOf<File?>(null) }
+    var selectingText by remember { mutableStateOf<String?>(null) }
     var previewingWebsite by remember { mutableStateOf<File?>(null) }
     var showInAppBrowser by remember { mutableStateOf(false) }
     var browserInitialUrl by remember { mutableStateOf("https://www.instagram.com/rawde_vvvvvv/") }
@@ -145,7 +169,13 @@ fun RawChatbotScreen(
     var inputText by remember { mutableStateOf("") }
     var pendingAttachment by remember { mutableStateOf<ChatUploadedFile?>(null) }
     var uploadingFile by remember { mutableStateOf(false) }
-    var sending by remember { mutableStateOf(false) }
+    val activeBgSessions by ChatbotBackgroundManager.activeSessions.collectAsState()
+    val bgUpdateTick by ChatbotBackgroundManager.updateTick.collectAsState()
+    val bgToast by ChatbotBackgroundManager.lastToast.collectAsState()
+    val sending = currentSessionId in activeBgSessions
+    var showAttachChooser by remember { mutableStateOf(false) }
+    var renamingSession by remember { mutableStateOf<ChatSessionMeta?>(null) }
+    var renameDraft by remember { mutableStateOf("") }
     var toastMsg by remember { mutableStateOf<String?>(null) }
 
     LaunchedEffect(toastMsg) {
@@ -172,9 +202,33 @@ fun RawChatbotScreen(
     }
 
     fun copyFullText(text: String) {
-        val cb = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
-        cb.setPrimaryClip(ClipData.newPlainText("RAW EDIT AI", text))
-        toastMsg = "Message copied"
+        runCatching {
+            localClipboard.setText(AnnotatedString(text))
+        }
+        runCatching {
+            val cb = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+            cb.setPrimaryClip(ClipData.newPlainText("RAW EDIT AI", text))
+        }
+        haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+        toastMsg = "Copied to clipboard"
+    }
+
+    val galleryPicker = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.PickVisualMedia()
+    ) { uri ->
+        if (uri != null) {
+            uploadingFile = true
+            scope.launch {
+                val res = cacheManager.importChatAttachment(uri)
+                uploadingFile = false
+                res.onSuccess { uploaded ->
+                    pendingAttachment = uploaded
+                    toastMsg = "Attached ${uploaded.fileName}"
+                }.onFailure { err ->
+                    toastMsg = err.message ?: "Max file size is 500 MB"
+                }
+            }
+        }
     }
 
     val filePicker = rememberLauncherForActivityResult(
@@ -198,6 +252,7 @@ fun RawChatbotScreen(
     fun sendMessage(customPrompt: String? = null) {
         val textToSend = (customPrompt ?: inputText).trim()
         val attached = pendingAttachment
+        val browserCtx = pendingBrowserContext
         if (textToSend.isEmpty() && attached == null) return
         if (sending) return
 
@@ -229,45 +284,24 @@ fun RawChatbotScreen(
         pendingAttachment = null
         pendingBrowserContext = null
         pendingBrowserTitle = null
-        sending = true
 
-        scope.launch {
-            val res = ChatbotEngine.sendAppChatMessage(
-                context = context,
-                geminiRouter = geminiRouter,
-                cacheManager = cacheManager,
-                userPreferences = userPreferences,
-                repository = repository,
-                userProfile = userProfile,
-                allProjects = allProjects,
-                activeProject = activeProject,
-                allAssets = allAssets,
-                activePalette = activePalette,
-                history = updatedWithUser,
-                userText = effectiveUserText,
-                uploadedFile = attached,
-                browserPageContext = pendingBrowserContext
-            )
-            sending = false
-            res.onSuccess { outcome ->
-                val nextList = messages + outcome.assistantMessage
-                messages = nextList
-                ChatbotEngine.saveChatHistory(cacheManager, nextList, currentSessionId)
-                ChatbotEngine.upsertChatSessionMeta(cacheManager, currentSessionId, nextList)
-                sessions = ChatbotEngine.listChatSessions(cacheManager)
-                if (outcome.assistantMessage.appliedActions.isNotEmpty()) {
-                    toastMsg = outcome.assistantMessage.appliedActions.first()
-                }
-            }.onFailure { err ->
-                val errMsg = ChatMessageItem(
-                    role = "assistant",
-                    text = "Error: ${err.message ?: "Could not reach Gemini AI. Check your API key in Settings."}"
-                )
-                val nextList = messages + errMsg
-                messages = nextList
-                ChatbotEngine.saveChatHistory(cacheManager, nextList, currentSessionId)
-            }
-        }
+        ChatbotBackgroundManager.launchChatJob(
+            appContext = context.applicationContext,
+            sessionId = currentSessionId,
+            geminiRouter = geminiRouter,
+            cacheManager = cacheManager,
+            userPreferences = userPreferences,
+            repository = repository,
+            userProfile = userProfile,
+            allProjects = allProjects,
+            activeProject = activeProject,
+            allAssets = allAssets,
+            activePalette = activePalette,
+            historySnapshot = updatedWithUser,
+            userText = effectiveUserText,
+            uploadedFile = attached,
+            browserPageContext = browserCtx
+        )
     }
 
     Box(
@@ -399,6 +433,7 @@ fun RawChatbotScreen(
                             ChatBubbleRow(
                                 msg = msg,
                                 onCopyFull = { copyFullText(msg.text) },
+                                onSelectText = { selectingText = msg.text },
                                 onViewFile = { path ->
                                     val f = File(path)
                                     if (f.exists()) viewingFile = f else toastMsg = "File not found"
@@ -556,7 +591,7 @@ fun RawChatbotScreen(
                         backgroundColor = RawColors.RaisedCard,
                         iconTint = RawColors.Tan,
                         enabled = !uploadingFile && !sending,
-                        onClick = { filePicker.launch(arrayOf("*/*")) }
+                        onClick = { showAttachChooser = true }
                     )
 
                     OutlinedTextField(
@@ -651,6 +686,173 @@ fun RawChatbotScreen(
         )
     }
 
+
+    selectingText?.let { rawTxt ->
+        Dialog(
+            onDismissRequest = { selectingText = null },
+            properties = DialogProperties(usePlatformDefaultWidth = false)
+        ) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 18.dp)
+                    .clip(RoundedCornerShape(26.dp))
+                    .background(RawColors.CardSurface)
+                    .border(1.dp, RawColors.Divider, RoundedCornerShape(26.dp))
+                    .padding(18.dp),
+                verticalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        text = "Select & Copy Text",
+                        fontFamily = BricolageFamily,
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 18.sp,
+                        color = RawColors.TextPrimary
+                    )
+                    CircleActionButton(icon = RawIconType.CLOSE, size = 34.dp, onClick = { selectingText = null })
+                }
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .heightIn(min = 120.dp, max = 380.dp)
+                        .clip(RoundedCornerShape(16.dp))
+                        .background(RawColors.BgPrimary)
+                        .verticalScroll(rememberScrollState())
+                        .padding(14.dp)
+                ) {
+                    BasicTextField(
+                        value = rawTxt,
+                        onValueChange = {},
+                        readOnly = true,
+                        textStyle = TextStyle(
+                            fontFamily = BricolageFamily,
+                            fontSize = 14.5.sp,
+                            lineHeight = 21.sp,
+                            color = RawColors.TextPrimary
+                        ),
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                }
+                BigPrimaryButton(
+                    text = "Copy all",
+                    height = 48.dp,
+                    leadingIcon = RawIconType.COPY,
+                    onClick = {
+                        copyFullText(rawTxt)
+                        selectingText = null
+                    }
+                )
+            }
+        }
+    }
+
+
+    if (showAttachChooser) {
+        Dialog(onDismissRequest = { showAttachChooser = false }) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(24.dp))
+                    .background(RawColors.CardSurface)
+                    .border(1.dp, RawColors.Divider, RoundedCornerShape(24.dp))
+                    .padding(18.dp),
+                verticalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
+                Text(
+                    text = "Attach to Chat",
+                    fontFamily = BricolageFamily,
+                    fontWeight = FontWeight.Bold,
+                    fontSize = 18.sp,
+                    color = RawColors.TextPrimary
+                )
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(16.dp))
+                        .background(RawColors.RaisedCard)
+                        .clickable {
+                            showAttachChooser = false
+                            galleryPicker.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageAndVideo))
+                        }
+                        .padding(14.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    RawIcon(RawIconType.IMAGE, size = 18.dp, tint = RawColors.Tan)
+                    Text("Gallery (Photos & Videos)", fontFamily = BricolageFamily, fontWeight = FontWeight.SemiBold, fontSize = 14.5.sp, color = RawColors.TextPrimary)
+                }
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(16.dp))
+                        .background(RawColors.RaisedCard)
+                        .clickable {
+                            showAttachChooser = false
+                            filePicker.launch(arrayOf("*/*"))
+                        }
+                        .padding(14.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    RawIcon(RawIconType.FILE, size = 18.dp, tint = RawColors.Tan)
+                    Text("Files (PDF, ZIP, Skill, Docs)", fontFamily = BricolageFamily, fontWeight = FontWeight.SemiBold, fontSize = 14.5.sp, color = RawColors.TextPrimary)
+                }
+            }
+        }
+    }
+
+    renamingSession?.let { target ->
+        Dialog(onDismissRequest = { renamingSession = null }) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(24.dp))
+                    .background(RawColors.CardSurface)
+                    .border(1.dp, RawColors.Divider, RoundedCornerShape(24.dp))
+                    .padding(18.dp),
+                verticalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
+                Text(
+                    text = "Rename Chat",
+                    fontFamily = BricolageFamily,
+                    fontWeight = FontWeight.Bold,
+                    fontSize = 18.sp,
+                    color = RawColors.TextPrimary
+                )
+                OutlinedTextField(
+                    value = renameDraft,
+                    onValueChange = { renameDraft = it },
+                    singleLine = true,
+                    textStyle = TextStyle(fontFamily = BricolageFamily, fontSize = 15.sp, color = RawColors.TextPrimary),
+                    shape = RoundedCornerShape(14.dp),
+                    colors = OutlinedTextFieldDefaults.colors(
+                        focusedBorderColor = RawColors.Tan,
+                        unfocusedBorderColor = RawColors.Divider,
+                        focusedContainerColor = RawColors.BgPrimary,
+                        unfocusedContainerColor = RawColors.BgPrimary,
+                        cursorColor = RawColors.Tan
+                    ),
+                    modifier = Modifier.fillMaxWidth()
+                )
+                BigPrimaryButton(
+                    text = "Save",
+                    height = 46.dp,
+                    onClick = {
+                        ChatbotEngine.renameChatSession(cacheManager, target.id, renameDraft)
+                        sessions = ChatbotEngine.listChatSessions(cacheManager)
+                        renamingSession = null
+                        toastMsg = "Chat renamed"
+                    }
+                )
+            }
+        }
+    }
+
     if (showHistoryDialog) {
         ChatHistoryDialog(
             sessions = sessions,
@@ -659,6 +861,10 @@ fun RawChatbotScreen(
                 currentSessionId = s.id
                 messages = ChatbotEngine.loadChatHistory(cacheManager, s.id)
                 showHistoryDialog = false
+            },
+            onRenameSession = { s ->
+                renamingSession = s
+                renameDraft = s.title
             },
             onDeleteSession = { s ->
                 ChatbotEngine.deleteChatSession(cacheManager, s.id)
@@ -678,6 +884,7 @@ private fun ChatHistoryDialog(
     sessions: List<ChatSessionMeta>,
     currentSessionId: String,
     onSelectSession: (ChatSessionMeta) -> Unit,
+    onRenameSession: (ChatSessionMeta) -> Unit,
     onDeleteSession: (ChatSessionMeta) -> Unit,
     onNewChat: () -> Unit,
     onDismiss: () -> Unit
@@ -771,12 +978,20 @@ private fun ChatHistoryDialog(
                                     )
                                 }
                             }
-                            CircleActionButton(
-                                icon = RawIconType.TRASH,
-                                size = 32.dp,
-                                iconTint = RawColors.ErrorCoral,
-                                onClick = { onDeleteSession(s) }
-                            )
+                            Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                CircleActionButton(
+                                    icon = RawIconType.EDIT,
+                                    size = 32.dp,
+                                    iconTint = RawColors.Tan,
+                                    onClick = { onRenameSession(s) }
+                                )
+                                CircleActionButton(
+                                    icon = RawIconType.TRASH,
+                                    size = 32.dp,
+                                    iconTint = RawColors.ErrorCoral,
+                                    onClick = { onDeleteSession(s) }
+                                )
+                            }
                         }
                     }
                 }
@@ -789,6 +1004,7 @@ private fun ChatHistoryDialog(
 private fun ChatBubbleRow(
     msg: ChatMessageItem,
     onCopyFull: () -> Unit,
+    onSelectText: () -> Unit,
     onViewFile: (String) -> Unit,
     onSaveFile: (String, String) -> Unit,
     onPreviewWebsite: (String) -> Unit
@@ -878,13 +1094,20 @@ private fun ChatBubbleRow(
             }
 
 
-            if (msg.websitePreviewPath.isNotBlank()) {
+            val effectivePreviewPath = msg.websitePreviewPath.ifBlank {
+                when {
+                    msg.generatedFilePath.endsWith(".html", true) -> msg.generatedFilePath
+                    msg.attachmentPath.endsWith(".html", true) -> msg.attachmentPath
+                    else -> ""
+                }
+            }
+            if (effectivePreviewPath.isNotBlank()) {
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
                         .clip(RoundedCornerShape(14.dp))
                         .background(RawColors.Tan)
-                        .clickable { onPreviewWebsite(msg.websitePreviewPath) }
+                        .clickable { onPreviewWebsite(effectivePreviewPath) }
                         .padding(horizontal = 14.dp, vertical = 10.dp),
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.SpaceBetween
@@ -957,17 +1180,32 @@ private fun ChatBubbleRow(
                 }
             }
 
-            // Full Message Copy Row
+            // Select & Full Message Copy Row
             Row(
                 modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.End
+                horizontalArrangement = Arrangement.spacedBy(6.dp, Alignment.End)
             ) {
+                Box(
+                    modifier = Modifier
+                        .clip(CircleShape)
+                        .background(if (isUser) Color.Black.copy(alpha = 0.12f) else RawColors.RaisedCard)
+                        .clickable { onSelectText() }
+                        .padding(horizontal = 10.dp, vertical = 5.dp)
+                ) {
+                    Text(
+                        text = "Select",
+                        fontFamily = JetBrainsMonoFamily,
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 10.5.sp,
+                        color = if (isUser) RawColors.Ink else RawColors.TextMuted
+                    )
+                }
                 Row(
                     modifier = Modifier
                         .clip(CircleShape)
                         .background(if (isUser) Color.Black.copy(alpha = 0.12f) else RawColors.RaisedCard)
                         .clickable { onCopyFull() }
-                        .padding(horizontal = 9.dp, vertical = 4.dp),
+                        .padding(horizontal = 10.dp, vertical = 5.dp),
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(4.dp)
                 ) {
@@ -980,7 +1218,7 @@ private fun ChatBubbleRow(
                         text = "Copy",
                         fontFamily = JetBrainsMonoFamily,
                         fontWeight = FontWeight.Bold,
-                        fontSize = 10.sp,
+                        fontSize = 10.5.sp,
                         color = if (isUser) RawColors.Ink else RawColors.TextMuted
                     )
                 }
@@ -991,101 +1229,55 @@ private fun ChatBubbleRow(
 
 @Composable
 private fun RichFormattedMessage(text: String) {
-    val lines = remember(text) { text.replace("\r\n", "\n").lines() }
-    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-        lines.forEach { rawLine ->
-            val line = rawLine.trimEnd()
-            val trimmed = line.trimStart()
-            when {
-                trimmed.isEmpty() -> Spacer(modifier = Modifier.height(2.dp))
-                trimmed.startsWith("### ") -> {
-                    Text(
-                        text = parseInlineMarkdown(trimmed.removePrefix("### ").trim()),
-                        fontFamily = BricolageFamily,
-                        fontWeight = FontWeight.Bold,
-                        fontSize = 15.5.sp,
-                        lineHeight = 21.sp,
-                        color = RawColors.Tan
-                    )
-                }
-                trimmed.startsWith("## ") -> {
-                    Text(
-                        text = parseInlineMarkdown(trimmed.removePrefix("## ").trim()),
-                        fontFamily = BricolageFamily,
-                        fontWeight = FontWeight.Bold,
-                        fontSize = 17.sp,
-                        lineHeight = 23.sp,
-                        color = RawColors.Cream
-                    )
-                }
-                trimmed.startsWith("# ") -> {
-                    Text(
-                        text = parseInlineMarkdown(trimmed.removePrefix("# ").trim()),
-                        fontFamily = BricolageFamily,
-                        fontWeight = FontWeight.Bold,
-                        fontSize = 18.5.sp,
-                        lineHeight = 24.sp,
-                        color = RawColors.Tan
-                    )
-                }
-                trimmed.startsWith("- ") || trimmed.startsWith("* ") || trimmed.startsWith("\u2022 ") -> {
-                    val body = trimmed.drop(2).trim()
-                    Row(
-                        horizontalArrangement = Arrangement.spacedBy(8.dp),
-                        verticalAlignment = Alignment.Top
-                    ) {
-                        Text(
-                            text = "\u2022",
-                            fontFamily = BricolageFamily,
-                            fontWeight = FontWeight.Bold,
-                            fontSize = 15.sp,
-                            color = RawColors.Tan
-                        )
-                        Text(
-                            text = parseInlineMarkdown(body),
-                            fontFamily = BricolageFamily,
-                            fontSize = 14.5.sp,
-                            lineHeight = 20.5.sp,
-                            color = RawColors.TextPrimary
-                        )
+    val styled = remember(text) {
+        buildAnnotatedString {
+            val lines = text.replace("\r\n", "\n").lines()
+            lines.forEachIndexed { idx, rawLine ->
+                val trimmed = rawLine.trim()
+                when {
+                    trimmed.isEmpty() -> {}
+                    trimmed.startsWith("### ") -> {
+                        withStyle(SpanStyle(fontWeight = FontWeight.Bold, fontSize = 15.5.sp, color = RawColors.Tan)) {
+                            append(parseInlineMarkdown(trimmed.removePrefix("### ").trim()))
+                        }
+                    }
+                    trimmed.startsWith("## ") -> {
+                        withStyle(SpanStyle(fontWeight = FontWeight.Bold, fontSize = 17.sp, color = RawColors.Cream)) {
+                            append(parseInlineMarkdown(trimmed.removePrefix("## ").trim()))
+                        }
+                    }
+                    trimmed.startsWith("# ") -> {
+                        withStyle(SpanStyle(fontWeight = FontWeight.Bold, fontSize = 18.5.sp, color = RawColors.Tan)) {
+                            append(parseInlineMarkdown(trimmed.removePrefix("# ").trim()))
+                        }
+                    }
+                    trimmed.startsWith("- ") || trimmed.startsWith("* ") || trimmed.startsWith("\u2022 ") -> {
+                        withStyle(SpanStyle(fontWeight = FontWeight.Bold, color = RawColors.Tan)) {
+                            append("\u2022  ")
+                        }
+                        append(parseInlineMarkdown(trimmed.drop(2).trim()))
+                    }
+                    trimmed.startsWith("> ") -> {
+                        withStyle(SpanStyle(color = RawColors.TextMuted)) {
+                            append("\u2502  ")
+                            append(parseInlineMarkdown(trimmed.removePrefix("> ").trim()))
+                        }
+                    }
+                    else -> {
+                        append(parseInlineMarkdown(trimmed))
                     }
                 }
-                trimmed.startsWith("> ") -> {
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .clip(RoundedCornerShape(10.dp))
-                            .background(RawColors.RaisedCard)
-                            .padding(horizontal = 10.dp, vertical = 7.dp),
-                        horizontalArrangement = Arrangement.spacedBy(8.dp)
-                    ) {
-                        Box(
-                            modifier = Modifier
-                                .width(3.dp)
-                                .height(18.dp)
-                                .background(RawColors.Tan, CircleShape)
-                        )
-                        Text(
-                            text = parseInlineMarkdown(trimmed.removePrefix("> ").trim()),
-                            fontFamily = BricolageFamily,
-                            fontSize = 14.sp,
-                            lineHeight = 19.5.sp,
-                            color = RawColors.TextMuted
-                        )
-                    }
-                }
-                else -> {
-                    Text(
-                        text = parseInlineMarkdown(trimmed),
-                        fontFamily = BricolageFamily,
-                        fontSize = 14.5.sp,
-                        lineHeight = 20.5.sp,
-                        color = RawColors.TextPrimary
-                    )
-                }
+                if (idx < lines.lastIndex) append("\n")
             }
         }
     }
+    Text(
+        text = styled,
+        fontFamily = BricolageFamily,
+        fontSize = 14.5.sp,
+        lineHeight = 21.sp,
+        color = RawColors.TextPrimary
+    )
 }
 
 private fun parseInlineMarkdown(input: String): AnnotatedString {
@@ -1258,6 +1450,7 @@ private fun ChatWebsitePreviewDialog(
                         settings.loadWithOverviewMode = true
                         settings.useWideViewPort = desktopMode
                         webViewClient = WebViewClient()
+                        webChromeClient = WebChromeClient()
                         loadDataWithBaseURL("https://rawedit.local/", htmlText, "text/html", "UTF-8", null)
                     }
                 },
@@ -1331,17 +1524,54 @@ private fun InAppAiBrowserDialog(
                 )
             }
 
+            var loadProgress by remember { mutableIntStateOf(0) }
+            if (loadProgress in 1..99) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(3.dp)
+                        .background(RawColors.RaisedCard)
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth(loadProgress / 100f)
+                            .height(3.dp)
+                            .background(RawColors.Tan)
+                    )
+                }
+            }
             AndroidView(
                 factory = { ctx ->
                     WebView(ctx).apply {
+                        CookieManager.getInstance().setAcceptCookie(true)
+                        CookieManager.getInstance().setAcceptThirdPartyCookies(this, true)
                         settings.javaScriptEnabled = true
                         settings.domStorageEnabled = true
+                        settings.databaseEnabled = true
                         settings.useWideViewPort = true
                         settings.loadWithOverviewMode = true
+                        settings.javaScriptCanOpenWindowsAutomatically = true
+                        settings.userAgentString =
+                            "Mozilla/5.0 (Linux; Android 13; Redmi Note 9) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Mobile Safari/537.36"
+                        webChromeClient = object : WebChromeClient() {
+                            override fun onProgressChanged(view: WebView?, newProgress: Int) {
+                                loadProgress = newProgress
+                            }
+                        }
                         webViewClient = object : WebViewClient() {
+                            override fun shouldOverrideUrlLoading(view: WebView?, request: WebResourceRequest?): Boolean {
+                                val u = request?.url?.toString().orEmpty()
+                                if (u.startsWith("http://") || u.startsWith("https://")) {
+                                    return false
+                                }
+                                // Block intent:// or instagram:// deep links so pages stay inside WebView
+                                return true
+                            }
+
                             override fun onPageFinished(view: WebView?, url: String?) {
                                 super.onPageFinished(view, url)
                                 if (!url.isNullOrBlank()) urlDraft = url
+                                CookieManager.getInstance().flush()
                             }
                         }
                         loadUrl(initialUrl)

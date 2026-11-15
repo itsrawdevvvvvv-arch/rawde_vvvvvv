@@ -53,9 +53,10 @@ object ChatbotEngine {
     private val WEB_SEARCH_REGEX = Regex("<<<WEB_SEARCH\\s+([^>]+?)>>>", RegexOption.IGNORE_CASE)
     private val WEB_FETCH_REGEX = Regex("<<<WEB_FETCH\\s+([^>]+?)>>>", RegexOption.IGNORE_CASE)
     private val WEB_DOWNLOAD_REGEX = Regex("<<<WEB_DOWNLOAD\\s+([^>]+?)>>>", RegexOption.IGNORE_CASE)
-    private val CREATE_PDF_REGEX = Regex("""<<<CREATE_PDF\s+title="([^"]*)"(?:\s+filename="([^"]*)")?\s*>>>\s*\n([\s\S]*?)<<<END_CREATE_PDF>>>""", RegexOption.IGNORE_CASE)
-    private val CREATE_FILE_REGEX = Regex("""<<<CREATE_FILE\s+filename="([^"]+)"\s*>>>\s*\n([\s\S]*?)<<<END_CREATE_FILE>>>""", RegexOption.IGNORE_CASE)
-    private val WEBSITE_PREVIEW_REGEX = Regex("""<<<WEBSITE_PREVIEW\s+title="([^"]*)"\s*>>>\s*\n([\s\S]*?)<<<END_WEBSITE_PREVIEW>>>""", RegexOption.IGNORE_CASE)
+    private val CREATE_PDF_REGEX = Regex("<<<CREATE_PDF([^>]*)>>>\\s*([\\s\\S]*?)<<<END_CREATE_PDF>>>", RegexOption.IGNORE_CASE)
+    private val CREATE_FILE_REGEX = Regex("<<<CREATE_FILE([^>]*)>>>\\s*([\\s\\S]*?)<<<END_CREATE_FILE>>>", RegexOption.IGNORE_CASE)
+    private val WEBSITE_PREVIEW_REGEX = Regex("<<<WEBSITE_PREVIEW([^>]*)>>>\\s*([\\s\\S]*?)<<<END_WEBSITE_PREVIEW>>>", RegexOption.IGNORE_CASE)
+    private val HTML_FENCE_REGEX = Regex("```(?:html|htm)?\\s*\\n(<!DOCTYPE html[\\s\\S]*?</html>|<html[\\s\\S]*?</html>)\\s*```", RegexOption.IGNORE_CASE)
 
 
 
@@ -92,13 +93,39 @@ object ChatbotEngine {
 
     fun upsertChatSessionMeta(cacheManager: CacheManager, sessionId: String, messages: List<ChatMessageItem>) {
         runCatching {
-            val existing = listChatSessions(cacheManager).filterNot { it.id == sessionId }.toMutableList()
+            val currentList = listChatSessions(cacheManager)
+            val prevTitle = currentList.firstOrNull { it.id == sessionId }?.title?.takeIf { it.isNotBlank() && it != "New Chat" }
+            val existing = currentList.filterNot { it.id == sessionId }.toMutableList()
             val firstUser = messages.firstOrNull { it.role == "user" }?.text?.trim().orEmpty()
-            val title = firstUser.take(40).ifBlank { "New Chat" }
+            val title = prevTitle ?: firstUser.take(40).ifBlank { "New Chat" }
             val updatedAt = messages.lastOrNull()?.timestampMs ?: System.currentTimeMillis()
             existing.add(0, ChatSessionMeta(sessionId, title, updatedAt))
             val arr = JSONArray()
             existing.take(30).forEach { s ->
+                arr.put(JSONObject().apply {
+                    put("id", s.id)
+                    put("title", s.title)
+                    put("updatedAtMs", s.updatedAtMs)
+                })
+            }
+            File(cacheManager.chatHistoryDir, "chat_sessions_index.json").writeText(arr.toString(2), Charsets.UTF_8)
+        }
+    }
+
+
+    fun renameChatSession(cacheManager: CacheManager, sessionId: String, newTitle: String) {
+        val clean = newTitle.trim().take(60)
+        if (clean.isEmpty()) return
+        runCatching {
+            val all = listChatSessions(cacheManager).toMutableList()
+            val idx = all.indexOfFirst { it.id == sessionId }
+            if (idx != -1) {
+                all[idx] = all[idx].copy(title = clean)
+            } else {
+                all.add(0, ChatSessionMeta(sessionId, clean, System.currentTimeMillis()))
+            }
+            val arr = JSONArray()
+            all.take(30).forEach { s ->
                 arr.put(JSONObject().apply {
                     put("id", s.id)
                     put("title", s.title)
@@ -421,10 +448,11 @@ object ChatbotEngine {
             var webPreviewPath = ""
 
             CREATE_PDF_REGEX.find(replyText)?.let { m ->
-                val pdfTitle = m.groupValues[1].trim().ifBlank { "RAW EDIT Document" }
-                val rawFn = m.groupValues[2].trim().ifBlank { "raw_edit_doc.pdf" }
+                val attrs = m.groupValues[1]
+                val pdfTitle = extractAttr(attrs, "title").ifBlank { "RAW EDIT Document" }
+                val rawFn = extractAttr(attrs, "filename").ifBlank { "raw_edit_doc.pdf" }
                 val safeFn = (if (rawFn.endsWith(".pdf", true)) rawFn else "$rawFn.pdf").replace(Regex("[^A-Za-z0-9._-]"), "_")
-                val body = m.groupValues[3].trim()
+                val body = m.groupValues[2].trim()
                 runCatching {
                     val out = File(cacheManager.sharedPacksDir, safeFn)
                     ChatbotFileTools.createStyledPdf(out, pdfTitle, body)
@@ -438,7 +466,8 @@ object ChatbotEngine {
             }
 
             CREATE_FILE_REGEX.find(replyText)?.let { m ->
-                val rawFn = m.groupValues[1].trim().replace(Regex("[^A-Za-z0-9._-]"), "_").ifBlank { "output.txt" }
+                val attrs = m.groupValues[1]
+                val rawFn = extractAttr(attrs, "filename").replace(Regex("[^A-Za-z0-9._-]"), "_").ifBlank { "output.txt" }
                 val content = m.groupValues[2]
                 runCatching {
                     val out = File(cacheManager.sharedPacksDir, rawFn)
@@ -446,13 +475,17 @@ object ChatbotEngine {
                     out.writeText(content, Charsets.UTF_8)
                     genFilePath = out.absolutePath
                     genFileName = out.name
+                    if (rawFn.endsWith(".html", true) || rawFn.endsWith(".htm", true)) {
+                        webPreviewPath = out.absolutePath
+                    }
                     appliedBadges.add("Created file: ${out.name}")
                 }
                 replyText = replyText.replace(m.value, "").trim()
             }
 
             WEBSITE_PREVIEW_REGEX.find(replyText)?.let { m ->
-                val siteTitle = m.groupValues[1].trim().ifBlank { "Website" }
+                val attrs = m.groupValues[1]
+                val siteTitle = extractAttr(attrs, "title").ifBlank { "Website" }
                 val html = m.groupValues[2].trim()
                 runCatching {
                     val out = ChatbotFileTools.saveWebsiteHtml(cacheManager, siteTitle, html)
@@ -464,6 +497,22 @@ object ChatbotEngine {
                     appliedBadges.add("Website ready to preview: $siteTitle")
                 }
                 replyText = replyText.replace(m.value, "").trim()
+            }
+
+            // Fallback: if AI returned a fenced HTML website without <<<WEBSITE_PREVIEW>>>, still enable live preview!
+            if (webPreviewPath.isBlank()) {
+                HTML_FENCE_REGEX.find(replyText)?.let { m ->
+                    val html = m.groupValues[1].trim()
+                    runCatching {
+                        val out = ChatbotFileTools.saveWebsiteHtml(cacheManager, "site_${System.currentTimeMillis()}", html)
+                        webPreviewPath = out.absolutePath
+                        if (genFilePath.isBlank()) {
+                            genFilePath = out.absolutePath
+                            genFileName = out.name
+                        }
+                        appliedBadges.add("Website ready to preview")
+                    }
+                }
             }
 
             // 1. Check for <<<PROMPT_UPDATE ... >>>
