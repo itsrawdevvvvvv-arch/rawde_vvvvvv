@@ -3,7 +3,16 @@ package com.rawedit.app.ui.screens
 import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
+import android.content.Intent
+import android.net.Uri
+import android.net.http.SslError
+import android.os.Message
+import android.view.ViewGroup
+import android.webkit.RenderProcessGoneDetail
+import android.webkit.SslErrorHandler
+import android.webkit.WebResourceError
 import android.widget.Toast
+import androidx.compose.material3.Surface
 import androidx.activity.compose.BackHandler
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.zIndex
@@ -466,9 +475,19 @@ fun RawChatbotScreen(
                                 onPreviewWebsite = { path ->
                                     keyboard?.hide()
                                     val f = File(path)
-                                    if (f.exists()) previewingWebsite = f else {
-                                        Toast.makeText(context, "Website file not found", Toast.LENGTH_SHORT).show()
-                                        toastMsg = "Website file not found"
+                                    if (f.exists()) {
+                                        previewingWebsite = f
+                                    } else {
+                                        val fallback = Regex("(<!DOCTYPE html[\\s\\S]*?</html>|<html[\\s\\S]*?</html>)", RegexOption.IGNORE_CASE)
+                                            .find(msg.text)?.groupValues?.getOrNull(1)
+                                        if (!fallback.isNullOrBlank()) {
+                                            val out = File(context.cacheDir, "preview_${msg.id.hashCode()}.html")
+                                            runCatching { out.writeText(fallback, Charsets.UTF_8) }
+                                            previewingWebsite = out
+                                        } else {
+                                            Toast.makeText(context, "Website file not found", Toast.LENGTH_SHORT).show()
+                                            toastMsg = "Website file not found"
+                                        }
                                     }
                                 }
                             )
@@ -695,18 +714,18 @@ fun RawChatbotScreen(
                             .verticalScroll(rememberScrollState())
                             .padding(14.dp)
                     ) {
-                        BasicTextField(
-                            value = rawTxt,
-                            onValueChange = {},
-                            readOnly = true,
-                            textStyle = TextStyle(
-                                fontFamily = BricolageFamily,
-                                fontSize = 14.5.sp,
-                                lineHeight = 21.sp,
-                                color = RawColors.TextPrimary
-                            ),
-                            modifier = Modifier.fillMaxWidth()
-                        )
+                        SelectionContainer {
+                            Text(
+                                text = rawTxt,
+                                style = TextStyle(
+                                    fontFamily = BricolageFamily,
+                                    fontSize = 14.5.sp,
+                                    lineHeight = 21.sp,
+                                    color = RawColors.TextPrimary
+                                ),
+                                modifier = Modifier.fillMaxWidth()
+                            )
+                        }
                     }
                     BigPrimaryButton(
                         text = "Copy all",
@@ -738,6 +757,29 @@ fun RawChatbotScreen(
                 )
             }
         }
+
+        if (showInAppBrowser) {
+            BackHandler { showInAppBrowser = false }
+            Box(modifier = Modifier.fillMaxSize().zIndex(60f)) {
+                InAppAiBrowserDialog(
+                    initialUrl = browserInitialUrl,
+                    onSendPageToAi = { url, title, pageText ->
+                        pendingBrowserTitle = title.ifBlank { url }
+                        pendingBrowserContext = "URL: $url\nTITLE: $title\nCONTENT:\n$pageText"
+                        showInAppBrowser = false
+                        if (inputText.isBlank()) {
+                            inputText = if (url.contains("instagram.com", ignoreCase = true)) {
+                                "Analyze this Instagram page & reels and suggest 5 new viral reel ideas + scripts in RAWDEV style."
+                            } else {
+                                "Use this webpage data to help me."
+                            }
+                        }
+                        toastMsg = "Page captured for AI"
+                    },
+                    onDismiss = { showInAppBrowser = false }
+                )
+            }
+        }
     }
 
 
@@ -751,25 +793,7 @@ fun RawChatbotScreen(
 
 
 
-    if (showInAppBrowser) {
-        InAppAiBrowserDialog(
-            initialUrl = browserInitialUrl,
-            onSendPageToAi = { url, title, pageText ->
-                pendingBrowserTitle = title.ifBlank { url }
-                pendingBrowserContext = "URL: $url\nTITLE: $title\nCONTENT:\n$pageText"
-                showInAppBrowser = false
-                if (inputText.isBlank()) {
-                    inputText = if (url.contains("instagram.com", ignoreCase = true)) {
-                        "Analyze this Instagram page & reels and suggest 5 new viral reel ideas + scripts in RAWDEV style."
-                    } else {
-                        "Use this webpage data to help me."
-                    }
-                }
-                toastMsg = "Page captured for AI"
-            },
-            onDismiss = { showInAppBrowser = false }
-        )
-    }
+
 
 
 
@@ -1134,29 +1158,32 @@ private fun ChatBubbleRow(
                 }
             }
             if (effectivePreviewPath.isNotBlank()) {
-                RawPressButton(onClick = { onPreviewWebsite(effectivePreviewPath) }) {
+                Surface(
+                    onClick = { onPreviewWebsite(effectivePreviewPath) },
+                    shape = RoundedCornerShape(14.dp),
+                    color = RawColors.Tan,
+                    modifier = Modifier.fillMaxWidth()
+                ) {
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .clip(RoundedCornerShape(14.dp))
-                            .background(RawColors.Tan)
                             .padding(horizontal = 14.dp, vertical = 12.dp),
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.SpaceBetween
                     ) {
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(8.dp)
-                    ) {
-                        RawIcon(RawIconType.GLOBE, size = 16.dp, tint = RawColors.Ink)
-                        Text(
-                            text = "Preview Website Live",
-                            fontFamily = BricolageFamily,
-                            fontWeight = FontWeight.Bold,
-                            fontSize = 13.5.sp,
-                            color = RawColors.Ink
-                        )
-                    }
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            RawIcon(RawIconType.GLOBE, size = 16.dp, tint = RawColors.Ink)
+                            Text(
+                                text = "Preview Website Live",
+                                fontFamily = BricolageFamily,
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 13.5.sp,
+                                color = RawColors.Ink
+                            )
+                        }
                         RawIcon(RawIconType.ARROW_RIGHT, size = 14.dp, tint = RawColors.Ink)
                     }
                 }
@@ -1218,28 +1245,30 @@ private fun ChatBubbleRow(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.End)
             ) {
-                RawPressButton(onClick = onSelectText) {
+                Surface(
+                    onClick = onSelectText,
+                    shape = CircleShape,
+                    color = if (isUser) Color.Black.copy(alpha = 0.14f) else RawColors.RaisedCard
+                ) {
                     Box(
-                        modifier = Modifier
-                            .clip(CircleShape)
-                            .background(if (isUser) Color.Black.copy(alpha = 0.14f) else RawColors.RaisedCard)
-                            .padding(horizontal = 12.dp, vertical = 7.dp)
+                        modifier = Modifier.padding(horizontal = 14.dp, vertical = 9.dp)
                     ) {
                         Text(
                             text = "Select",
                             fontFamily = JetBrainsMonoFamily,
                             fontWeight = FontWeight.Bold,
-                            fontSize = 11.sp,
+                            fontSize = 11.5.sp,
                             color = if (isUser) RawColors.Ink else RawColors.TextPrimary
                         )
                     }
                 }
-                RawPressButton(onClick = onCopyFull) {
+                Surface(
+                    onClick = onCopyFull,
+                    shape = CircleShape,
+                    color = if (isUser) Color.Black.copy(alpha = 0.14f) else RawColors.RaisedCard
+                ) {
                     Row(
-                        modifier = Modifier
-                            .clip(CircleShape)
-                            .background(if (isUser) Color.Black.copy(alpha = 0.14f) else RawColors.RaisedCard)
-                            .padding(horizontal = 12.dp, vertical = 7.dp),
+                        modifier = Modifier.padding(horizontal = 14.dp, vertical = 9.dp),
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.spacedBy(5.dp)
                     ) {
@@ -1252,7 +1281,7 @@ private fun ChatBubbleRow(
                             text = "Copy",
                             fontFamily = JetBrainsMonoFamily,
                             fontWeight = FontWeight.Bold,
-                            fontSize = 11.sp,
+                            fontSize = 11.5.sp,
                             color = if (isUser) RawColors.Ink else RawColors.TextPrimary
                         )
                     }
@@ -1475,8 +1504,16 @@ private fun ChatWebsitePreviewOverlay(
             AndroidView(
                 factory = { ctx ->
                     WebView(ctx).apply {
+                        layoutParams = ViewGroup.LayoutParams(
+                            ViewGroup.LayoutParams.MATCH_PARENT,
+                            ViewGroup.LayoutParams.MATCH_PARENT
+                        )
+                        setBackgroundColor(android.graphics.Color.WHITE)
                         settings.javaScriptEnabled = true
                         settings.domStorageEnabled = true
+                        settings.allowFileAccess = true
+                        settings.allowContentAccess = true
+                        settings.mixedContentMode = WebSettings.MIXED_CONTENT_ALWAYS_ALLOW
                         settings.loadWithOverviewMode = true
                         settings.useWideViewPort = desktopMode
                         webViewClient = WebViewClient()
@@ -1506,153 +1543,296 @@ private fun InAppAiBrowserDialog(
     onSendPageToAi: (url: String, title: String, pageText: String) -> Unit,
     onDismiss: () -> Unit
 ) {
+    val context = LocalContext.current
     var urlDraft by remember(initialUrl) { mutableStateOf(initialUrl) }
     var webViewRef by remember { mutableStateOf<WebView?>(null) }
+    var desktopMode by remember { mutableStateOf(false) }
+    var loadProgress by remember { mutableIntStateOf(0) }
+    var pageError by remember { mutableStateOf<String?>(null) }
 
-    Dialog(
-        onDismissRequest = onDismiss,
-        properties = DialogProperties(usePlatformDefaultWidth = false)
+    val mobileUa = "Mozilla/5.0 (Linux; Android 13; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Mobile Safari/537.36"
+    val desktopUa = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
+
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(RawColors.BgPrimary)
+            .statusBarsPadding()
+            .navigationBarsPadding()
     ) {
-        Column(
+        Row(
             modifier = Modifier
-                .fillMaxSize()
-                .background(RawColors.BgPrimary)
-                .statusBarsPadding()
-                .navigationBarsPadding()
+                .fillMaxWidth()
+                .padding(horizontal = 12.dp, vertical = 8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
         ) {
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 12.dp, vertical = 8.dp),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
-                CircleActionButton(icon = RawIconType.CLOSE, size = 38.dp, onClick = onDismiss)
-                OutlinedTextField(
-                    value = urlDraft,
-                    onValueChange = { urlDraft = it },
-                    singleLine = true,
-                    textStyle = TextStyle(fontFamily = JetBrainsMonoFamily, fontSize = 12.sp, color = RawColors.TextPrimary),
-                    shape = RoundedCornerShape(16.dp),
-                    colors = OutlinedTextFieldDefaults.colors(
-                        focusedBorderColor = RawColors.Tan,
-                        unfocusedBorderColor = RawColors.Divider,
-                        focusedContainerColor = RawColors.CardSurface,
-                        unfocusedContainerColor = RawColors.CardSurface,
-                        cursorColor = RawColors.Tan
-                    ),
-                    modifier = Modifier.weight(1f)
-                )
-                CircleActionButton(
-                    icon = RawIconType.ARROW_RIGHT,
-                    size = 38.dp,
-                    backgroundColor = RawColors.RaisedCard,
-                    onClick = {
-                        val target = if (urlDraft.startsWith("http")) urlDraft else "https://$urlDraft"
-                        webViewRef?.loadUrl(target)
-                    }
-                )
-            }
-
-            var loadProgress by remember { mutableIntStateOf(0) }
-            if (loadProgress in 1..99) {
-                Box(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(3.dp)
-                        .background(RawColors.RaisedCard)
-                ) {
-                    Box(
-                        modifier = Modifier
-                            .fillMaxWidth(loadProgress / 100f)
-                            .height(3.dp)
-                            .background(RawColors.Tan)
-                    )
+            CircleActionButton(icon = RawIconType.CLOSE, size = 38.dp, onClick = onDismiss)
+            OutlinedTextField(
+                value = urlDraft,
+                onValueChange = { urlDraft = it },
+                singleLine = true,
+                textStyle = TextStyle(fontFamily = JetBrainsMonoFamily, fontSize = 12.sp, color = RawColors.TextPrimary),
+                shape = RoundedCornerShape(16.dp),
+                colors = OutlinedTextFieldDefaults.colors(
+                    focusedBorderColor = RawColors.Tan,
+                    unfocusedBorderColor = RawColors.Divider,
+                    focusedContainerColor = RawColors.CardSurface,
+                    unfocusedContainerColor = RawColors.CardSurface,
+                    cursorColor = RawColors.Tan
+                ),
+                modifier = Modifier.weight(1f)
+            )
+            CircleActionButton(
+                icon = RawIconType.ARROW_RIGHT,
+                size = 38.dp,
+                backgroundColor = RawColors.RaisedCard,
+                onClick = {
+                    pageError = null
+                    val target = if (urlDraft.startsWith("http")) urlDraft else "https://$urlDraft"
+                    webViewRef?.loadUrl(target)
                 }
-            }
-            AndroidView(
-                factory = { ctx ->
-                    WebView(ctx).apply {
-                        CookieManager.getInstance().setAcceptCookie(true)
-                        CookieManager.getInstance().setAcceptThirdPartyCookies(this, true)
-                        setBackgroundColor(android.graphics.Color.WHITE)
-                        setLayerType(android.view.View.LAYER_TYPE_HARDWARE, null)
-                        settings.javaScriptEnabled = true
-                        settings.domStorageEnabled = true
-                        settings.databaseEnabled = true
-                        settings.allowContentAccess = true
-                        settings.allowFileAccess = true
-                        settings.mixedContentMode = WebSettings.MIXED_CONTENT_ALWAYS_ALLOW
-                        settings.useWideViewPort = true
-                        settings.loadWithOverviewMode = true
-                        settings.setSupportMultipleWindows(false)
-                        settings.javaScriptCanOpenWindowsAutomatically = true
-                        settings.userAgentString =
-                            "Mozilla/5.0 (Linux; Android 13; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Mobile Safari/537.36"
-                        webChromeClient = object : WebChromeClient() {
-                            override fun onProgressChanged(view: WebView?, newProgress: Int) {
-                                loadProgress = newProgress
-                            }
-                        }
-                        webViewClient = object : WebViewClient() {
-                            override fun shouldOverrideUrlLoading(view: WebView?, request: WebResourceRequest?): Boolean {
-                                val u = request?.url?.toString().orEmpty()
-                                if (u.startsWith("http://") || u.startsWith("https://")) {
-                                    return false
-                                }
-                                // Block intent:// or instagram:// deep links so pages stay inside WebView
-                                return true
-                            }
+            )
+        }
 
-                            override fun onPageFinished(view: WebView?, url: String?) {
-                                super.onPageFinished(view, url)
-                                if (!url.isNullOrBlank()) urlDraft = url
-                                CookieManager.getInstance().flush()
-                            }
-                        }
-                        loadUrl(initialUrl)
-                        webViewRef = this
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 12.dp, vertical = 2.dp),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Surface(
+                onClick = {
+                    desktopMode = !desktopMode
+                    webViewRef?.let { wv ->
+                        wv.settings.userAgentString = if (desktopMode) desktopUa else mobileUa
+                        wv.settings.useWideViewPort = true
+                        wv.reload()
                     }
                 },
-                modifier = Modifier
-                    .weight(1f)
-                    .fillMaxWidth()
-            )
+                shape = CircleShape,
+                color = if (desktopMode) RawColors.Tan else RawColors.RaisedCard
+            ) {
+                Text(
+                    text = if (desktopMode) "Desktop ON" else "Desktop",
+                    fontFamily = JetBrainsMonoFamily,
+                    fontWeight = FontWeight.Bold,
+                    fontSize = 11.sp,
+                    color = if (desktopMode) RawColors.Ink else RawColors.TextPrimary,
+                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp)
+                )
+            }
+            Surface(
+                onClick = {
+                    val u = webViewRef?.url ?: urlDraft
+                    val target = if (u.startsWith("http")) u else "https://$u"
+                    runCatching {
+                        context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(target)))
+                    }
+                },
+                shape = CircleShape,
+                color = RawColors.RaisedCard
+            ) {
+                Text(
+                    text = "Open in Chrome",
+                    fontFamily = JetBrainsMonoFamily,
+                    fontWeight = FontWeight.Bold,
+                    fontSize = 11.sp,
+                    color = RawColors.Tan,
+                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp)
+                )
+            }
+            Surface(
+                onClick = {
+                    pageError = null
+                    webViewRef?.reload()
+                },
+                shape = CircleShape,
+                color = RawColors.RaisedCard
+            ) {
+                Text(
+                    text = "Reload",
+                    fontFamily = JetBrainsMonoFamily,
+                    fontWeight = FontWeight.Bold,
+                    fontSize = 11.sp,
+                    color = RawColors.TextPrimary,
+                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp)
+                )
+            }
+        }
 
+        if (loadProgress in 1..99) {
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(3.dp)
+                    .background(RawColors.RaisedCard)
+            ) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth(loadProgress / 100f)
+                        .height(3.dp)
+                        .background(RawColors.Tan)
+                )
+            }
+        }
+
+        pageError?.let { err ->
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .background(RawColors.CardSurface)
-                    .padding(horizontal = 14.dp, vertical = 10.dp),
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    .background(RawColors.ErrorSoft)
+                    .padding(horizontal = 12.dp, vertical = 8.dp),
+                horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                CircleActionButton(
-                    icon = RawIconType.CHEVRON_LEFT,
-                    size = 42.dp,
-                    onClick = { if (webViewRef?.canGoBack() == true) webViewRef?.goBack() }
-                )
-                BigPrimaryButton(
-                    text = "Send Page to AI",
-                    height = 46.dp,
-                    leadingIcon = RawIconType.SPARK,
-                    onClick = {
-                        val wv = webViewRef
-                        if (wv != null) {
-                            wv.evaluateJavascript(
-                                "(function(){ return document.body ? document.body.innerText.slice(0, 9000) : ''; })()"
-                            ) { rawJson ->
-                                val decoded = rawJson?.trim()?.removeSurrounding(""")
-                                    ?.replace("\\n", "\n")
-                                    ?.replace("\\"", """)
-                                    .orEmpty()
-                                onSendPageToAi(wv.url ?: urlDraft, wv.title ?: "", decoded)
-                            }
-                        }
-                    },
+                Text(
+                    text = err,
+                    fontFamily = BricolageFamily,
+                    fontSize = 12.sp,
+                    color = RawColors.ErrorCoral,
                     modifier = Modifier.weight(1f)
                 )
             }
+        }
+
+        AndroidView(
+            factory = { ctx ->
+                WebView(ctx).apply {
+                    layoutParams = ViewGroup.LayoutParams(
+                        ViewGroup.LayoutParams.MATCH_PARENT,
+                        ViewGroup.LayoutParams.MATCH_PARENT
+                    )
+                    CookieManager.getInstance().setAcceptCookie(true)
+                    CookieManager.getInstance().setAcceptThirdPartyCookies(this, true)
+                    setBackgroundColor(android.graphics.Color.WHITE)
+                    settings.javaScriptEnabled = true
+                    settings.domStorageEnabled = true
+                    settings.databaseEnabled = true
+                    settings.allowContentAccess = true
+                    settings.allowFileAccess = true
+                    settings.mixedContentMode = WebSettings.MIXED_CONTENT_ALWAYS_ALLOW
+                    settings.useWideViewPort = true
+                    settings.loadWithOverviewMode = true
+                    settings.setSupportMultipleWindows(true)
+                    settings.javaScriptCanOpenWindowsAutomatically = true
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                        @Suppress("DEPRECATION")
+                        settings.forceDark = WebSettings.FORCE_DARK_OFF
+                    }
+                    settings.userAgentString = mobileUa
+                    webChromeClient = object : WebChromeClient() {
+                        override fun onProgressChanged(view: WebView?, newProgress: Int) {
+                            loadProgress = newProgress
+                        }
+
+                        override fun onCreateWindow(
+                            view: WebView?,
+                            isDialog: Boolean,
+                            isUserGesture: Boolean,
+                            resultMsg: Message?
+                        ): Boolean {
+                            val transport = resultMsg?.obj as? WebView.WebViewTransport ?: return false
+                            val temp = WebView(ctx)
+                            temp.webViewClient = object : WebViewClient() {
+                                override fun shouldOverrideUrlLoading(v: WebView?, req: WebResourceRequest?): Boolean {
+                                    val popupUrl = req?.url?.toString().orEmpty()
+                                    if (popupUrl.startsWith("http://") || popupUrl.startsWith("https://")) {
+                                        view?.loadUrl(popupUrl)
+                                    }
+                                    return true
+                                }
+                            }
+                            transport.webView = temp
+                            resultMsg.sendToTarget()
+                            return true
+                        }
+                    }
+                    webViewClient = object : WebViewClient() {
+                        override fun shouldOverrideUrlLoading(view: WebView?, request: WebResourceRequest?): Boolean {
+                            val u = request?.url?.toString().orEmpty()
+                            if (u.startsWith("http://") || u.startsWith("https://")) {
+                                return false
+                            }
+                            return true
+                        }
+
+                        override fun onPageFinished(view: WebView?, url: String?) {
+                            super.onPageFinished(view, url)
+                            if (!url.isNullOrBlank()) urlDraft = url
+                            CookieManager.getInstance().flush()
+                        }
+
+                        override fun onReceivedError(
+                            view: WebView?,
+                            request: WebResourceRequest?,
+                            error: WebResourceError?
+                        ) {
+                            if (request?.isForMainFrame == true) {
+                                pageError = "Page load issue (${error?.description ?: "network error"}). Try Desktop or Open in Chrome."
+                            }
+                        }
+
+                        override fun onReceivedSslError(
+                            view: WebView?,
+                            handler: SslErrorHandler?,
+                            error: SslError?
+                        ) {
+                            handler?.cancel()
+                            pageError = "SSL error loading page. Try Open in Chrome."
+                        }
+
+                        override fun onRenderProcessGone(
+                            view: WebView?,
+                            detail: RenderProcessGoneDetail?
+                        ): Boolean {
+                            pageError = "Browser renderer restarted. Tap Reload."
+                            return true
+                        }
+                    }
+                    loadUrl(initialUrl)
+                    webViewRef = this
+                }
+            },
+            modifier = Modifier
+                .weight(1f)
+                .fillMaxWidth()
+        )
+
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .background(RawColors.CardSurface)
+                .padding(horizontal = 14.dp, vertical = 10.dp),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            CircleActionButton(
+                icon = RawIconType.CHEVRON_LEFT,
+                size = 42.dp,
+                onClick = { if (webViewRef?.canGoBack() == true) webViewRef?.goBack() }
+            )
+            BigPrimaryButton(
+                text = "Send Page to AI",
+                height = 46.dp,
+                leadingIcon = RawIconType.SPARK,
+                onClick = {
+                    val wv = webViewRef
+                    if (wv != null) {
+                        wv.evaluateJavascript(
+                            "(function(){ return document.body ? document.body.innerText.slice(0, 9000) : ''; })()"
+                        ) { rawJson ->
+                            val decoded = rawJson?.trim()?.removeSurrounding(""")
+                                ?.replace("\\n", "\n")
+                                ?.replace("\\"", """)
+                                .orEmpty()
+                            onSendPageToAi(wv.url ?: urlDraft, wv.title ?: "", decoded)
+                        }
+                    }
+                },
+                modifier = Modifier.weight(1f)
+            )
         }
     }
 }
