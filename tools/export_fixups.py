@@ -292,6 +292,20 @@ def fix_broken_string_literals():
         pass
 
 
+
+BAD_JSON_PROMPT = """appendLine("Return ONLY valid JSON: {"recommendedTolerance": <int 8..90>, "note": "<short 1-line fix note>"}")"""
+GOOD_JSON_PROMPT = """appendLine("Return ONLY valid JSON: {\\"recommendedTolerance\\": <int 8..90>, \\"note\\": \\"<short 1-line fix note>\\"}")"""
+
+
+def fix_unescaped_json_prompt():
+    """Router prompt keeps shipping unescaped quotes inside a Kotlin string."""
+    for p in (root / "app/src/main/java").rglob("*.kt"):
+        s = p.read_text()
+        if BAD_JSON_PROMPT in s:
+            p.write_text(s.replace(BAD_JSON_PROMPT, GOOD_JSON_PROMPT))
+            print(f"  unescaped JSON prompt quotes fixed in {p.name}")
+
+
 STEPS = [
     fix_version,
     fix_navigation,
@@ -304,6 +318,7 @@ STEPS = [
     fix_card_border_color,
     fix_ai_router_compat,
     fix_broken_string_literals,
+    fix_unescaped_json_prompt,
 ]
 
 for step in STEPS:

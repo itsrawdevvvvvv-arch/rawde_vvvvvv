@@ -893,7 +893,7 @@ class GeminiWaterfallRouter(context: Context) {
                 appendLine("User circled error area(s) in normalized 0..1 coords: $circleDesc")
                 appendLine("If leftover background remains inside the circle, increase tolerance slightly (e.g. +8..+20).")
                 appendLine("If foreground subject edges got eaten inside the circle, decrease tolerance slightly (e.g. -6..-15).")
-                appendLine("Return ONLY valid JSON: {"recommendedTolerance": <int 8..90>, "note": "<short 1-line fix note>"}")
+                appendLine("Return ONLY valid JSON: {\"recommendedTolerance\": <int 8..90>, \"note\": \"<short 1-line fix note>\"}")
             }
             val b64 = bitmapToJpegBase64(cutoutBitmap, maxDim = 768, quality = 85)
             val res = generateWithWaterfall(
