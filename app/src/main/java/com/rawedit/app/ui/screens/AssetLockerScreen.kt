@@ -97,7 +97,7 @@ fun AssetLockerScreen(
     cacheManager: CacheManager,
     onBack: () -> Unit,
     onImportAsset: (uri: Uri, isVideo: Boolean) -> Unit,
-    onOpenWebBrowser: () -> Unit,
+    onOpenBackgroundRemover: () -> Unit,
     onSaveCutoutBitmap: (
         bitmap: Bitmap,
         isCutout: Boolean,
@@ -179,72 +179,17 @@ fun AssetLockerScreen(
             .statusBarsPadding()
     ) {
         Column(modifier = Modifier.fillMaxSize()) {
-            // Top bar
+            // Minimal Top bar
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .height(62.dp)
+                    .height(58.dp)
                     .padding(horizontal = 18.dp),
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                CircleActionButton(icon = RawIconType.BACK, onClick = onBack, size = 50.dp)
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(10.dp)
-                ) {
-                    val hasKey = apiKey.isNotBlank()
-                    Row(
-                        modifier = Modifier
-                            .clip(CircleShape)
-                            .background(
-                                when {
-                                    quotaExhausted -> RawColors.ErrorSoft
-                                    hasKey -> RawColors.AccentSoft
-                                    else -> RawColors.RaisedCard
-                                }
-                            )
-                            .border(
-                                width = 1.dp,
-                                color = if (quotaExhausted) RawColors.ErrorBorder else Color.Transparent,
-                                shape = CircleShape
-                            )
-                            .clickable {
-                                if (quotaExhausted) onSwitchGroqKey() else onOpenGroqKey()
-                            }
-                            .padding(horizontal = 12.dp, vertical = 7.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(6.dp)
-                    ) {
-                        RawIcon(
-                            type = RawIconType.KEY,
-                            size = 14.dp,
-                            tint = when {
-                                quotaExhausted -> RawColors.ErrorCoral
-                                hasKey -> RawColors.Tan
-                                else -> RawColors.TextMuted
-                            }
-                        )
-                        Text(
-                            text = when {
-                                !hasKey -> "Add Gemini key"
-                                quotaExhausted -> "Quota 0 \u2022 Switch"
-                                else -> quotaBadgeText
-                            },
-                            fontFamily = JetBrainsMonoFamily,
-                            fontWeight = FontWeight.Bold,
-                            fontSize = 11.5.sp,
-                            color = when {
-                                quotaExhausted -> RawColors.ErrorCoral
-                                hasKey -> RawColors.Tan
-                                else -> RawColors.TextMuted
-                            },
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis
-                        )
-                    }
-                    RawPixelMascot(kind = PixelMascotKind.LENS_BOT, size = 38.dp)
-                }
+                CircleActionButton(icon = RawIconType.BACK, onClick = onBack, size = 44.dp)
+                RawPixelMascot(kind = PixelMascotKind.LENS_BOT, size = 36.dp)
             }
 
             Box(modifier = Modifier.weight(1f).fillMaxWidth()) {
@@ -264,7 +209,7 @@ fun AssetLockerScreen(
 
                     item {
                         Text(
-                            text = "Local images, PNG cutouts, and MP4 clips are intercepted cleanly offline under `assets/`.",
+                            text = "Local images, cutouts, clips & custom fonts.",
                             style = RawTypography.bodyMedium.copy(fontSize = 15.sp, lineHeight = 21.sp),
                             color = RawColors.TextMuted
                         )
@@ -292,16 +237,10 @@ fun AssetLockerScreen(
                                 )
                             }
                             RawSecondaryButton(
-                                text = "In-App Web Capture & Icon Finder",
-                                height = 50.dp,
-                                leadingIcon = RawIconType.GLOBE,
-                                onClick = onOpenWebBrowser
-                            )
-                            RawSecondaryButton(
-                                text = "Open-Source Studios (Emoji / SVG / Canvas / Lottie)",
+                                text = "Background Remover (Batch + AI)",
                                 height = 50.dp,
                                 leadingIcon = RawIconType.SPARK,
-                                onClick = onOpenWebBrowser
+                                onClick = onOpenBackgroundRemover
                             )
                             RawSecondaryButton(
                                 text = "Import Custom Font (.ttf / .otf / .zip)",
@@ -494,7 +433,7 @@ fun AssetLockerScreen(
                                     color = RawColors.TextPrimary
                                 )
                                 Text(
-                                    text = "Pick an image, transparent PNG cutout, video clip, or use In-App Web Capture & Icon Finder above to screenshot websites and extract icons with AI cutout refinement.",
+                                    text = "Pick an image, video clip, or use Background Remover above.",
                                     style = RawTypography.bodyMedium.copy(fontSize = 14.5.sp, lineHeight = 20.5.sp),
                                     color = RawColors.TextMuted
                                 )

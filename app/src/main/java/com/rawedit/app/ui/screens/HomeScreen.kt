@@ -69,6 +69,7 @@ import com.rawedit.app.ui.icons.PixelSparkle
 import com.rawedit.app.ui.icons.RawIcon
 import com.rawedit.app.ui.icons.RawIconType
 import com.rawedit.app.ui.icons.RawPixelMascot
+import com.rawedit.app.ui.motion.FeatheredScrollEdges
 import com.rawedit.app.ui.motion.RawEasings
 import com.rawedit.app.ui.motion.RawPressButton
 import com.rawedit.app.ui.motion.TiltedAccentPill
@@ -181,8 +182,6 @@ fun HomeScreen(
                     .defaultMinSize(minHeight = availableHeight)
                     .navigationBarsPadding()
                     .padding(
-                        start = 20.dp,
-                        end = 20.dp,
                         top = if (isCompact) 14.dp else 28.dp,
                         bottom = 132.dp
                     ),
@@ -191,6 +190,7 @@ fun HomeScreen(
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
+                        .padding(horizontal = 20.dp)
                         .vhRise(entranceState, 0),
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically
@@ -227,7 +227,7 @@ fun HomeScreen(
 
                 Spacer(modifier = Modifier.height(if (isCompact) 10.dp else 14.dp))
 
-                Column(modifier = Modifier.vhRise(entranceState, 60)) {
+                Column(modifier = Modifier.padding(horizontal = 20.dp).vhRise(entranceState, 60)) {
                     Text(
                         text = "Make",
                         style = headlineStyle,
@@ -261,6 +261,7 @@ fun HomeScreen(
                     modifier = Modifier
                         .fillMaxWidth()
                         .horizontalScroll(rememberScrollState())
+                        .padding(horizontal = 20.dp)
                         .vhRise(entranceState, 120),
                     horizontalArrangement = Arrangement.spacedBy(10.dp)
                 ) {
@@ -297,6 +298,7 @@ fun HomeScreen(
                     lineHeight = 22.5.sp,
                     color = RawColors.TextMuted,
                     modifier = Modifier
+                        .padding(horizontal = 20.dp)
                         .widthIn(max = 290.dp)
                         .vhRise(entranceState, 180)
                 )
@@ -306,6 +308,7 @@ fun HomeScreen(
                 Box(
                     modifier = Modifier
                         .fillMaxWidth()
+                        .padding(horizontal = 20.dp)
                         .height(if (isCompact) 152.dp else 176.dp)
                         .vhRise(entranceState, 240)
                 ) {
@@ -373,10 +376,17 @@ fun HomeScreen(
                 HomeSlideCreateBar(
                     animEnabled = animEnabled,
                     onTriggered = onStartNewReel,
-                    modifier = Modifier.vhRise(entranceState, 300)
+                    modifier = Modifier.padding(horizontal = 20.dp).vhRise(entranceState, 300)
                 )
             }
         }
+
+        FeatheredScrollEdges(
+            scrollState = scrollState,
+            topHeight = 36.dp,
+            bottomHeight = 128.dp,
+            alwaysShowBottom = true
+        )
     }
 }
 

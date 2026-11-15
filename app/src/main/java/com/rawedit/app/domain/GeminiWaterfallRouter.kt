@@ -763,7 +763,7 @@ class GeminiWaterfallRouter(context: Context) {
                 2. Every entry MUST use standard SubRip (.srt) format:
                    - Sequential cue number (1, 2, 3...)
                    - Full timestamp line in exact HH:MM:SS,mmm --> HH:MM:SS,mmm format
-                   - 2 to 4 spoken words per cue for punchy kinetic typography pacing.
+                   - Strictly 1 spoken word per cue (word-by-word) for frame-accurate kinetic typography pacing.
                 3. Never summarize, never skip the second half, and never stop before the audio ends at $endTsStr.
                 4. Output ONLY raw .srt text — no markdown code fences, no commentary.
             """.trimIndent()
@@ -801,7 +801,7 @@ class GeminiWaterfallRouter(context: Context) {
                     $tailContext
                     $scriptSection
                     CONTINUE transcribing the remaining spoken audio starting strictly from $resumeTs all the way to the end of the audio at $endTsStr ($durStr seconds).
-                    Use exact HH:MM:SS,mmm --> HH:MM:SS,mmm format, 2 to 4 words per cue. Output ONLY the remaining raw SRT cues.
+                    Use exact HH:MM:SS,mmm --> HH:MM:SS,mmm format, strictly 1 word per cue (word-by-word). Output ONLY the remaining raw SRT cues.
                 """.trimIndent()
 
                 val contRes = generate(
@@ -872,4 +872,43 @@ class GeminiWaterfallRouter(context: Context) {
             Result.failure(t)
         }
     }
+
+    suspend fun refineCutoutWithCircles(
+        apiKey: String,
+        cutoutBitmap: Bitmap,
+        circles: List<IssueCircle>,
+        currentTolerance: Int
+    ): Result<Pair<Int, String>> = withContext(Dispatchers.IO) {
+        runCatching {
+            val circleDesc = if (circles.isEmpty()) {
+                "No specific circle drawn; perform a general edge & background-residue audit."
+            } else {
+                circles.joinToString("; ") { c ->
+                    "circle at x=%.2f, y=%.2f, r=%.2f".format(Locale.US, c.centerXNorm, c.centerYNorm, c.radiusNorm)
+                }
+            }
+            val prompt = buildString {
+                appendLine("You are refining a background-removed PNG cutout.")
+                appendLine("Current color-distance tolerance: $currentTolerance (valid range 8..90).")
+                appendLine("User circled error area(s) in normalized 0..1 coords: $circleDesc")
+                appendLine("If leftover background remains inside the circle, increase tolerance slightly (e.g. +8..+20).")
+                appendLine("If foreground subject edges got eaten inside the circle, decrease tolerance slightly (e.g. -6..-15).")
+                appendLine("Return ONLY valid JSON: {"recommendedTolerance": <int 8..90>, "note": "<short 1-line fix note>"}")
+            }
+            val b64 = bitmapToJpegBase64(cutoutBitmap, maxDim = 768, quality = 85)
+            val res = generateWithWaterfall(
+                apiKey = apiKey,
+                mode = GeminiRouteMode.FAST_CHAT,
+                prompt = prompt,
+                systemInstruction = "Output strict JSON only.",
+                expectJson = true,
+                images = listOf(GeminiImageInput(b64, "image/jpeg"))
+            ).getOrThrow()
+            val obj = JSONObject(extractJsonObject(res.text))
+            val recTol = obj.optInt("recommendedTolerance", currentTolerance).coerceIn(8, 90)
+            val note = obj.optString("note", "AI refined tolerance to $recTol").ifBlank { "AI refined tolerance to $recTol" }
+            recTol to note
+        }
+    }
+
 }

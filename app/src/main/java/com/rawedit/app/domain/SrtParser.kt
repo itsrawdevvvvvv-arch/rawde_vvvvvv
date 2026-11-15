@@ -199,20 +199,8 @@ object SrtParser {
         val effectiveEnd = maxOf(effectiveStart + 1.0, totalDurationSec)
         val spanSec = effectiveEnd - effectiveStart
 
-        // Group into 2-4 word phrases (or break on punctuation)
-        val chunks = mutableListOf<String>()
-        val current = mutableListOf<String>()
-        for (w in cleanWords) {
-            current.add(w)
-            val endsPunct = w.endsWith(".") || w.endsWith("!") || w.endsWith("?") || w.endsWith(",") || w.endsWith(";") || w.endsWith(":")
-            if (current.size >= 3 || (current.size >= 2 && endsPunct)) {
-                chunks.add(current.joinToString(" "))
-                current.clear()
-            }
-        }
-        if (current.isNotEmpty()) {
-            chunks.add(current.joinToString(" "))
-        }
+        // Word-by-word cues (1 word per cue) for tight kinetic sync
+        val chunks = cleanWords
 
         val weights = chunks.map { ch ->
             val pauseBonus = if (ch.endsWith(".") || ch.endsWith("!") || ch.endsWith("?")) 3 else 0

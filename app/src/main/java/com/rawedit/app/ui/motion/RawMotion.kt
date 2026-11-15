@@ -217,11 +217,45 @@ fun BoxScope.FeatheredScrollEdges(
     canScrollBackward: () -> Boolean,
     canScrollForward: () -> Boolean,
     topOffset: Dp = 0.dp,
-    topHeight: Dp = 54.dp,
-    bottomHeight: Dp = 112.dp,
+    topHeight: Dp = 44.dp,
+    bottomHeight: Dp = 104.dp,
     alwaysShowBottom: Boolean = false
 ) {
-    // No-op on low-end devices to eliminate GPU overdraw during scrolling
+    val showTop by remember { derivedStateOf(canScrollBackward) }
+    val showBottom by remember(alwaysShowBottom) {
+        derivedStateOf { alwaysShowBottom || canScrollForward() }
+    }
+    if (showTop && topHeight > 0.dp) {
+        Box(
+            modifier = Modifier
+                .align(Alignment.TopCenter)
+                .padding(top = topOffset)
+                .fillMaxWidth()
+                .height(topHeight)
+                .background(
+                    Brush.verticalGradient(
+                        0f to RawColors.BgPrimary,
+                        0.55f to RawColors.BgPrimary.copy(alpha = 0.78f),
+                        1f to Color.Transparent
+                    )
+                )
+        )
+    }
+    if (showBottom && bottomHeight > 0.dp) {
+        Box(
+            modifier = Modifier
+                .align(Alignment.BottomCenter)
+                .fillMaxWidth()
+                .height(bottomHeight)
+                .background(
+                    Brush.verticalGradient(
+                        0f to Color.Transparent,
+                        0.45f to RawColors.BgPrimary.copy(alpha = 0.78f),
+                        1f to RawColors.BgPrimary
+                    )
+                )
+        )
+    }
 }
 
 @Composable

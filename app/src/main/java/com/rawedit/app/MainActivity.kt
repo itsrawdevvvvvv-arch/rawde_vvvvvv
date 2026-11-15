@@ -58,7 +58,7 @@ import com.rawedit.app.ui.screens.ProfileSetupScreen
 import com.rawedit.app.ui.screens.RawChatbotScreen
 import com.rawedit.app.ui.screens.RenderingScreen
 import com.rawedit.app.ui.screens.ResultScreen
-import com.rawedit.app.ui.screens.WebBrowserAssetScreen
+import com.rawedit.app.ui.screens.BackgroundRemoverScreen
 import com.rawedit.app.ui.theme.RawColors
 import com.rawedit.app.ui.theme.RawEditTheme
 import kotlinx.coroutines.Dispatchers
@@ -78,7 +78,7 @@ private sealed interface AppRoute {
     data class CreateHub(val projectId: Long) : AppRoute
     data class AddVoice(val projectId: Long) : AppRoute
     data class AssetLocker(val projectId: Long) : AppRoute
-    data class WebBrowser(val projectId: Long) : AppRoute
+    data class BackgroundRemover(val projectId: Long) : AppRoute
     data class CopyPrompt(val projectId: Long) : AppRoute
     data class CodePaste(val projectId: Long) : AppRoute
     data class KeyframeSheet(val projectId: Long) : AppRoute
@@ -552,7 +552,7 @@ private fun MainAuthenticatedHost(
                                     }
                                 }
                             },
-                            onOpenWebBrowser = { pushRoute(AppRoute.WebBrowser(proj.id)) },
+                            onOpenBackgroundRemover = { pushRoute(AppRoute.BackgroundRemover(proj.id)) },
                             onSaveCutoutBitmap = { bmp, isCutout, name, desc, safe ->
                                 saveCapturedBitmapToLocker(proj.id, bmp, isCutout, name, desc, safe)
                             },
@@ -577,18 +577,15 @@ private fun MainAuthenticatedHost(
                     }
                 }
 
-                is AppRoute.WebBrowser -> {
-                    WebBrowserAssetScreen(
+                is AppRoute.BackgroundRemover -> {
+                    BackgroundRemoverScreen(
                         apiKey = userProfile.groqApiKey,
-                        modelPref = userProfile.groqModelPref,
-                        quotaExhausted = userProfile.groqQuotaExhausted,
+                        geminiRouter = geminiRouter,
                         onBack = ::popRoute,
-                        onSaveCapturedBitmap = { bmp, isCutout, name, desc, safe ->
-                            saveCapturedBitmapToLocker(route.projectId, bmp, isCutout, name, desc, safe)
-                        },
-                        onOpenGroqKey = { openGroqDialog(switchMode = false) },
-                        onSwitchGroqKey = { openGroqDialog(switchMode = true) },
-                        onRefreshGroqQuota = { refreshGroqQuota(silent = true) }
+                        onOpenGeminiKey = { openGroqDialog(switchMode = false) },
+                        onSaveCutout = { bmp, name ->
+                            saveCapturedBitmapToLocker(route.projectId, bmp, true, name, null, null)
+                        }
                     )
                 }
 
