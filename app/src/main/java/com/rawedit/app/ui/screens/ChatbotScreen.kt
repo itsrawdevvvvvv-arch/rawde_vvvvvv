@@ -3,6 +3,10 @@ package com.rawedit.app.ui.screens
 import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
+import android.widget.Toast
+import androidx.activity.compose.BackHandler
+import androidx.compose.ui.platform.LocalSoftwareKeyboardController
+import androidx.compose.ui.zIndex
 import android.annotation.SuppressLint
 import android.os.Build
 import android.webkit.WebSettings
@@ -134,6 +138,7 @@ fun RawChatbotScreen(
     val context = LocalContext.current
     val localClipboard = LocalClipboardManager.current
     val haptic = LocalHapticFeedback.current
+    val keyboard = LocalSoftwareKeyboardController.current
     val scope = rememberCoroutineScope()
     val listState = rememberLazyListState()
 
@@ -204,14 +209,13 @@ fun RawChatbotScreen(
     }
 
     fun copyFullText(text: String) {
-        runCatching {
-            localClipboard.setText(AnnotatedString(text))
-        }
+        runCatching { localClipboard.setText(AnnotatedString(text)) }
         runCatching {
             val cb = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
             cb.setPrimaryClip(ClipData.newPlainText("RAW EDIT AI", text))
         }
         haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+        Toast.makeText(context, "Copied to clipboard", Toast.LENGTH_SHORT).show()
         toastMsg = "Copied to clipboard"
     }
 
@@ -435,8 +439,9 @@ fun RawChatbotScreen(
                             ChatBubbleRow(
                                 msg = msg,
                                 onCopyFull = { copyFullText(msg.text) },
-                                onSelectText = { selectingText = msg.text },
+                                onSelectText = { keyboard?.hide(); selectingText = msg.text },
                                 onViewFile = { path ->
+                                    keyboard?.hide()
                                     val f = File(path)
                                     if (f.exists()) viewingFile = f else toastMsg = "File not found"
                                 },
@@ -459,8 +464,12 @@ fun RawChatbotScreen(
                                     }
                                 },
                                 onPreviewWebsite = { path ->
+                                    keyboard?.hide()
                                     val f = File(path)
-                                    if (f.exists()) previewingWebsite = f else toastMsg = "Website file not found"
+                                    if (f.exists()) previewingWebsite = f else {
+                                        Toast.makeText(context, "Website file not found", Toast.LENGTH_SHORT).show()
+                                        toastMsg = "Website file not found"
+                                    }
                                 }
                             )
                         }
@@ -641,6 +650,94 @@ fun RawChatbotScreen(
                 .navigationBarsPadding()
                 .padding(bottom = 86.dp)
         )
+
+        selectingText?.let { rawTxt ->
+            BackHandler { selectingText = null }
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .zIndex(40f)
+                    .background(Color.Black.copy(alpha = 0.72f))
+                    .clickable(onClick = { selectingText = null }),
+                contentAlignment = Alignment.Center
+            ) {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 18.dp)
+                        .clip(RoundedCornerShape(26.dp))
+                        .background(RawColors.CardSurface)
+                        .border(1.dp, RawColors.Divider, RoundedCornerShape(26.dp))
+                        .clickable(enabled = false, onClick = {})
+                        .padding(18.dp),
+                    verticalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            text = "Select & Copy Text",
+                            fontFamily = BricolageFamily,
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 18.sp,
+                            color = RawColors.TextPrimary
+                        )
+                        CircleActionButton(icon = RawIconType.CLOSE, size = 34.dp, onClick = { selectingText = null })
+                    }
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .heightIn(min = 140.dp, max = 400.dp)
+                            .clip(RoundedCornerShape(16.dp))
+                            .background(RawColors.BgPrimary)
+                            .verticalScroll(rememberScrollState())
+                            .padding(14.dp)
+                    ) {
+                        BasicTextField(
+                            value = rawTxt,
+                            onValueChange = {},
+                            readOnly = true,
+                            textStyle = TextStyle(
+                                fontFamily = BricolageFamily,
+                                fontSize = 14.5.sp,
+                                lineHeight = 21.sp,
+                                color = RawColors.TextPrimary
+                            ),
+                            modifier = Modifier.fillMaxWidth()
+                        )
+                    }
+                    BigPrimaryButton(
+                        text = "Copy all",
+                        height = 48.dp,
+                        leadingIcon = RawIconType.COPY,
+                        onClick = {
+                            copyFullText(rawTxt)
+                            selectingText = null
+                        }
+                    )
+                }
+            }
+        }
+
+        previewingWebsite?.let { htmlFile ->
+            BackHandler { previewingWebsite = null }
+            Box(modifier = Modifier.fillMaxSize().zIndex(50f)) {
+                ChatWebsitePreviewOverlay(
+                    htmlFile = htmlFile,
+                    onSave = {
+                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                            scope.launch {
+                                cacheManager.saveFileToDownloads(htmlFile, htmlFile.name, "text/html")
+                                    .onSuccess { toastMsg = "Saved ${htmlFile.name} to Downloads" }
+                            }
+                        }
+                    },
+                    onDismiss = { previewingWebsite = null }
+                )
+            }
+        }
     }
 
 
@@ -652,20 +749,6 @@ fun RawChatbotScreen(
         )
     }
 
-    previewingWebsite?.let { htmlFile ->
-        ChatWebsitePreviewDialog(
-            htmlFile = htmlFile,
-            onSave = {
-                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                    scope.launch {
-                        cacheManager.saveFileToDownloads(htmlFile, htmlFile.name, "text/html")
-                            .onSuccess { toastMsg = "Saved ${htmlFile.name} to Downloads" }
-                    }
-                }
-            },
-            onDismiss = { previewingWebsite = null }
-        )
-    }
 
 
     if (showInAppBrowser) {
@@ -689,69 +772,6 @@ fun RawChatbotScreen(
     }
 
 
-    selectingText?.let { rawTxt ->
-        Dialog(
-            onDismissRequest = { selectingText = null },
-            properties = DialogProperties(usePlatformDefaultWidth = false)
-        ) {
-            Column(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 18.dp)
-                    .clip(RoundedCornerShape(26.dp))
-                    .background(RawColors.CardSurface)
-                    .border(1.dp, RawColors.Divider, RoundedCornerShape(26.dp))
-                    .padding(18.dp),
-                verticalArrangement = Arrangement.spacedBy(12.dp)
-            ) {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Text(
-                        text = "Select & Copy Text",
-                        fontFamily = BricolageFamily,
-                        fontWeight = FontWeight.Bold,
-                        fontSize = 18.sp,
-                        color = RawColors.TextPrimary
-                    )
-                    CircleActionButton(icon = RawIconType.CLOSE, size = 34.dp, onClick = { selectingText = null })
-                }
-                Column(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .heightIn(min = 120.dp, max = 380.dp)
-                        .clip(RoundedCornerShape(16.dp))
-                        .background(RawColors.BgPrimary)
-                        .verticalScroll(rememberScrollState())
-                        .padding(14.dp)
-                ) {
-                    BasicTextField(
-                        value = rawTxt,
-                        onValueChange = {},
-                        readOnly = true,
-                        textStyle = TextStyle(
-                            fontFamily = BricolageFamily,
-                            fontSize = 14.5.sp,
-                            lineHeight = 21.sp,
-                            color = RawColors.TextPrimary
-                        ),
-                        modifier = Modifier.fillMaxWidth()
-                    )
-                }
-                BigPrimaryButton(
-                    text = "Copy all",
-                    height = 48.dp,
-                    leadingIcon = RawIconType.COPY,
-                    onClick = {
-                        copyFullText(rawTxt)
-                        selectingText = null
-                    }
-                )
-            }
-        }
-    }
 
 
     if (showAttachChooser) {
@@ -1056,19 +1076,17 @@ private fun ChatBubbleRow(
                 }
             }
 
-            SelectionContainer {
-                if (isUser) {
-                    Text(
-                        text = msg.text,
-                        fontFamily = BricolageFamily,
-                        fontWeight = FontWeight.SemiBold,
-                        fontSize = 14.5.sp,
-                        lineHeight = 20.5.sp,
-                        color = RawColors.Ink
-                    )
-                } else {
-                    RichFormattedMessage(text = msg.text)
-                }
+            if (isUser) {
+                Text(
+                    text = msg.text,
+                    fontFamily = BricolageFamily,
+                    fontWeight = FontWeight.SemiBold,
+                    fontSize = 14.5.sp,
+                    lineHeight = 20.5.sp,
+                    color = RawColors.Ink
+                )
+            } else {
+                RichFormattedMessage(text = msg.text)
             }
 
             if (msg.appliedActions.isNotEmpty()) {
@@ -1403,7 +1421,7 @@ private fun ChatFileViewerDialog(
 
 @SuppressLint("SetJavaScriptEnabled")
 @Composable
-private fun ChatWebsitePreviewDialog(
+private fun ChatWebsitePreviewOverlay(
     htmlFile: File,
     onSave: () -> Unit,
     onDismiss: () -> Unit
@@ -1412,11 +1430,6 @@ private fun ChatWebsitePreviewDialog(
         runCatching { htmlFile.readText(Charsets.UTF_8) }.getOrDefault("<html><body><h3>Empty</h3></body></html>")
     }
     var desktopMode by remember { mutableStateOf(false) }
-
-    Dialog(
-        onDismissRequest = onDismiss,
-        properties = DialogProperties(usePlatformDefaultWidth = false)
-    ) {
         Column(
             modifier = Modifier
                 .fillMaxSize()
@@ -1479,7 +1492,7 @@ private fun ChatWebsitePreviewDialog(
                     .fillMaxWidth()
             )
         }
-    }
+    
 }
 
 
@@ -1559,6 +1572,7 @@ private fun InAppAiBrowserDialog(
                     WebView(ctx).apply {
                         CookieManager.getInstance().setAcceptCookie(true)
                         CookieManager.getInstance().setAcceptThirdPartyCookies(this, true)
+                        setBackgroundColor(android.graphics.Color.WHITE)
                         setLayerType(android.view.View.LAYER_TYPE_HARDWARE, null)
                         settings.javaScriptEnabled = true
                         settings.domStorageEnabled = true
@@ -1571,7 +1585,7 @@ private fun InAppAiBrowserDialog(
                         settings.setSupportMultipleWindows(false)
                         settings.javaScriptCanOpenWindowsAutomatically = true
                         settings.userAgentString =
-                            "Mozilla/5.0 (Linux; Android 13; Redmi Note 9) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Mobile Safari/537.36"
+                            "Mozilla/5.0 (Linux; Android 13; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Mobile Safari/537.36"
                         webChromeClient = object : WebChromeClient() {
                             override fun onProgressChanged(view: WebView?, newProgress: Int) {
                                 loadProgress = newProgress

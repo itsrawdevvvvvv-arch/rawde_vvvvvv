@@ -476,6 +476,32 @@ def fix_chatbot_state_order():
     print("  chatbot bg state hoisted above first use")
 
 
+def fix_enum_body_brace():
+    """An enum whose last constant ends in a comment loses its closing brace."""
+    p = root / "app/src/main/java/com/rawedit/app/domain/GeminiWaterfallRouter.kt"
+    s = read(p)
+    if s is None:
+        return
+    lines = s.split("\n")
+    fixed = False
+    for i, line in enumerate(lines):
+        if not line.strip().startswith("FAST_CHAT"):
+            continue
+        j = i + 1
+        while j < len(lines) and lines[j].strip() == "":
+            j += 1
+        if j >= len(lines):
+            continue
+        nxt = lines[j]
+        if nxt.startswith(("enum class", "class ", "object ", "data class", "fun ")):
+            lines.insert(i + 1, "}")
+            fixed = True
+            break
+    if fixed:
+        p.write_text("\n".join(lines))
+        print("  GeminiRouteMode closing brace restored")
+
+
 STEPS = [
     fix_version,
     fix_navigation,
@@ -494,6 +520,7 @@ STEPS = [
     fix_router_stray_brace,
     fix_assetlocker_card_call,
     fix_chatbot_state_order,
+    fix_enum_body_brace,
 ]
 
 for step in STEPS:
