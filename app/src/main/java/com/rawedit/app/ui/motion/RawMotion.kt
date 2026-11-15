@@ -516,26 +516,7 @@ fun CascadeSkewCard(
     modifier: Modifier = Modifier,
     content: @Composable () -> Unit
 ) {
-    val animEnabled = rememberAnimationsEnabled()
-    val progress = remember { Animatable(if (animEnabled && index < 6) 0f else 1f) }
-
-    LaunchedEffect(Unit) {
-        if (animEnabled && index < 6 && progress.value < 1f) {
-            if (index > 0) delay(index * 36L)
-            progress.animateTo(1f, tween(320, easing = RawEasings.Morph))
-        }
-    }
-
-    Box(
-        modifier = modifier.graphicsLayer {
-            val p = progress.value
-            val s = 0.95f + 0.05f * p
-            translationY = (1f - p) * 24f
-            scaleX = s
-            scaleY = s
-            alpha = p.coerceIn(0f, 1f)
-        }
-    ) {
+    Box(modifier = modifier) {
         content()
     }
 }

@@ -140,7 +140,7 @@ fun CreateHubScreen(
             subtitle = if (attachedAssetCount > 0) {
                 "$attachedAssetCount local media attached \u2022 custom fonts"
             } else {
-                "Images, PNG cutouts, video clips & custom .ttf/.otf fonts"
+                "Images, video clips & custom .ttf/.otf fonts"
             },
             statusText = if (attachedAssetCount > 0) "Attached ($attachedAssetCount)" else "Optional",
             statusDone = attachedAssetCount > 0,

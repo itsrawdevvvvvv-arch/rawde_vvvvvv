@@ -177,6 +177,8 @@ fun AddVoiceScreen(
     var srtCueCount by remember(project.id) { mutableStateOf(project.srtCueCount) }
     var srtError by remember { mutableStateOf<String?>(null) }
     var transcribingAudio by remember { mutableStateOf(false) }
+    var transcribeProgress by remember { mutableStateOf(0f) }
+    var transcribeStatus by remember { mutableStateOf("Starting...") }
     var showSrtEditor by remember { mutableStateOf(false) }
 
     var topic by remember(project.id) {
@@ -600,6 +602,8 @@ fun AddVoiceScreen(
                                         onOpenGeminiKey()
                                     } else {
                                         transcribingAudio = true
+                                        transcribeProgress = 0.08f
+                                        transcribeStatus = "Preparing audio..."
                                         srtError = null
                                         scope.launch {
                                             val f = File(audioPath)
@@ -607,7 +611,11 @@ fun AddVoiceScreen(
                                                 apiKey = key,
                                                 audioFile = f,
                                                 knownDurationSec = audioDuration,
-                                                scriptHint = topic
+                                                scriptHint = topic,
+                                                onProgress = { p, st ->
+                                                    transcribeProgress = p
+                                                    transcribeStatus = st
+                                                }
                                             )
                                             transcribingAudio = false
                                             res.onSuccess { parsed ->
@@ -625,6 +633,51 @@ fun AddVoiceScreen(
                                 },
                                 modifier = Modifier.weight(1f)
                             )
+                        }
+
+                        if (transcribingAudio) {
+                            Column(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clip(RoundedCornerShape(14.dp))
+                                    .background(RawColors.RaisedCard)
+                                    .padding(12.dp),
+                                verticalArrangement = Arrangement.spacedBy(6.dp)
+                            ) {
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.SpaceBetween
+                                ) {
+                                    Text(
+                                        text = transcribeStatus,
+                                        fontFamily = BricolageFamily,
+                                        fontSize = 12.5.sp,
+                                        color = RawColors.TextPrimary
+                                    )
+                                    Text(
+                                        text = "${(transcribeProgress * 100).toInt()}%",
+                                        fontFamily = JetBrainsMonoFamily,
+                                        fontWeight = FontWeight.Bold,
+                                        fontSize = 12.sp,
+                                        color = RawColors.Tan
+                                    )
+                                }
+                                Box(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .height(6.dp)
+                                        .clip(CircleShape)
+                                        .background(RawColors.BgPrimary)
+                                ) {
+                                    Box(
+                                        modifier = Modifier
+                                            .fillMaxWidth(transcribeProgress.coerceIn(0.05f, 1f))
+                                            .height(6.dp)
+                                            .clip(CircleShape)
+                                            .background(RawColors.Tan)
+                                    )
+                                }
+                            }
                         }
 
                         if (topic.isNotBlank()) {

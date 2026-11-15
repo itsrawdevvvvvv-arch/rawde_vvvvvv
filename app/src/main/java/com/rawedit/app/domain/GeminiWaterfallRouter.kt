@@ -58,18 +58,6 @@ data class ModelHealthStatus(
 )
 
 
-data class CutoutToolCall(
-    val tool: String,
-    val cx: Float = 0.5f,
-    val cy: Float = 0.5f,
-    val radius: Float = 0.14f,
-    val intParam: Int = 34
-)
-
-data class CutoutToolAgentResult(
-    val reply: String,
-    val toolCalls: List<CutoutToolCall>
-)
 
 data class GeminiImageInput(
     val base64Data: String,
@@ -212,7 +200,7 @@ class GeminiWaterfallRouter(context: Context) {
                     if (expectJson) {
                         put("responseMimeType", "application/json")
                     }
-                    put("maxOutputTokens", maxOutputTokens.coerceIn(512, 16384))
+                    put("maxOutputTokens", maxOutputTokens.coerceIn(512, 65536))
                 })
             }
             return payload.toString()
@@ -557,8 +545,9 @@ class GeminiWaterfallRouter(context: Context) {
                 apiKey = apiKey,
                 prompt = prompt,
                 systemInstruction = PALETTE_SYSTEM,
-                routeMode = GeminiRouteMode.JSON_WORKHORSE,
-                expectJson = true
+                routeMode = GeminiRouteMode.FAST_CHAT,
+                expectJson = true,
+                maxOutputTokens = 768
             ).getOrThrow()
 
             val obj = JSONObject(GroqCodec.stripJsonFences(res.text))
@@ -634,85 +623,6 @@ class GeminiWaterfallRouter(context: Context) {
         }
     }
 
-    suspend fun auditCutout(
-        apiKey: String,
-        comparisonFile: File,
-        currentTolerance: Int,
-        currentPad: CutoutPadRatios,
-        isSvgSource: Boolean,
-        keepOriginalMode: Boolean
-    ): Result<CutoutAuditResult> = withContext(Dispatchers.IO) {
-        try {
-            val (b64, mime) = encodeFileForVision(comparisonFile, maxDim = 1024)
-            val padInfo = String.format(
-                Locale.US,
-                "T=%.2f, R=%.2f, B=%.2f, L=%.2f",
-                currentPad.top,
-                currentPad.right,
-                currentPad.bottom,
-                currentPad.left
-            )
-            val prompt = """
-                Inspect this side-by-side PNG cutout diagnostic image carefully.
-                LEFT panel shows the SOURCE original. RIGHT panel shows the extracted PNG CUTOUT placed over a dark gray checkerboard.
-                Current parameters: isSvg=$isSvgSource, tolerance=$currentTolerance, keepOriginal=$keepOriginalMode, padding=[$padInfo].
-
-                Check for two specific conversion defects:
-                1. UNNECESSARY CROPPING: outer vector strokes, rounded corners, drop shadows, circular rings, or thin edges clipped/cut off at the top, right, bottom, or left border of the RIGHT cutout.
-                2. OVER-REMOVAL / ACCIDENTAL ERASURE: bright foreground details, inner logo text, eyes, shiny highlights, or anti-aliased edges erased into checkerboard tiles (comparing RIGHT vs LEFT), OR the LEFT image is a full rectangular UI screenshot/scene that should keep its background intact rather than keying out corners.
-
-                Respond ONLY with raw valid JSON containing exact keys:
-                - "status": "OK" or "ADJUST"
-                - "diagnosis": 1 concise honest sentence summarizing whether clipping or accidental erasure was seen and what you fixed (or "Cutout edges and interior details look clean.")
-                - "keepOriginal": boolean (set true ONLY if background removal destroyed a complex UI card, photo, or non-transparent scene)
-                - "recommendedTolerance": integer (if isSvg=true, use 0; if inner light shapes/text were erased on a raster logo, lower to 6..20; otherwise $currentTolerance)
-                - "extraPadTop": number 0.0..0.16
-                - "extraPadRight": number 0.0..0.16
-                - "extraPadBottom": number 0.0..0.16
-                - "extraPadLeft": number 0.0..0.16
-            """.trimIndent()
-
-            val res = generate(
-                apiKey = apiKey,
-                prompt = prompt,
-                systemInstruction = "Respond strictly with raw valid JSON matching the exact schema keys.",
-                routeMode = GeminiRouteMode.JSON_WORKHORSE,
-                expectJson = true,
-                images = listOf(GeminiImageInput(base64Data = b64, mimeType = mime))
-            ).getOrThrow()
-
-            val obj = JSONObject(GroqCodec.stripJsonFences(res.text))
-            val statusRaw = obj.optString("status", "OK").trim().uppercase(Locale.US)
-            val diagnosis = obj.optString("diagnosis", "Cutout edges verified by Gemini Vision.")
-            val keepOriginal = obj.optBoolean("keepOriginal", keepOriginalMode)
-            val recommendedTolerance = obj.optInt("recommendedTolerance", currentTolerance)
-            val extraT = obj.optDouble("extraPadTop", 0.0).toFloat().coerceIn(0f, 0.16f)
-            val extraR = obj.optDouble("extraPadRight", 0.0).toFloat().coerceIn(0f, 0.16f)
-            val extraB = obj.optDouble("extraPadBottom", 0.0).toFloat().coerceIn(0f, 0.16f)
-            val extraL = obj.optDouble("extraPadLeft", 0.0).toFloat().coerceIn(0f, 0.16f)
-
-            val hasDelta = keepOriginal != keepOriginalMode ||
-                (!isSvgSource && recommendedTolerance != currentTolerance) ||
-                extraT > 0.01f || extraR > 0.01f || extraB > 0.01f || extraL > 0.01f
-
-            Result.success(
-                CutoutAuditResult(
-                    status = if (statusRaw == "ADJUST" || hasDelta) "ADJUST" else "OK",
-                    diagnosis = diagnosis.ifBlank { "Cutout edges and interior details verified by Gemini Vision." },
-                    keepOriginal = keepOriginal,
-                    recommendedTolerance = recommendedTolerance,
-                    extraPadTop = extraT,
-                    extraPadRight = extraR,
-                    extraPadBottom = extraB,
-                    extraPadLeft = extraL,
-                    needsReprocess = hasDelta
-                )
-            )
-        } catch (ce: CancellationException) {
-            throw ce
-        } catch (t: Throwable) {
-            Result.failure(t)
-        }
     }
 
     /**
@@ -723,7 +633,8 @@ class GeminiWaterfallRouter(context: Context) {
         apiKey: String,
         audioFile: File,
         knownDurationSec: Double = 0.0,
-        scriptHint: String = ""
+        scriptHint: String = "",
+        onProgress: (Float, String) -> Unit = { _, _ -> }
     ): Result<SrtParseResult> = withContext(Dispatchers.IO) {
         try {
             val cleanKey = sanitizeApiKey(apiKey)
@@ -749,6 +660,7 @@ class GeminiWaterfallRouter(context: Context) {
                 }
             }
 
+            onProgress(0.15f, "Preparing audio...")
             val rawBytes = audioFile.readBytes()
             val b64 = Base64.encodeToString(rawBytes, Base64.NO_WRAP)
             val ext = audioFile.extension.lowercase(Locale.US)
@@ -784,14 +696,16 @@ class GeminiWaterfallRouter(context: Context) {
                 4. Output ONLY raw .srt text — no markdown code fences, no commentary.
             """.trimIndent()
 
+            onProgress(0.45f, "Transcribing word-by-word...")
             val initialRes = generate(
                 apiKey = cleanKey,
                 prompt = prompt,
-                routeMode = GeminiRouteMode.JSON_WORKHORSE,
+                routeMode = GeminiRouteMode.FAST_CHAT,
                 expectJson = false,
                 images = listOf(GeminiImageInput(base64Data = b64, mimeType = mime)),
-                maxOutputTokens = 16384
+                maxOutputTokens = 65536
             ).getOrThrow()
+            onProgress(0.75f, "Aligning timestamps...")
 
             val collectedCues = mutableListOf<SrtCue>()
             val firstParsed = SrtParser.parse(initialRes.text)
@@ -820,13 +734,14 @@ class GeminiWaterfallRouter(context: Context) {
                     Use exact HH:MM:SS,mmm --> HH:MM:SS,mmm format, strictly 1 word per cue (word-by-word). Output ONLY the remaining raw SRT cues.
                 """.trimIndent()
 
+                onProgress((0.75f + pass * 0.07f).coerceAtMost(0.95f), "Completing remaining audio...")
                 val contRes = generate(
                     apiKey = cleanKey,
                     prompt = contPrompt,
-                    routeMode = GeminiRouteMode.JSON_WORKHORSE,
+                    routeMode = GeminiRouteMode.FAST_CHAT,
                     expectJson = false,
                     images = listOf(GeminiImageInput(base64Data = b64, mimeType = mime)),
-                    maxOutputTokens = 16384
+                    maxOutputTokens = 65536
                 ).getOrNull() ?: break
 
                 val contParsed = SrtParser.parse(contRes.text)
@@ -888,130 +803,4 @@ class GeminiWaterfallRouter(context: Context) {
             Result.failure(t)
         }
     }
-
-    private fun bitmapToJpegBase64(bmp: Bitmap, maxDim: Int = 768, quality: Int = 85): String {
-        val maxSide = maxOf(bmp.width, bmp.height)
-        val scaled = if (maxSide > maxDim) {
-            val scale = maxDim.toFloat() / maxSide.toFloat()
-            Bitmap.createScaledBitmap(
-                bmp,
-                (bmp.width * scale).toInt().coerceAtLeast(1),
-                (bmp.height * scale).toInt().coerceAtLeast(1),
-                true
-            )
-        } else {
-            bmp
-        }
-        val out = ByteArrayOutputStream()
-        scaled.compress(Bitmap.CompressFormat.JPEG, quality, out)
-        return Base64.encodeToString(out.toByteArray(), Base64.NO_WRAP)
-    }
-
-    private fun extractJsonObject(raw: String): String {
-        val start = raw.indexOf('{')
-        val end = raw.lastIndexOf('}')
-        return if (start >= 0 && end > start) raw.substring(start, end + 1) else raw.trim()
-    }
-
-    suspend fun refineCutoutWithCircles(
-        apiKey: String,
-        cutoutBitmap: Bitmap,
-        circles: List<IssueCircle>,
-        currentTolerance: Int
-    ): Result<Pair<Int, String>> = withContext(Dispatchers.IO) {
-        runCatching {
-            val circleDesc = if (circles.isEmpty()) {
-                "No specific circle drawn; perform a general edge & background-residue audit."
-            } else {
-                circles.joinToString("; ") { c ->
-                    "circle at x=%.2f, y=%.2f, r=%.2f".format(Locale.US, c.centerXNorm, c.centerYNorm, c.radiusNorm)
-                }
-            }
-            val prompt = buildString {
-                appendLine("You are refining a background-removed PNG cutout.")
-                appendLine("Current color-distance tolerance: $currentTolerance (valid range 8..90).")
-                appendLine("User circled error area(s) in normalized 0..1 coords: $circleDesc")
-                appendLine("If leftover background remains inside the circle, increase tolerance slightly (e.g. +8..+20).")
-                appendLine("If foreground subject edges got eaten inside the circle, decrease tolerance slightly (e.g. -6..-15).")
-                appendLine("Return ONLY valid JSON: {\"recommendedTolerance\": <int 8..90>, \"note\": \"<short 1-line fix note>\"}")
-            }
-            val b64 = bitmapToJpegBase64(cutoutBitmap, maxDim = 768, quality = 85)
-            val res = generate(
-                apiKey = apiKey,
-                routeMode = GeminiRouteMode.FAST_CHAT,
-                prompt = prompt,
-                systemInstruction = "Output strict JSON only.",
-                expectJson = true,
-                images = listOf(GeminiImageInput(b64, "image/jpeg"))
-            ).getOrThrow()
-            val obj = JSONObject(extractJsonObject(res.text))
-            val recTol = obj.optInt("recommendedTolerance", currentTolerance).coerceIn(8, 90)
-            val note = obj.optString("note", "AI refined tolerance to $recTol").ifBlank { "AI refined tolerance to $recTol" }
-            recTol to note
-        }
-    }
-
-
-    suspend fun runCutoutToolAgent(
-        apiKey: String,
-        cutoutBitmap: Bitmap,
-        circles: List<IssueCircle>,
-        userInstruction: String,
-        currentTolerance: Int
-    ): Result<CutoutToolAgentResult> = withContext(Dispatchers.IO) {
-        runCatching {
-            val circleDesc = if (circles.isEmpty()) {
-                "None drawn."
-            } else {
-                circles.joinToString("; ") { c ->
-                    "circle(cx=%.3f, cy=%.3f, r=%.3f)".format(Locale.US, c.centerXNorm, c.centerYNorm, c.radiusNorm)
-                }
-            }
-            val prompt = buildString {
-                appendLine("You are an AI Cutout Editor controlling image cutout tools.")
-                appendLine("User instruction: \"$userInstruction\"")
-                appendLine("User-drawn red circles (normalized 0..1): $circleDesc")
-                appendLine("Current flood-fill tolerance: $currentTolerance")
-                appendLine()
-                appendLine("Available tools:")
-                appendLine("1. {\"tool\": \"erase_circle\", \"cx\": <0..1>, \"cy\": <0..1>, \"r\": <0.03..0.6>} -> removes unwanted leftover background/object in that circle.")
-                appendLine("2. {\"tool\": \"restore_circle\", \"cx\": <0..1>, \"cy\": <0..1>, \"r\": <0.03..0.6>} -> restores accidentally cut-out foreground subject in that circle.")
-                appendLine("3. {\"tool\": \"soften_edges\", \"value\": <1..4>} -> feathers/smooths jagged edges.")
-                appendLine("4. {\"tool\": \"resegment_flood\", \"value\": <8..90>} -> re-runs solid background flood-fill with new tolerance.")
-                appendLine("5. {\"tool\": \"reset_ml_cutout\"} -> resets to fresh on-device ML subject segmentation.")
-                appendLine()
-                appendLine("If user drew circle(s) and says 'remove'/'erase'/'clean'/'fix', emit erase_circle at those exact cx, cy, r (or restore_circle if they say 'restore'/'keep'/'bring back').")
-                appendLine("Return ONLY valid JSON:")
-                appendLine("{\"reply\": \"<short 1-sentence confirmation>\", \"tools\": [ ... ]}")
-            }
-            val b64 = bitmapToJpegBase64(cutoutBitmap, maxDim = 768, quality = 85)
-            val res = generate(
-                apiKey = apiKey,
-                routeMode = GeminiRouteMode.FAST_CHAT,
-                prompt = prompt,
-                systemInstruction = "Output strict JSON only.",
-                expectJson = true,
-                images = listOf(GeminiImageInput(b64, "image/jpeg"))
-            ).getOrThrow()
-
-            val obj = JSONObject(extractJsonObject(res.text))
-            val reply = obj.optString("reply", "Applied cutout refinement.").ifBlank { "Applied cutout refinement." }
-            val toolsArr = obj.optJSONArray("tools") ?: JSONArray()
-            val calls = mutableListOf<CutoutToolCall>()
-            for (i in 0 until toolsArr.length()) {
-                val t = toolsArr.optJSONObject(i) ?: continue
-                calls.add(
-                    CutoutToolCall(
-                        tool = t.optString("tool", ""),
-                        cx = t.optDouble("cx", 0.5).toFloat().coerceIn(0f, 1f),
-                        cy = t.optDouble("cy", 0.5).toFloat().coerceIn(0f, 1f),
-                        radius = t.optDouble("r", 0.14).toFloat().coerceIn(0.02f, 0.7f),
-                        intParam = t.optInt("value", currentTolerance)
-                    )
-                )
-            }
-            CutoutToolAgentResult(reply = reply, toolCalls = calls)
-        }
-    }
-
 }

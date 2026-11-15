@@ -42,6 +42,7 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -451,7 +452,7 @@ fun RawSecondaryButton(
                 .graphicsLayer { alpha = if (enabled) 1f else 0.4f }
                 .clip(CircleShape)
                 .background(bg)
-                .padding(horizontal = if (height <= 48.dp) 14.dp else 20.dp),
+                .padding(horizontal = if (height <= 48.dp) 11.dp else 18.dp),
             horizontalArrangement = Arrangement.Center,
             verticalAlignment = Alignment.CenterVertically
         ) {
@@ -463,10 +464,11 @@ fun RawSecondaryButton(
                 text = text,
                 fontFamily = BricolageFamily,
                 fontWeight = FontWeight.Bold,
-                fontSize = if (height <= 42.dp) 13.5.sp else if (height <= 48.dp) 14.5.sp else 17.sp,
+                fontSize = if (height <= 42.dp) 13.sp else if (height <= 48.dp) 14.sp else 16.5.sp,
                 color = fg,
                 maxLines = 1,
-                softWrap = false
+                softWrap = false,
+                overflow = TextOverflow.Ellipsis
             )
         }
     }

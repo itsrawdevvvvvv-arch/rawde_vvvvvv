@@ -15,6 +15,13 @@ import org.json.JSONObject
 import java.io.File
 import java.util.Locale
 
+
+data class ChatSessionMeta(
+    val id: String,
+    val title: String,
+    val updatedAtMs: Long
+)
+
 data class ChatMessageItem(
     val id: String = "msg_${System.currentTimeMillis()}_${(100..999).random()}",
     val role: String, // "user" or "assistant"
@@ -23,6 +30,9 @@ data class ChatMessageItem(
     val attachmentPath: String = "",
     val attachmentSize: Long = 0L,
     val appliedActions: List<String> = emptyList(),
+    val generatedFilePath: String = "",
+    val generatedFileName: String = "",
+    val websitePreviewPath: String = "",
     val timestampMs: Long = System.currentTimeMillis()
 )
 
@@ -37,9 +47,83 @@ object ChatbotEngine {
     private val PROMPT_UPDATE_REGEX = Regex("""<<<PROMPT_UPDATE\s*\n([\s\S]*?)>>>""", RegexOption.IGNORE_CASE)
     private val STYLE_ZIP_REGEX = Regex("""<<<STYLE_ZIP_FILE\s+path="([^"]+)"\s*>>>\s*\n([\s\S]*?)<<<END_STYLE_ZIP_FILE>>>""", RegexOption.IGNORE_CASE)
     private val GITHUB_FETCH_REGEX = Regex("""<<<GITHUB_FETCH\s+query="([^"]+)"\s*>>>""", RegexOption.IGNORE_CASE)
-    private val GITHUB_CREATE_REPO_REGEX = Regex("""<<<GITHUB_CREATE_REPO\s+name="([^"]+)"(?:\s+description="([^"]*)")?(?:\s+private="(true|false)")?\s*>>>""", RegexOption.IGNORE_CASE)
-    private val GITHUB_WRITE_FILE_REGEX = Regex("""<<<GITHUB_WRITE_FILE\s+repo="([^"]+)"\s+path="([^"]+)"(?:\s+message="([^"]*)")?\s*>>>\s*\n([\s\S]*?)<<<END_GITHUB_WRITE_FILE>>>""", RegexOption.IGNORE_CASE)
-    private val GITHUB_DELETE_FILE_REGEX = Regex("""<<<GITHUB_DELETE_FILE\s+repo="([^"]+)"\s+path="([^"]+)"(?:\s+message="([^"]*)")?\s*>>>""", RegexOption.IGNORE_CASE)
+    private val GITHUB_CREATE_REPO_REGEX = Regex("<<<GITHUB_CREATE_REPO\\s+([^>]+?)>>>", RegexOption.IGNORE_CASE)
+    private val GITHUB_WRITE_FILE_REGEX = Regex("<<<GITHUB_WRITE_FILE\\s+([^>]+?)>>>\\s*\\n([\\s\\S]*?)<<<END_GITHUB_WRITE_FILE>>>", RegexOption.IGNORE_CASE)
+    private val GITHUB_DELETE_FILE_REGEX = Regex("<<<GITHUB_DELETE_FILE\\s+([^>]+?)>>>", RegexOption.IGNORE_CASE)
+    private val WEB_SEARCH_REGEX = Regex("<<<WEB_SEARCH\\s+([^>]+?)>>>", RegexOption.IGNORE_CASE)
+    private val WEB_FETCH_REGEX = Regex("<<<WEB_FETCH\\s+([^>]+?)>>>", RegexOption.IGNORE_CASE)
+    private val WEB_DOWNLOAD_REGEX = Regex("<<<WEB_DOWNLOAD\\s+([^>]+?)>>>", RegexOption.IGNORE_CASE)
+    private val CREATE_PDF_REGEX = Regex("""<<<CREATE_PDF\s+title="([^"]*)"(?:\s+filename="([^"]*)")?\s*>>>\s*\n([\s\S]*?)<<<END_CREATE_PDF>>>""", RegexOption.IGNORE_CASE)
+    private val CREATE_FILE_REGEX = Regex("""<<<CREATE_FILE\s+filename="([^"]+)"\s*>>>\s*\n([\s\S]*?)<<<END_CREATE_FILE>>>""", RegexOption.IGNORE_CASE)
+    private val WEBSITE_PREVIEW_REGEX = Regex("""<<<WEBSITE_PREVIEW\s+title="([^"]*)"\s*>>>\s*\n([\s\S]*?)<<<END_WEBSITE_PREVIEW>>>""", RegexOption.IGNORE_CASE)
+
+
+
+    private fun extractAttr(attrBlob: String, key: String): String {
+        val dq = Regex("$key\\s*=\\s*\"([^\"]*)\"", RegexOption.IGNORE_CASE).find(attrBlob)
+        if (dq != null) return dq.groupValues[1].trim()
+        val sq = Regex("$key\\s*=\\s*'([^']*)'", RegexOption.IGNORE_CASE).find(attrBlob)
+        if (sq != null) return sq.groupValues[1].trim()
+        return ""
+    }
+
+    fun listChatSessions(cacheManager: CacheManager): List<ChatSessionMeta> {
+        val indexFile = File(cacheManager.chatHistoryDir, "chat_sessions_index.json")
+        if (!indexFile.exists()) {
+            // Migrate legacy global chat if present
+            val legacy = loadChatHistory(cacheManager, "global")
+            return if (legacy.isNotEmpty()) {
+                val title = legacy.firstOrNull { it.role == "user" }?.text?.take(36)?.ifBlank { "Studio Chat" } ?: "Studio Chat"
+                listOf(ChatSessionMeta("global", title, legacy.lastOrNull()?.timestampMs ?: System.currentTimeMillis()))
+            } else emptyList()
+        }
+        return runCatching {
+            val arr = JSONArray(indexFile.readText(Charsets.UTF_8))
+            (0 until arr.length()).mapNotNull { i ->
+                val o = arr.optJSONObject(i) ?: return@mapNotNull null
+                ChatSessionMeta(
+                    id = o.optString("id", "global"),
+                    title = o.optString("title", "New Chat"),
+                    updatedAtMs = o.optLong("updatedAtMs", 0L)
+                )
+            }.sortedByDescending { it.updatedAtMs }
+        }.getOrDefault(emptyList())
+    }
+
+    fun upsertChatSessionMeta(cacheManager: CacheManager, sessionId: String, messages: List<ChatMessageItem>) {
+        runCatching {
+            val existing = listChatSessions(cacheManager).filterNot { it.id == sessionId }.toMutableList()
+            val firstUser = messages.firstOrNull { it.role == "user" }?.text?.trim().orEmpty()
+            val title = firstUser.take(40).ifBlank { "New Chat" }
+            val updatedAt = messages.lastOrNull()?.timestampMs ?: System.currentTimeMillis()
+            existing.add(0, ChatSessionMeta(sessionId, title, updatedAt))
+            val arr = JSONArray()
+            existing.take(30).forEach { s ->
+                arr.put(JSONObject().apply {
+                    put("id", s.id)
+                    put("title", s.title)
+                    put("updatedAtMs", s.updatedAtMs)
+                })
+            }
+            File(cacheManager.chatHistoryDir, "chat_sessions_index.json").writeText(arr.toString(2), Charsets.UTF_8)
+        }
+    }
+
+    fun deleteChatSession(cacheManager: CacheManager, sessionId: String) {
+        runCatching {
+            File(cacheManager.chatHistoryDir, "chat_${sessionId}.json").delete()
+            val remaining = listChatSessions(cacheManager).filterNot { it.id == sessionId }
+            val arr = JSONArray()
+            remaining.forEach { s ->
+                arr.put(JSONObject().apply {
+                    put("id", s.id)
+                    put("title", s.title)
+                    put("updatedAtMs", s.updatedAtMs)
+                })
+            }
+            File(cacheManager.chatHistoryDir, "chat_sessions_index.json").writeText(arr.toString(2), Charsets.UTF_8)
+        }
+    }
 
     fun loadChatHistory(cacheManager: CacheManager, sessionKey: String = "global"): List<ChatMessageItem> {
         val file = File(cacheManager.chatHistoryDir, "chat_${sessionKey}.json")
@@ -62,6 +146,9 @@ object ChatbotEngine {
                         attachmentPath = o.optString("attachmentPath", ""),
                         attachmentSize = o.optLong("attachmentSize", 0L),
                         appliedActions = actions,
+                        generatedFilePath = o.optString("generatedFilePath", ""),
+                        generatedFileName = o.optString("generatedFileName", ""),
+                        websitePreviewPath = o.optString("websitePreviewPath", ""),
                         timestampMs = o.optLong("timestampMs", 0L)
                     )
                 )
@@ -84,6 +171,9 @@ object ChatbotEngine {
                         put("attachmentPath", m.attachmentPath)
                         put("attachmentSize", m.attachmentSize)
                         put("appliedActions", JSONArray().apply { m.appliedActions.forEach { put(it) } })
+                        put("generatedFilePath", m.generatedFilePath)
+                        put("generatedFileName", m.generatedFileName)
+                        put("websitePreviewPath", m.websitePreviewPath)
                         put("timestampMs", m.timestampMs)
                     }
                 )
@@ -111,7 +201,8 @@ object ChatbotEngine {
         activePalette: PaletteState,
         history: List<ChatMessageItem>,
         userText: String,
-        uploadedFile: ChatUploadedFile? = null
+        uploadedFile: ChatUploadedFile? = null,
+        browserPageContext: String? = null
     ): Result<ChatbotTurnOutcome> = withContext(Dispatchers.IO) {
         runCatching {
             if (!userProfile.hasGeminiKey) {
@@ -163,7 +254,11 @@ object ChatbotEngine {
             val attachmentContext = if (uploadedFile != null) {
                 buildString {
                     appendLine("USER UPLOADED FILE IN CHAT: ${uploadedFile.fileName} (${uploadedFile.sizeBytes} bytes, MIME: ${uploadedFile.mimeType}, stored locally at ${uploadedFile.localPath})")
-                    if (uploadedFile.textPreview.isNotBlank()) {
+                    val inspected = ChatbotFileTools.inspectLocalFile(File(uploadedFile.localPath))
+                    if (inspected.isNotBlank()) {
+                        appendLine("FILE CONTENT / ARCHIVE INSPECTION:")
+                        appendLine(inspected.take(12_000))
+                    } else if (uploadedFile.textPreview.isNotBlank()) {
                         appendLine("FILE CONTENT / PREVIEW:")
                         appendLine(uploadedFile.textPreview.take(12_000))
                     }
@@ -210,19 +305,47 @@ object ChatbotEngine {
                 - Create repo: <<<GITHUB_CREATE_REPO name="repo-name" description="..." private="false">>>
                 - Create or edit file: <<<GITHUB_WRITE_FILE repo="owner/repo" path="path/to/file" message="commit msg">>>\n[file content]\n<<<END_GITHUB_WRITE_FILE>>>
                 - Delete file: <<<GITHUB_DELETE_FILE repo="owner/repo" path="path/to/file" message="commit msg">>>
-                4. To patch the active project's HTML reel code, include standard search/replace blocks:
+                4. File, PDF & Website Creation Tools:
+                - Create PDF: <<<CREATE_PDF title="Title" filename="doc.pdf">>>\n[Markdown/text content]\n<<<END_CREATE_PDF>>>
+                - Create text/code/skill file (.txt, .md, .skill, .json, etc.): <<<CREATE_FILE filename="notes.md">>>\n[content]\n<<<END_CREATE_FILE>>>
+                - Build HTML/CSS/JS website with in-app live preview: <<<WEBSITE_PREVIEW title="My Site">>>\n[Complete self-contained HTML with <style> and <script>]\n<<<END_WEBSITE_PREVIEW>>>
+                5. Live Web & Dependency Tools:
+                - Search web: <<<WEB_SEARCH query="search terms">>>
+                - Read webpage: <<<WEB_FETCH url="https://...">>>
+                - Download JS/CSS/font/asset dependency: <<<WEB_DOWNLOAD url="https://..." filename="lib.js">>>
+                6. To patch the active project's HTML reel code, include standard search/replace blocks:
                 <<<SEARCH
                 exact lines in current HTML
                 ===REPLACE
                 updated lines
                 >>>
-                Always explain clearly and warmly what you did or suggest punchy, actionable reel ideas tailored to the user's style!
+                FORMATTING STYLE: Use clean Markdown headings (## Heading, ### Subheading), crisp bullet points (- item), and `highlights` for key terms. Avoid wrapping every phrase in **asterisks**—use bold sparingly only for key labels.
             """.trimIndent()
 
+            val rawdevSkillText = runCatching {
+                context.assets.open("skills/rawdev-reel-scripts/SKILL.md").bufferedReader(Charsets.UTF_8).use { it.readText() }
+            }.getOrDefault("")
+
             val lowerMsg = userText.lowercase(Locale.US)
-            val isHeavyTask = uploadedFile != null ||
+            val isScriptRequest = listOf("script", "hook", "reel", "tts", "hinglish", "caption", "viral").any { lowerMsg.contains(it) }
+            val wantsLiveWeb = listOf("latest", "current", "today", "2026", "trending", "new ", "search", "web", "fetch", "news", "best ", "write a script", "reel script").any { lowerMsg.contains(it) }
+
+            var liveWebContext = ""
+            if (wantsLiveWeb && browserPageContext.isNullOrBlank()) {
+                val searchRes = WebAgentTools.searchWeb(userText.take(120), maxResults = 4).getOrNull()
+                if (!searchRes.isNullOrEmpty()) {
+                    appliedBadges.add("Fetched live web data")
+                    liveWebContext = buildString {
+                        appendLine("=== LIVE WEB SEARCH RESULTS ===")
+                        searchRes.forEach { hit ->
+                            appendLine("- ${hit.title} (${hit.url}): ${hit.snippet}")
+                        }
+                    }
+                }
+            }
+            val isHeavyTask = uploadedFile != null || !browserPageContext.isNullOrBlank() || isScriptRequest || wantsLiveWeb ||
                 userText.length > 140 ||
-                listOf("srt", "script", "idea", "reel", "prompt", "zip", "style", "skill", "html", "code", "fix", "patch", "github", "font").any { lowerMsg.contains(it) }
+                listOf("srt", "script", "idea", "reel", "prompt", "zip", "style", "skill", "html", "code", "fix", "patch", "github", "font", "pdf", "website", "preview", "css", "js", "file", "md", "txt", "create", "make").any { lowerMsg.contains(it) }
 
             val fullPrompt = if (!isHeavyTask) {
                 buildString {
@@ -255,6 +378,17 @@ object ChatbotEngine {
                     if (preFetchedGithubNote.isNotBlank()) {
                         appendLine(preFetchedGithubNote)
                     }
+                    if (isScriptRequest && rawdevSkillText.isNotBlank()) {
+                        appendLine("=== TRAINED SCRIPT SKILL (rawdev-reel-scripts/SKILL.md — FOLLOW STRICTLY) ===")
+                        appendLine(rawdevSkillText.take(4000))
+                    }
+                    if (!browserPageContext.isNullOrBlank()) {
+                        appendLine("=== IN-APP BROWSER ACTIVE PAGE ===")
+                        appendLine(browserPageContext.take(10_000))
+                    }
+                    if (liveWebContext.isNotBlank()) {
+                        appendLine(liveWebContext)
+                    }
                     if (attachmentContext.isNotBlank()) {
                         appendLine(attachmentContext)
                     }
@@ -270,7 +404,7 @@ object ChatbotEngine {
             val genRes = geminiRouter.generate(
                 apiKey = userProfile.geminiApiKey,
                 prompt = fullPrompt,
-                systemInstruction = if (isHeavyTask) systemInstruction else "You are the friendly, fast RAW EDIT Studio AI Assistant. Reply concisely and helpfully.",
+                systemInstruction = if (isHeavyTask) systemInstruction else "You are the friendly, fast RAW EDIT Studio AI Assistant. Format answers cleanly with ## headings, ### subheadings, bullet points (- ), and `code` highlights. Do not overuse **asterisks**.",
                 routeMode = GeminiRouteMode.FAST_CHAT,
                 expectJson = false,
                 images = visionInputs,
@@ -280,6 +414,57 @@ object ChatbotEngine {
             var replyText = genRes.text
             var updatedPromptNotes: String? = null
             var updatedProject: ProjectEntity? = null
+
+
+            var genFilePath = ""
+            var genFileName = ""
+            var webPreviewPath = ""
+
+            CREATE_PDF_REGEX.find(replyText)?.let { m ->
+                val pdfTitle = m.groupValues[1].trim().ifBlank { "RAW EDIT Document" }
+                val rawFn = m.groupValues[2].trim().ifBlank { "raw_edit_doc.pdf" }
+                val safeFn = (if (rawFn.endsWith(".pdf", true)) rawFn else "$rawFn.pdf").replace(Regex("[^A-Za-z0-9._-]"), "_")
+                val body = m.groupValues[3].trim()
+                runCatching {
+                    val out = File(cacheManager.sharedPacksDir, safeFn)
+                    ChatbotFileTools.createStyledPdf(out, pdfTitle, body)
+                    genFilePath = out.absolutePath
+                    genFileName = out.name
+                    appliedBadges.add("Created PDF: ${out.name}")
+                }.onFailure { err ->
+                    replyText += "\n\n*(PDF error: ${err.message})*"
+                }
+                replyText = replyText.replace(m.value, "").trim()
+            }
+
+            CREATE_FILE_REGEX.find(replyText)?.let { m ->
+                val rawFn = m.groupValues[1].trim().replace(Regex("[^A-Za-z0-9._-]"), "_").ifBlank { "output.txt" }
+                val content = m.groupValues[2]
+                runCatching {
+                    val out = File(cacheManager.sharedPacksDir, rawFn)
+                    out.parentFile?.mkdirs()
+                    out.writeText(content, Charsets.UTF_8)
+                    genFilePath = out.absolutePath
+                    genFileName = out.name
+                    appliedBadges.add("Created file: ${out.name}")
+                }
+                replyText = replyText.replace(m.value, "").trim()
+            }
+
+            WEBSITE_PREVIEW_REGEX.find(replyText)?.let { m ->
+                val siteTitle = m.groupValues[1].trim().ifBlank { "Website" }
+                val html = m.groupValues[2].trim()
+                runCatching {
+                    val out = ChatbotFileTools.saveWebsiteHtml(cacheManager, siteTitle, html)
+                    webPreviewPath = out.absolutePath
+                    if (genFilePath.isBlank()) {
+                        genFilePath = out.absolutePath
+                        genFileName = out.name
+                    }
+                    appliedBadges.add("Website ready to preview: $siteTitle")
+                }
+                replyText = replyText.replace(m.value, "").trim()
+            }
 
             // 1. Check for <<<PROMPT_UPDATE ... >>>
             PROMPT_UPDATE_REGEX.find(replyText)?.let { m ->
@@ -303,11 +488,12 @@ object ChatbotEngine {
                 replyText = replyText.replace(m.value, "").trim()
             }
 
-            // 3b. GitHub Create Repo / Write File / Delete File
+            // 3b. Hardened GitHub Create Repo / Write File / Delete File
             GITHUB_CREATE_REPO_REGEX.findAll(replyText).toList().forEach { m ->
-                val repoName = m.groupValues[1].trim()
-                val desc = m.groupValues[2].trim()
-                val priv = m.groupValues[3].equals("true", ignoreCase = true)
+                val attrs = m.groupValues[1]
+                val repoName = extractAttr(attrs, "name")
+                val desc = extractAttr(attrs, "description")
+                val priv = extractAttr(attrs, "private").equals("true", ignoreCase = true)
                 if (repoName.isNotEmpty()) {
                     GitHubToolFetcher.createRepo(userProfile.githubAccessToken, repoName, desc, priv)
                         .onSuccess { full ->
@@ -320,12 +506,13 @@ object ChatbotEngine {
                 replyText = replyText.replace(m.value, "").trim()
             }
             GITHUB_WRITE_FILE_REGEX.findAll(replyText).toList().forEach { m ->
-                val repoSlug = m.groupValues[1].trim()
-                val filePath = m.groupValues[2].trim()
-                val msg = m.groupValues[3].trim()
-                val content = m.groupValues[4]
+                val attrs = m.groupValues[1]
+                val repoSlug = extractAttr(attrs, "repo")
+                val filePath = extractAttr(attrs, "path")
+                val msg = extractAttr(attrs, "message")
+                val content = m.groupValues[2]
                 val parts = repoSlug.split("/", limit = 2)
-                if (parts.size == 2) {
+                if (parts.size == 2 && filePath.isNotBlank()) {
                     GitHubToolFetcher.createOrUpdateRepoFile(userProfile.githubAccessToken, parts[0], parts[1], filePath, content, msg)
                         .onSuccess { target ->
                             appliedBadges.add("Committed to GitHub: $target")
@@ -337,11 +524,12 @@ object ChatbotEngine {
                 replyText = replyText.replace(m.value, "").trim()
             }
             GITHUB_DELETE_FILE_REGEX.findAll(replyText).toList().forEach { m ->
-                val repoSlug = m.groupValues[1].trim()
-                val filePath = m.groupValues[2].trim()
-                val msg = m.groupValues[3].trim()
+                val attrs = m.groupValues[1]
+                val repoSlug = extractAttr(attrs, "repo")
+                val filePath = extractAttr(attrs, "path")
+                val msg = extractAttr(attrs, "message")
                 val parts = repoSlug.split("/", limit = 2)
-                if (parts.size == 2) {
+                if (parts.size == 2 && filePath.isNotBlank()) {
                     GitHubToolFetcher.deleteRepoFile(userProfile.githubAccessToken, parts[0], parts[1], filePath, msg)
                         .onSuccess { resMsg ->
                             appliedBadges.add(resMsg)
@@ -349,6 +537,48 @@ object ChatbotEngine {
                         }.onFailure { err ->
                             replyText += "\n\n*(GitHub delete note: ${err.message})*"
                         }
+                }
+                replyText = replyText.replace(m.value, "").trim()
+            }
+
+            // 3c. Web Search / Fetch / Download Dependencies
+            WEB_DOWNLOAD_REGEX.findAll(replyText).toList().forEach { m ->
+                val attrs = m.groupValues[1]
+                val url = extractAttr(attrs, "url")
+                val fn = extractAttr(attrs, "filename").ifBlank { url.substringAfterLast('/').substringBefore('?').ifBlank { "dep.js" } }
+                if (url.isNotBlank()) {
+                    WebAgentTools.downloadWebDependency(url, fn, cacheManager)
+                        .onSuccess { f ->
+                            appliedBadges.add("Downloaded: ${f.name}")
+                            genFilePath = f.absolutePath
+                            genFileName = f.name
+                        }.onFailure { err ->
+                            replyText += "\n\n*(Download error: ${err.message})*"
+                        }
+                }
+                replyText = replyText.replace(m.value, "").trim()
+            }
+            WEB_SEARCH_REGEX.findAll(replyText).toList().forEach { m ->
+                val q = extractAttr(m.groupValues[1], "query")
+                if (q.isNotBlank()) {
+                    WebAgentTools.searchWeb(q, maxResults = 4).onSuccess { hits ->
+                        appliedBadges.add("Searched web: $q")
+                        if (hits.isNotEmpty()) {
+                            replyText += "\n\n### Web Sources\n" + hits.joinToString("\n") { "- **${it.title}** (`${it.url}`): ${it.snippet}" }
+                        }
+                    }
+                }
+                replyText = replyText.replace(m.value, "").trim()
+            }
+            WEB_FETCH_REGEX.findAll(replyText).toList().forEach { m ->
+                val u = extractAttr(m.groupValues[1], "url")
+                if (u.isNotBlank()) {
+                    WebAgentTools.fetchWebPageText(u, maxChars = 2500).onSuccess { txt ->
+                        appliedBadges.add("Read page: $u")
+                        if (txt.isNotBlank()) {
+                            replyText += "\n\n> Fetched from `$u`: ${txt.take(400)}..."
+                        }
+                    }
                 }
                 replyText = replyText.replace(m.value, "").trim()
             }
@@ -395,7 +625,10 @@ object ChatbotEngine {
             val assistantMsg = ChatMessageItem(
                 role = "assistant",
                 text = replyText.ifBlank { "Done! I've applied your requested updates." },
-                appliedActions = appliedBadges
+                appliedActions = appliedBadges,
+                generatedFilePath = genFilePath,
+                generatedFileName = genFileName,
+                websitePreviewPath = webPreviewPath
             )
 
             ChatbotTurnOutcome(

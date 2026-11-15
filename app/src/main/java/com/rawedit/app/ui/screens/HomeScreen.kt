@@ -24,6 +24,7 @@ import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.defaultMinSize
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -261,10 +262,10 @@ fun HomeScreen(
                     modifier = Modifier
                         .fillMaxWidth()
                         .horizontalScroll(rememberScrollState())
-                        .padding(horizontal = 20.dp)
                         .vhRise(entranceState, 120),
                     horizontalArrangement = Arrangement.spacedBy(10.dp)
                 ) {
+                    Spacer(modifier = Modifier.width(10.dp))
                     HOME_STEP_CHIPS.forEachIndexed { idx, chip ->
                         val active = idx == 0
                         Box(

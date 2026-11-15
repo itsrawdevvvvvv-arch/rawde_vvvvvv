@@ -58,7 +58,6 @@ import com.rawedit.app.ui.screens.ProfileSetupScreen
 import com.rawedit.app.ui.screens.RawChatbotScreen
 import com.rawedit.app.ui.screens.RenderingScreen
 import com.rawedit.app.ui.screens.ResultScreen
-import com.rawedit.app.ui.screens.BackgroundRemoverScreen
 import com.rawedit.app.ui.theme.RawColors
 import com.rawedit.app.ui.theme.RawEditTheme
 import kotlinx.coroutines.Dispatchers
@@ -78,7 +77,6 @@ private sealed interface AppRoute {
     data class CreateHub(val projectId: Long) : AppRoute
     data class AddVoice(val projectId: Long) : AppRoute
     data class AssetLocker(val projectId: Long) : AppRoute
-    data class BackgroundRemover(val projectId: Long) : AppRoute
     data class CopyPrompt(val projectId: Long) : AppRoute
     data class CodePaste(val projectId: Long) : AppRoute
     data class KeyframeSheet(val projectId: Long) : AppRoute
@@ -552,10 +550,6 @@ private fun MainAuthenticatedHost(
                                     }
                                 }
                             },
-                            onOpenBackgroundRemover = { pushRoute(AppRoute.BackgroundRemover(proj.id)) },
-                            onSaveCutoutBitmap = { bmp, isCutout, name, desc, safe ->
-                                saveCapturedBitmapToLocker(proj.id, bmp, isCutout, name, desc, safe)
-                            },
                             onUpdateAssetNotes = { assetId, desc, safe ->
                                 scope.launch {
                                     container.repository.updateAssetDescription(assetId, desc, safe)
@@ -575,18 +569,6 @@ private fun MainAuthenticatedHost(
                             geminiRouter = geminiRouter
                         )
                     }
-                }
-
-                is AppRoute.BackgroundRemover -> {
-                    BackgroundRemoverScreen(
-                        apiKey = userProfile.geminiApiKey,
-                        geminiRouter = geminiRouter,
-                        onBack = ::popRoute,
-                        onOpenGeminiKey = { openGroqDialog(switchMode = false) },
-                        onSaveCutout = { bmp, name ->
-                            saveCapturedBitmapToLocker(route.projectId, bmp, true, name, null, null)
-                        }
-                    )
                 }
 
                 is AppRoute.CopyPrompt -> {

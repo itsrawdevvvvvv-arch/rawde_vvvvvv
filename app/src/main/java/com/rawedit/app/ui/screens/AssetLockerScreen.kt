@@ -97,14 +97,6 @@ fun AssetLockerScreen(
     cacheManager: CacheManager,
     onBack: () -> Unit,
     onImportAsset: (uri: Uri, isVideo: Boolean) -> Unit,
-    onOpenBackgroundRemover: () -> Unit,
-    onSaveCutoutBitmap: (
-        bitmap: Bitmap,
-        isCutout: Boolean,
-        suggestedName: String,
-        defaultDescription: String?,
-        defaultSafeZone: String?
-    ) -> Unit,
     onUpdateAssetNotes: (assetId: Long, description: String, safeZone: String) -> Unit,
     onToggleAttach: (assetId: Long) -> Unit,
     onDeleteAsset: (LocalAssetEntity) -> Unit,
@@ -126,7 +118,6 @@ fun AssetLockerScreen(
     var describingAssetId by remember { mutableStateOf<Long?>(null) }
     var editingNoteTarget by remember { mutableStateOf<LocalAssetEntity?>(null) }
     var deleteConfirmTarget by remember { mutableStateOf<LocalAssetEntity?>(null) }
-    var cutoutStudioTarget by remember { mutableStateOf<CutoutStudioInput?>(null) }
     var toastMsg by remember { mutableStateOf<String?>(null) }
 
     LaunchedEffect(toastMsg) {
@@ -209,7 +200,7 @@ fun AssetLockerScreen(
 
                     item {
                         Text(
-                            text = "Local images, cutouts, clips & custom fonts.",
+                            text = "Local images, clips & custom fonts.",
                             style = RawTypography.bodyMedium.copy(fontSize = 15.sp, lineHeight = 21.sp),
                             color = RawColors.TextMuted
                         )
@@ -222,14 +213,14 @@ fun AssetLockerScreen(
                                 horizontalArrangement = Arrangement.spacedBy(10.dp)
                             ) {
                                 RawSecondaryButton(
-                                    text = "Pick Image / PNG",
+                                    text = "Pick Image",
                                     height = 50.dp,
                                     leadingIcon = RawIconType.IMAGE,
                                     onClick = { imagePicker.launch(arrayOf("image/*")) },
                                     modifier = Modifier.weight(1f)
                                 )
                                 RawSecondaryButton(
-                                    text = "Pick Video Clip",
+                                    text = "Pick Video",
                                     height = 50.dp,
                                     leadingIcon = RawIconType.FILM,
                                     onClick = { videoPicker.launch(arrayOf("video/*")) },
@@ -237,13 +228,7 @@ fun AssetLockerScreen(
                                 )
                             }
                             RawSecondaryButton(
-                                text = "Background Remover (Batch + AI)",
-                                height = 50.dp,
-                                leadingIcon = RawIconType.SPARK,
-                                onClick = onOpenBackgroundRemover
-                            )
-                            RawSecondaryButton(
-                                text = "Import Custom Font (.ttf / .otf / .zip)",
+                                text = "Import Custom Font",
                                 height = 50.dp,
                                 leadingIcon = RawIconType.CODE,
                                 onClick = { fontPicker.launch(arrayOf("*/*")) }
@@ -489,19 +474,7 @@ fun AssetLockerScreen(
                                             }
                                         }
                                     },
-                                    onEditNote = { editingNoteTarget = asset },
-                                    onMakeCutout = {
-                                        scope.launch {
-                                            val bmpRes = cacheManager.loadAssetBitmapForCutout(asset.fileName)
-                                            bmpRes.onSuccess { bmp ->
-                                                cutoutStudioTarget = CutoutStudioInput.BitmapInput(
-                                                    sourceBitmap = bmp,
-                                                    suggestedName = "${asset.fileName.substringBeforeLast('.')}_cutout",
-                                                    defaultKeepOriginal = false,
-                                                    defaultDescription = asset.description,
-                                                    defaultSafeZone = asset.safeZone
-                                                )
-                                            }.onFailure { err ->
+                                    onEditNote = { editingNoteTarget = asset }.onFailure { err ->
                                                 toastMsg = err.message ?: "Could not load image for cutout"
                                             }
                                         }
@@ -664,23 +637,6 @@ fun AssetLockerScreen(
         )
     }
 
-    cutoutStudioTarget?.let { target ->
-        CutoutStudioDialog(
-            input = target,
-            apiKey = apiKey,
-            modelPref = modelPref,
-            quotaExhausted = quotaExhausted,
-            onOpenGroqKey = onOpenGroqKey,
-            onSwitchGroqKey = onSwitchGroqKey,
-            onRefreshGroqQuota = onRefreshGroqQuota,
-            onDismiss = { cutoutStudioTarget = null },
-            onConfirmSave = { finalBmp, isCutout, suggestedName, desc, safe ->
-                cutoutStudioTarget = null
-                onSaveCutoutBitmap(finalBmp, isCutout, suggestedName, desc, safe)
-                toastMsg = if (isCutout) "Cutout PNG saved" else "PNG saved"
-            }
-        )
-    }
 }
 
 @Composable
@@ -692,8 +648,7 @@ private fun AssetLockerCard(
     onToggleAttach: () -> Unit,
     onDelete: () -> Unit,
     onAutoDescribe: () -> Unit,
-    onEditNote: () -> Unit,
-    onMakeCutout: () -> Unit
+    onEditNote: () -> Unit
 ) {
     val context = LocalContext.current
     val isCutout = asset.kind == LocalAssetEntity.KIND_CUTOUT
