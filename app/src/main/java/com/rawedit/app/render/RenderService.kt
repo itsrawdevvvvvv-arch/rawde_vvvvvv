@@ -17,15 +17,16 @@ import com.rawedit.app.R
 import com.rawedit.app.RawEditApplication
 import com.rawedit.app.data.local.ProjectEntity
 import com.rawedit.app.data.local.VideoEntity
+import com.rawedit.app.domain.LayerTimelineCompiler
+import java.io.File
+import java.util.UUID
+import java.util.concurrent.atomic.AtomicBoolean
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.launch
-import java.io.File
-import java.util.UUID
-import java.util.concurrent.atomic.AtomicBoolean
 
 class RenderService : Service() {
 
