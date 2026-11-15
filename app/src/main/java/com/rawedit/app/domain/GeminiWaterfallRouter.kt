@@ -969,25 +969,25 @@ class GeminiWaterfallRouter(context: Context) {
             }
             val prompt = buildString {
                 appendLine("You are an AI Cutout Editor controlling image cutout tools.")
-                appendLine("User instruction: "$userInstruction"")
+                appendLine("User instruction: \"$userInstruction\"")
                 appendLine("User-drawn red circles (normalized 0..1): $circleDesc")
                 appendLine("Current flood-fill tolerance: $currentTolerance")
                 appendLine()
                 appendLine("Available tools:")
-                appendLine("1. {"tool": "erase_circle", "cx": <0..1>, "cy": <0..1>, "r": <0.03..0.6>} -> removes unwanted leftover background/object in that circle.")
-                appendLine("2. {"tool": "restore_circle", "cx": <0..1>, "cy": <0..1>, "r": <0.03..0.6>} -> restores accidentally cut-out foreground subject in that circle.")
-                appendLine("3. {"tool": "soften_edges", "value": <1..4>} -> feathers/smooths jagged edges.")
-                appendLine("4. {"tool": "resegment_flood", "value": <8..90>} -> re-runs solid background flood-fill with new tolerance.")
-                appendLine("5. {"tool": "reset_ml_cutout"} -> resets to fresh on-device ML subject segmentation.")
+                appendLine("1. {\"tool\": \"erase_circle\", \"cx\": <0..1>, \"cy\": <0..1>, \"r\": <0.03..0.6>} -> removes unwanted leftover background/object in that circle.")
+                appendLine("2. {\"tool\": \"restore_circle\", \"cx\": <0..1>, \"cy\": <0..1>, \"r\": <0.03..0.6>} -> restores accidentally cut-out foreground subject in that circle.")
+                appendLine("3. {\"tool\": \"soften_edges\", \"value\": <1..4>} -> feathers/smooths jagged edges.")
+                appendLine("4. {\"tool\": \"resegment_flood\", \"value\": <8..90>} -> re-runs solid background flood-fill with new tolerance.")
+                appendLine("5. {\"tool\": \"reset_ml_cutout\"} -> resets to fresh on-device ML subject segmentation.")
                 appendLine()
                 appendLine("If user drew circle(s) and says 'remove'/'erase'/'clean'/'fix', emit erase_circle at those exact cx, cy, r (or restore_circle if they say 'restore'/'keep'/'bring back').")
                 appendLine("Return ONLY valid JSON:")
-                appendLine("{"reply": "<short 1-sentence confirmation>", "tools": [ ... ]}")
+                appendLine("{\"reply\": \"<short 1-sentence confirmation>\", \"tools\": [ ... ]}")
             }
             val b64 = bitmapToJpegBase64(cutoutBitmap, maxDim = 768, quality = 85)
-            val res = generateWithWaterfall(
+            val res = generate(
                 apiKey = apiKey,
-                mode = GeminiRouteMode.FAST_CHAT,
+                routeMode = GeminiRouteMode.FAST_CHAT,
                 prompt = prompt,
                 systemInstruction = "Output strict JSON only.",
                 expectJson = true,

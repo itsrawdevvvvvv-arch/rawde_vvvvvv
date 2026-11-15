@@ -330,6 +330,67 @@ def fix_router_vision_helpers():
         print("  router vision helpers repaired")
 
 
+def fix_unescaped_appendline_quotes():
+    """appendLine(...) bodies keep shipping raw inner quotes that break parsing.
+
+    Quotes inside ${...} template expressions are legal Kotlin and must be left
+    alone, so only quotes at template depth 0 are escaped.
+    """
+    def escape_inner(inner: str) -> str:
+        out = []
+        i = 0
+        depth = 0
+        while i < len(inner):
+            ch = inner[i]
+            if depth == 0 and inner.startswith("${", i):
+                depth = 1
+                out.append("${")
+                i += 2
+                continue
+            if depth > 0:
+                if ch == "{":
+                    depth += 1
+                elif ch == "}":
+                    depth -= 1
+                out.append(ch)
+                i += 1
+                continue
+            if ch == "\\" and i + 1 < len(inner):
+                out.append(inner[i:i + 2])
+                i += 2
+                continue
+            if ch == '"':
+                out.append('\\"')
+                i += 1
+                continue
+            out.append(ch)
+            i += 1
+        return "".join(out)
+
+    for p in (root / "app/src/main/java").rglob("*.kt"):
+        s = p.read_text()
+        lines = s.split("\n")
+        changed = False
+        for i, line in enumerate(lines):
+            marker = 'appendLine("'
+            if marker not in line:
+                continue
+            start = line.index(marker) + len(marker)
+            end = line.rfind('")')
+            if end <= start:
+                continue
+            inner = line[start:end]
+            if '"' not in inner:
+                continue
+            fixed = escape_inner(inner)
+            if fixed != inner:
+                lines[i] = line[:start] + fixed + line[end:]
+                changed = True
+        if changed:
+            p.write_text("\n".join(lines))
+            print(f"  inner quotes escaped in {p.name}")
+
+
 STEPS = [
     fix_version,
     fix_navigation,
@@ -344,6 +405,7 @@ STEPS = [
     fix_broken_string_literals,
     fix_unescaped_json_prompt,
     fix_router_vision_helpers,
+    fix_unescaped_appendline_quotes,
 ]
 
 for step in STEPS:
