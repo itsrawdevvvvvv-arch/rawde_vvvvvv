@@ -873,6 +873,30 @@ class GeminiWaterfallRouter(context: Context) {
         }
     }
 
+    private fun bitmapToJpegBase64(bmp: Bitmap, maxDim: Int = 768, quality: Int = 85): String {
+        val maxSide = maxOf(bmp.width, bmp.height)
+        val scaled = if (maxSide > maxDim) {
+            val scale = maxDim.toFloat() / maxSide.toFloat()
+            Bitmap.createScaledBitmap(
+                bmp,
+                (bmp.width * scale).toInt().coerceAtLeast(1),
+                (bmp.height * scale).toInt().coerceAtLeast(1),
+                true
+            )
+        } else {
+            bmp
+        }
+        val out = ByteArrayOutputStream()
+        scaled.compress(Bitmap.CompressFormat.JPEG, quality, out)
+        return Base64.encodeToString(out.toByteArray(), Base64.NO_WRAP)
+    }
+
+    private fun extractJsonObject(raw: String): String {
+        val start = raw.indexOf('{')
+        val end = raw.lastIndexOf('}')
+        return if (start >= 0 && end > start) raw.substring(start, end + 1) else raw.trim()
+    }
+
     suspend fun refineCutoutWithCircles(
         apiKey: String,
         cutoutBitmap: Bitmap,
@@ -896,9 +920,9 @@ class GeminiWaterfallRouter(context: Context) {
                 appendLine("Return ONLY valid JSON: {\"recommendedTolerance\": <int 8..90>, \"note\": \"<short 1-line fix note>\"}")
             }
             val b64 = bitmapToJpegBase64(cutoutBitmap, maxDim = 768, quality = 85)
-            val res = generateWithWaterfall(
+            val res = generate(
                 apiKey = apiKey,
-                mode = GeminiRouteMode.FAST_CHAT,
+                routeMode = GeminiRouteMode.FAST_CHAT,
                 prompt = prompt,
                 systemInstruction = "Output strict JSON only.",
                 expectJson = true,
