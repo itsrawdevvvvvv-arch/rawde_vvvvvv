@@ -28,6 +28,7 @@ enum class GeminiRouteMode {
     JSON_WORKHORSE, // 3.5-flash-lite (500 RPD) -> 3.1-flash-lite (500 RPD) -> 3.6-flash (20 RPD) -> 3.8-flash (20 RPD)
     CREATIVE_FLASH, // 3.8-flash (20 RPD) -> 3.6-flash (20 RPD) -> 3.5-flash-lite (500 RPD) -> 3.1-flash-lite (500 RPD)
     FAST_CHAT       // Instant low-latency chain: gemini-2.5-flash -> 3.5-flash-lite -> 2.5-flash-lite
+}
 
 
 enum class AiProvider(val id: String, val label: String) {
