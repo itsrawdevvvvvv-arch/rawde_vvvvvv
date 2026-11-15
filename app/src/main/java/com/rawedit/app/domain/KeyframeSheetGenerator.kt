@@ -21,8 +21,11 @@ import android.hardware.display.VirtualDisplay
 import android.media.ImageReader
 import android.os.Build
 import android.os.Bundle
+import android.os.Handler
+import android.os.Looper
 import android.util.DisplayMetrics
 import android.view.Display
+import android.view.PixelCopy
 import android.view.View
 import android.view.ViewGroup
 import android.view.WindowManager
@@ -824,7 +827,12 @@ $htmlSection
             withContext(Dispatchers.Main) {
                 val baseDisplayContext = create160DpiContext(context)
                 val dm = context.getSystemService(Context.DISPLAY_SERVICE) as DisplayManager
-                val reader = ImageReader.newInstance(STAGE_W, STAGE_H, PixelFormat.RGBA_8888, 2)
+                val mainHandler = Handler(Looper.getMainLooper())
+                val reader = ImageReader.newInstance(STAGE_W, STAGE_H, PixelFormat.RGBA_8888, 2).apply {
+                    setOnImageAvailableListener({ r ->
+                        runCatching { r.acquireLatestImage()?.close() }
+                    }, mainHandler)
+                }
                 imageReader = reader
 
                 val vd = dm.createVirtualDisplay(
@@ -874,9 +882,7 @@ $htmlSection
                 if (cancelled()) throw IllegalStateException("Cancelled")
                 evalAndWaitTwoFrames(activeWeb, idx + 1, tSec)
 
-                withContext(Dispatchers.Main) {
-                    activeWeb.draw(captureCanvas)
-                }
+                captureHardwareOrSoftwareFrame(presentation, activeWeb, captureBmp, captureCanvas)
                 thumbCanvas.drawBitmap(captureBmp, scaleMatrix, filterPaint)
 
                 val diag = readDiagnostics(activeWeb)
@@ -1239,6 +1245,41 @@ $htmlSection
 
             val borderPaint = if (sample.isFlagged) p.borderWarn else p.borderDefault
             canvas.drawRoundRect(cardRect, 14f, 14f, borderPaint)
+        }
+    }
+
+
+    private suspend fun captureHardwareOrSoftwareFrame(
+        presentation: OffscreenSheetPresentation?,
+        webView: WebView,
+        captureBmp: Bitmap,
+        captureCanvas: Canvas
+    ) {
+        val win = presentation?.window
+        if (win != null) {
+            val copied = withContext(Dispatchers.Main) {
+                val resultDeferred = CompletableDeferred<Int>()
+                val handler = Handler(Looper.getMainLooper())
+                runCatching {
+                    PixelCopy.request(
+                        win,
+                        captureBmp,
+                        { copyResult ->
+                            if (!resultDeferred.isCompleted) {
+                                resultDeferred.complete(copyResult)
+                            }
+                        },
+                        handler
+                    )
+                }.onFailure {
+                    if (!resultDeferred.isCompleted) resultDeferred.complete(-1)
+                }
+                resultDeferred.await()
+            }
+            if (copied == PixelCopy.SUCCESS) return
+        }
+        withContext(Dispatchers.Main) {
+            webView.draw(captureCanvas)
         }
     }
 

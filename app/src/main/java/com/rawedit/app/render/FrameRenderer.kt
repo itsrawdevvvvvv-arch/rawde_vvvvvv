@@ -11,8 +11,11 @@ import android.hardware.display.VirtualDisplay
 import android.media.ImageReader
 import android.os.Build
 import android.os.Bundle
+import android.os.Handler
+import android.os.Looper
 import android.util.DisplayMetrics
 import android.view.Display
+import android.view.PixelCopy
 import android.view.View
 import android.view.ViewGroup
 import android.view.WindowManager
@@ -90,7 +93,12 @@ class FrameRenderer(
             withContext(Dispatchers.Main) {
                 val baseDisplayContext = create160DpiContext(context)
                 val dm = context.getSystemService(Context.DISPLAY_SERVICE) as DisplayManager
-                val reader = ImageReader.newInstance(WIDTH, HEIGHT, PixelFormat.RGBA_8888, 2)
+                val mainHandler = Handler(Looper.getMainLooper())
+                val reader = ImageReader.newInstance(WIDTH, HEIGHT, PixelFormat.RGBA_8888, 2).apply {
+                    setOnImageAvailableListener({ r ->
+                        runCatching { r.acquireLatestImage()?.close() }
+                    }, mainHandler)
+                }
                 imageReader = reader
 
                 val vd = dm.createVirtualDisplay(
@@ -139,9 +147,7 @@ class FrameRenderer(
                 val t = minOf(i / FPS.toDouble(), durationSec)
                 evalAndWaitTwoFrames(activeWeb, i, t)
 
-                withContext(Dispatchers.Main) {
-                    activeWeb.draw(captureCanvas)
-                }
+                captureHardwareOrSoftwareFrame(presentation, activeWeb, captureBmp, captureCanvas)
 
                 val ptsNs = i * 1_000_000_000L / FPS
                 withContext(encoderDispatcher) {
@@ -177,6 +183,41 @@ class FrameRenderer(
             }
             encoderDispatcher.close()
             captureBmp.recycle()
+        }
+    }
+
+
+    private suspend fun captureHardwareOrSoftwareFrame(
+        presentation: OffscreenStagePresentation?,
+        webView: WebView,
+        captureBmp: Bitmap,
+        captureCanvas: Canvas
+    ) {
+        val win = presentation?.window
+        if (win != null) {
+            val copied = withContext(Dispatchers.Main) {
+                val resultDeferred = CompletableDeferred<Int>()
+                val handler = Handler(Looper.getMainLooper())
+                runCatching {
+                    PixelCopy.request(
+                        win,
+                        captureBmp,
+                        { copyResult ->
+                            if (!resultDeferred.isCompleted) {
+                                resultDeferred.complete(copyResult)
+                            }
+                        },
+                        handler
+                    )
+                }.onFailure {
+                    if (!resultDeferred.isCompleted) resultDeferred.complete(-1)
+                }
+                resultDeferred.await()
+            }
+            if (copied == PixelCopy.SUCCESS) return
+        }
+        withContext(Dispatchers.Main) {
+            webView.draw(captureCanvas)
         }
     }
 

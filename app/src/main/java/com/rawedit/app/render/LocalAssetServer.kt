@@ -399,7 +399,7 @@ class LocalAssetServer(
             }
             return new Promise(function(resolve) {
               var done = false;
-              var timer = setTimeout(finish, 260);
+              var timer = setTimeout(finish, 650);
               function finish() {
                 if (done) return;
                 done = true;
@@ -416,10 +416,13 @@ class LocalAssetServer(
             });
           }
           var p;
+          if (videoEl.readyState === 0 && videoEl.networkState === 0) {
+            try { videoEl.load(); } catch (_) {}
+          }
           if (videoEl.readyState < 1) {
             p = new Promise(function(resolve) {
               var settled = false;
-              var metaTimer = setTimeout(go, 340);
+              var metaTimer = setTimeout(go, 1500);
               function go() {
                 if (settled) return;
                 settled = true;
