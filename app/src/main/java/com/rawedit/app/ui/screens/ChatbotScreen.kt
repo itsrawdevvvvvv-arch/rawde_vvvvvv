@@ -145,6 +145,11 @@ fun RawChatbotScreen(
     var currentSessionId by remember {
         mutableStateOf(sessions.firstOrNull()?.id ?: "chat_${System.currentTimeMillis()}")
     }
+    val activeBgSessions by ChatbotBackgroundManager.activeSessions.collectAsState()
+    val bgUpdateTick by ChatbotBackgroundManager.updateTick.collectAsState()
+    val bgToast by ChatbotBackgroundManager.lastToast.collectAsState()
+    var toastMsg by remember { mutableStateOf<String?>(null) }
+
     var messages by remember(currentSessionId, bgUpdateTick) {
         mutableStateOf(ChatbotEngine.loadChatHistory(cacheManager, currentSessionId))
     }
@@ -170,14 +175,10 @@ fun RawChatbotScreen(
     var inputText by remember { mutableStateOf("") }
     var pendingAttachment by remember { mutableStateOf<ChatUploadedFile?>(null) }
     var uploadingFile by remember { mutableStateOf(false) }
-    val activeBgSessions by ChatbotBackgroundManager.activeSessions.collectAsState()
-    val bgUpdateTick by ChatbotBackgroundManager.updateTick.collectAsState()
-    val bgToast by ChatbotBackgroundManager.lastToast.collectAsState()
     val sending = currentSessionId in activeBgSessions
     var showAttachChooser by remember { mutableStateOf(false) }
     var renamingSession by remember { mutableStateOf<ChatSessionMeta?>(null) }
     var renameDraft by remember { mutableStateOf("") }
-    var toastMsg by remember { mutableStateOf<String?>(null) }
 
     LaunchedEffect(toastMsg) {
         if (toastMsg != null) {

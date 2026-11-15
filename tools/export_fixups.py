@@ -440,6 +440,42 @@ def fix_assetlocker_card_call():
         print("  asset card call repaired")
 
 
+def fix_chatbot_state_order():
+    """ChatbotScreen uses bg state before it is declared."""
+    p = root / "app/src/main/java/com/rawedit/app/ui/screens/ChatbotScreen.kt"
+    s = read(p)
+    if s is None:
+        return
+    lines = s.split("\n")
+    anchor = next((i for i, l in enumerate(lines) if "var messages by remember(currentSessionId, bgUpdateTick)" in l), None)
+    if anchor is None:
+        return
+    wanted = [
+        "ChatbotBackgroundManager.activeSessions.collectAsState()",
+        "ChatbotBackgroundManager.updateTick.collectAsState()",
+        "ChatbotBackgroundManager.lastToast.collectAsState()",
+        "var toastMsg by remember",
+    ]
+    found = []
+    for key in wanted:
+        idx = next((i for i, l in enumerate(lines) if key in l), None)
+        if idx is None:
+            continue
+        if idx < anchor:
+            continue
+        found.append((idx, lines[idx]))
+    if not found:
+        return
+    for idx, _ in sorted(found, reverse=True):
+        del lines[idx]
+    # anchor shifted by however many were removed above it (none, since all were below)
+    anchor = next(i for i, l in enumerate(lines) if "var messages by remember(currentSessionId, bgUpdateTick)" in l)
+    block = [l for _, l in sorted(found)] + [""]
+    lines[anchor:anchor] = block
+    p.write_text("\n".join(lines))
+    print("  chatbot bg state hoisted above first use")
+
+
 STEPS = [
     fix_version,
     fix_navigation,
@@ -457,6 +493,7 @@ STEPS = [
     fix_unescaped_appendline_quotes,
     fix_router_stray_brace,
     fix_assetlocker_card_call,
+    fix_chatbot_state_order,
 ]
 
 for step in STEPS:
