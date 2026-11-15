@@ -658,6 +658,26 @@ class LocalAssetServer(
               }
             }
 
+            // Ensure multi-line headlines never collapse vertically onto each other
+            var origFsPx = parseFloat(cs.fontSize) || 48;
+            var lhPx = parseFloat(cs.lineHeight);
+            if (!isNaN(lhPx) && origFsPx >= 36 && lhPx / origFsPx < 1.08) {
+              saveOrig(el);
+              el.style.lineHeight = '1.12';
+            }
+            // Clamp via getBoundingClientRect() so nothing clips off right/left stage edges
+            var rect = el.getBoundingClientRect();
+            if (rect && rect.width > 10 && rect.right > 1835) {
+              saveOrig(el);
+              var availRightW = Math.max(220, 1820 - rect.left);
+              var shrinkRatio = Math.max(0.45, (availRightW / rect.width) * 0.95);
+              var clampedFs = Math.max(22, Math.floor(origFsPx * shrinkRatio));
+              if (clampedFs < origFsPx) {
+                el.style.fontSize = clampedFs + 'px';
+                autoFitCount++;
+                notes.push('Clamped edge overflow on "' + (el.textContent || '').trim().slice(0, 20) + '"');
+              }
+            }
             var finalW = Math.max(el.offsetWidth, el.scrollWidth);
             var actualLeft = isCentered ? (left - finalW / 2) : left;
             var actualRight = isCentered ? (left + finalW / 2) : (left + finalW);

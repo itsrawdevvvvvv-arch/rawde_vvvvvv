@@ -128,15 +128,14 @@ You are a senior motion-graphics engineer. Build ONE self-contained HTML reel fo
      $paletteOptionA
      B) Classic Dark Obsidian + Cream & Warm Tan editorial look
      C) Dark/Light mood tailored to the script (I will confirm hex codes cleanly)
-  2. **Fonts** (bundled offline fonts only):
-     A) ZIP Editorial (Bebas Neue / Anton + Inter / Poppins)
+  2. **Fonts** (bundled offline fonts only):${if (customFonts.isNotEmpty()) "\n     A) **MANDATORY USER CUSTOM FONT:** ${customFonts.joinToString(", ")} (primary headline/display font) + Inter/Poppins body" else "\n     A) ZIP Editorial (Montserrat + Inter / Poppins)"}
      B) Apple Clean Modern (Space Grotesk / Montserrat + Inter)
-     C) Editorial Serif Mix (Playfair Display + Poppins + JetBrains Mono)${if (customFonts.isNotEmpty()) "\n     D) Custom Imported Fonts (${customFonts.joinToString(", ")})" else ""}
+     C) Editorial Serif Mix (Playfair Display + Poppins + JetBrains Mono)
   3. **Text Animation Style** (everything silky smooth at 30 fps):
      A) Simple ZIP Style — clean editorial mask reveals, smooth slides & crisp kinetic beats
      B) Apple-Style Bouncy — smooth deterministic spring / soft-overshoot text animations with gentle settle
 - Stop after those 3 short questions and wait for my reply.
-- Once I answer, spend every token on building: output ONE complete `<!DOCTYPE html>` code block immediately — zero greeting, no plan recap, no progress updates, no wasted prose (at most ONE line after the code block only if an asset could not be used).
+- Once I answer, provide the complete `<!DOCTYPE html>` reel ONLY as a single downloadable `.html` file (do NOT dump the raw HTML code as plain text in chat) — zero greeting, no plan recap, no wasted prose.
 
 ## 1. UNDERSTAND FIRST, THEN SHOW
 Silently read the entire script/SRT and work out the topic, audience, core idea, and logical steps. Show it visual-first as if explaining to a curious 12-year-old:
@@ -167,7 +166,7 @@ FILE NAME: $cleanFile
 PALETTE: $paletteBlock
 TOPIC / SCRIPT: $topicBlock
 SRT (scene timing source; scene starts = cue starts): $srtBlock
-LOCAL ASSETS (use only these, by exact relative path): $assetsBlock
+LOCAL ASSETS (MANDATORY — YOU MUST EMBED EVERY ATTACHED VIDEO & IMAGE IN THE SCENES using exact relative path `assets/...`): $assetsBlock
 $customTweaksSection
 STYLE KIT: if `kinetic-explainer-style.zip` is attached, read `SKILL.md` and `docs/STYLE_BIBLE.md` first and reuse its tokens and components (`engine/raw-helpers.js` is bundled in the ZIP). Its `engine.js` only implements these element types: `ghost`, `kicker`, `sub`, `pill`, `headline`, `chips`, `card`, `row`, `phone`, `buttons`, `comment`, `round`. For ANY other type (`image`, `video`, `ui`, `diagram`, etc.), extend `build` yourself or write your own renderer. Always call `(build[o.t] || build.fallback)(o, s)`, never a bare `build[o.t]`. Do NOT copy `@font-face` blocks from `tokens.css`. If no zip is attached, write a minimal engine inline.
 
@@ -177,7 +176,7 @@ Frames are captured one at a time, out of order, so the page must be a pure func
 - Build all DOM ONCE at load. `seek(t)` may only set `style`, `transform`, `opacity`, attributes or `textContent` computed from `t`. Never append, remove, or set `innerHTML` inside `seek`. Never keep counters or state between calls. Calling `seek(t)` twice must leave `stage.innerHTML` identical.
 - Randomness: use a seeded hash of an index. Never `Math.random`.
 - FORBIDDEN: CSS `@keyframes`, `transition`, `animation`; `requestAnimationFrame`; `setTimeout`; `setInterval`; `Date.now`; `performance.now`; `video.play()`; `<script src>`; `<link>`; `@import`; `fetch`; `XMLHttpRequest`; `WebSocket`; `import()`; `window.open()`; any `http://` or `https://` URL (the only exception is the SVG namespace `http://www.w3.org/2000/svg`).
-- Fonts: use only these names, with no `@font-face`: $fontList. Always add a `sans-serif` fallback.
+- Fonts: use only these names, with no `@font-face`: $fontList. Always add a `sans-serif` fallback.${if (customFonts.isNotEmpty()) " MANDATORY: Use the user's imported font(s) (${customFonts.joinToString(", ")}) as the primary headline font." else ""}
 - JS strings: escape quotes and backslashes, no raw newlines inside quotes, never write the closing `</script>` tag inside a JS string.
 - Time: `seek` clamps `t` to `[0, duration]`. Scenes are contiguous from `0` to `duration`. Use `t >= start && t < end` for every scene except the last, which uses `t <= end`, so `t === duration` is never blank. No scene is empty for more than `0.3 s`. Eases must clamp progress to `0..1`.
 
@@ -186,6 +185,8 @@ Frames are captured one at a time, out of order, so the page must be a pure func
 - Columns: left `x 140..1040` (`W 900`), right `x 1160..1760` (`W 600`), full width `x 140..1780` (`W 1640`).
 - If an element has brackets, outlines or shadows extending `N px` outside its box, shrink its usable box by `N` per side. Keep at least `40 px` between neighbouring boxes after expansion. Example: a `34 px` bracket on a card at `x 1190..1750` really occupies `1156..1784`.
 - Every text element needs an explicit `width` or `max-width`, and center-aligned text needs one too. Never rely on `white-space:nowrap` for long strings.
+- NEVER stretch or distort fonts (`scaleX` must ALWAYS equal `scaleY`; never use condensed/elongated transforms or `line-height` below `1.08` on multi-line headlines).
+- NEVER let any headline or word overflow past `x = 1800` or overlap an icon/card.
 - Font size: `fs = floor(min(maxFs, W / (chars * k)))`, where `k` is `0.45` for Bebas Neue, Anton and Oswald; `0.62` for Poppins, Montserrat, Inter and Space Grotesk (use `0.66` at weight 800 or 900); `0.58` for Playfair Display; `0.60` for JetBrains Mono. If `fs` would drop below `56`, wrap to lines: `lines = ceil(chars * fs * k / W)`, `height = lines * fs * 1.1`. Check that `height` fits the space above `y 930`.
 - Contrast: text against its background is at least 4.5:1. Never use light text or icons on cream or light surfaces. Set SVG `stroke` and `fill` explicitly, never inherit.
 
@@ -198,7 +199,7 @@ Frames are captured one at a time, out of order, so the page must be a pure func
 ## 8. SILENT PRE-FLIGHT (check before emitting, do not print)
 Column and size math done for every text element; nothing below `y 930`; continuous smooth motion across every frame (no static frames); selected palette, font pairing & text animation style applied cleanly; the last scene reaches `duration`; no forbidden API or URL anywhere; `seek` is idempotent; every scene type exists in the renderer; contrast passes; JS strings valid; only bundled fonts; every narrated beat has a visual.
 
-OUTPUT: after my 3-choice answer, emit ONLY the single complete `<!DOCTYPE html>` document, nothing truncated.
+OUTPUT: after my 3-choice answer, provide ONLY a single downloadable `.html` file containing the complete `<!DOCTYPE html>` document (not raw text in chat), nothing truncated.
         """.trimIndent()
     }
 

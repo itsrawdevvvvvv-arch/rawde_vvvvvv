@@ -5,6 +5,7 @@ import android.content.ClipboardManager
 import android.content.Context
 import android.annotation.SuppressLint
 import android.os.Build
+import android.webkit.WebSettings
 import android.webkit.WebView
 import android.webkit.CookieManager
 import android.webkit.WebResourceRequest
@@ -144,11 +145,6 @@ fun RawChatbotScreen(
     var currentSessionId by remember {
         mutableStateOf(sessions.firstOrNull()?.id ?: "chat_${System.currentTimeMillis()}")
     }
-    val activeBgSessions by ChatbotBackgroundManager.activeSessions.collectAsState()
-    val bgUpdateTick by ChatbotBackgroundManager.updateTick.collectAsState()
-    val bgToast by ChatbotBackgroundManager.lastToast.collectAsState()
-    var toastMsg by remember { mutableStateOf<String?>(null) }
-
     var messages by remember(currentSessionId, bgUpdateTick) {
         mutableStateOf(ChatbotEngine.loadChatHistory(cacheManager, currentSessionId))
     }
@@ -174,10 +170,14 @@ fun RawChatbotScreen(
     var inputText by remember { mutableStateOf("") }
     var pendingAttachment by remember { mutableStateOf<ChatUploadedFile?>(null) }
     var uploadingFile by remember { mutableStateOf(false) }
+    val activeBgSessions by ChatbotBackgroundManager.activeSessions.collectAsState()
+    val bgUpdateTick by ChatbotBackgroundManager.updateTick.collectAsState()
+    val bgToast by ChatbotBackgroundManager.lastToast.collectAsState()
     val sending = currentSessionId in activeBgSessions
     var showAttachChooser by remember { mutableStateOf(false) }
     var renamingSession by remember { mutableStateOf<ChatSessionMeta?>(null) }
     var renameDraft by remember { mutableStateOf("") }
+    var toastMsg by remember { mutableStateOf<String?>(null) }
 
     LaunchedEffect(toastMsg) {
         if (toastMsg != null) {
@@ -1095,11 +1095,23 @@ private fun ChatBubbleRow(
             }
 
 
-            val effectivePreviewPath = msg.websitePreviewPath.ifBlank {
-                when {
-                    msg.generatedFilePath.endsWith(".html", true) -> msg.generatedFilePath
-                    msg.attachmentPath.endsWith(".html", true) -> msg.attachmentPath
-                    else -> ""
+            val contextForPreview = LocalContext.current
+            val effectivePreviewPath = remember(msg.id, msg.websitePreviewPath, msg.generatedFilePath, msg.attachmentPath, msg.text) {
+                msg.websitePreviewPath.ifBlank {
+                    when {
+                        msg.generatedFilePath.endsWith(".html", true) -> msg.generatedFilePath
+                        msg.attachmentPath.endsWith(".html", true) -> msg.attachmentPath
+                        !isUser && (msg.text.contains("<!DOCTYPE html", ignoreCase = true) || msg.text.contains("<html", ignoreCase = true)) -> {
+                            val extracted = Regex("(<!DOCTYPE html[\\s\\S]*?</html>|<html[\\s\\S]*?</html>)", RegexOption.IGNORE_CASE)
+                                .find(msg.text)?.groupValues?.getOrNull(1)
+                            if (!extracted.isNullOrBlank()) {
+                                val f = File(contextForPreview.cacheDir, "preview_${msg.id.hashCode()}.html")
+                                runCatching { f.writeText(extracted, Charsets.UTF_8) }
+                                f.absolutePath
+                            } else ""
+                        }
+                        else -> ""
+                    }
                 }
             }
             if (effectivePreviewPath.isNotBlank()) {
@@ -1546,11 +1558,16 @@ private fun InAppAiBrowserDialog(
                     WebView(ctx).apply {
                         CookieManager.getInstance().setAcceptCookie(true)
                         CookieManager.getInstance().setAcceptThirdPartyCookies(this, true)
+                        setLayerType(android.view.View.LAYER_TYPE_HARDWARE, null)
                         settings.javaScriptEnabled = true
                         settings.domStorageEnabled = true
                         settings.databaseEnabled = true
+                        settings.allowContentAccess = true
+                        settings.allowFileAccess = true
+                        settings.mixedContentMode = WebSettings.MIXED_CONTENT_ALWAYS_ALLOW
                         settings.useWideViewPort = true
                         settings.loadWithOverviewMode = true
+                        settings.setSupportMultipleWindows(false)
                         settings.javaScriptCanOpenWindowsAutomatically = true
                         settings.userAgentString =
                             "Mozilla/5.0 (Linux; Android 13; Redmi Note 9) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Mobile Safari/537.36"
