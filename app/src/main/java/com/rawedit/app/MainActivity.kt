@@ -498,7 +498,7 @@ private fun MainAuthenticatedHost(
                         AssetLockerScreen(
                             project = proj,
                             allAssets = allAssets,
-                            apiKey = userProfile.groqApiKey,
+                            apiKey = userProfile.geminiApiKey,
                             modelPref = userProfile.groqModelPref,
                             quotaExhausted = userProfile.groqQuotaExhausted,
                             quotaBadgeText = userProfile.quotaSummaryText(),
@@ -579,7 +579,7 @@ private fun MainAuthenticatedHost(
 
                 is AppRoute.BackgroundRemover -> {
                     BackgroundRemoverScreen(
-                        apiKey = userProfile.groqApiKey,
+                        apiKey = userProfile.geminiApiKey,
                         geminiRouter = geminiRouter,
                         onBack = ::popRoute,
                         onOpenGeminiKey = { openGroqDialog(switchMode = false) },
@@ -648,7 +648,7 @@ private fun MainAuthenticatedHost(
                             project = proj,
                             cacheManager = container.cacheManager,
                             userProfile = userProfile,
-                            apiKey = userProfile.groqApiKey,
+                            apiKey = userProfile.geminiApiKey,
                             modelPref = userProfile.groqModelPref,
                             quotaExhausted = userProfile.groqQuotaExhausted,
                             quotaBadgeText = userProfile.quotaSummaryText(),

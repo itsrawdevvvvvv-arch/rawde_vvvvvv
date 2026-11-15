@@ -306,6 +306,30 @@ def fix_unescaped_json_prompt():
             print(f"  unescaped JSON prompt quotes fixed in {p.name}")
 
 
+def fix_router_vision_helpers():
+    """refineCutoutWithCircles calls helpers the export never writes."""
+    p = root / "app/src/main/java/com/rawedit/app/domain/GeminiWaterfallRouter.kt"
+    snippet = root / "tools/router_helpers.kt.txt"
+    s = read(p)
+    if s is None or not snippet.exists():
+        return
+    changed = False
+    if "private fun bitmapToJpegBase64" not in s:
+        anchor = "    suspend fun refineCutoutWithCircles("
+        if anchor in s:
+            s = s.replace(anchor, snippet.read_text() + anchor, 1)
+            changed = True
+    if "generateWithWaterfall(" in s:
+        s = s.replace("generateWithWaterfall(", "generate(", 1)
+        changed = True
+    if "                mode = GeminiRouteMode.FAST_CHAT," in s:
+        s = s.replace("                mode = GeminiRouteMode.FAST_CHAT,", "                routeMode = GeminiRouteMode.FAST_CHAT,", 1)
+        changed = True
+    if changed:
+        p.write_text(s)
+        print("  router vision helpers repaired")
+
+
 STEPS = [
     fix_version,
     fix_navigation,
@@ -319,6 +343,7 @@ STEPS = [
     fix_ai_router_compat,
     fix_broken_string_literals,
     fix_unescaped_json_prompt,
+    fix_router_vision_helpers,
 ]
 
 for step in STEPS:

@@ -71,6 +71,7 @@ class GeminiWaterfallRouter(context: Context) {
 
     companion object {
         val WORKHORSE_CHAIN = listOf(
+            "gemini-4-hydrogen",
             "gemini-3.5-flash-lite",
             "gemini-3.1-flash-lite",
             "gemini-3.6-flash",
@@ -78,6 +79,7 @@ class GeminiWaterfallRouter(context: Context) {
         )
 
         val CREATIVE_CHAIN = listOf(
+            "gemini-4-hydrogen",
             "gemini-3.8-flash",
             "gemini-3.6-flash",
             "gemini-3.5-flash-lite",
@@ -85,9 +87,9 @@ class GeminiWaterfallRouter(context: Context) {
         )
 
         val FAST_CHAIN = listOf(
+            "gemini-4-hydrogen",
             "gemini-2.5-flash",
             "gemini-2.5-flash-lite",
-            "gemini-2.0-flash",
             "gemini-3.5-flash-lite"
         )
 
@@ -119,7 +121,7 @@ class GeminiWaterfallRouter(context: Context) {
         }
 
         fun getMinIntervalMsForModel(modelId: String): Long = when {
-            modelId.contains("flash-lite") -> 4_000L
+            modelId.contains("hydrogen") || modelId.contains("flash-lite") -> 4_000L
             else -> 12_000L
         }
 
@@ -265,7 +267,7 @@ class GeminiWaterfallRouter(context: Context) {
         val chain = when (routeMode) {
             GeminiRouteMode.FAST_CHAT -> FAST_CHAIN
             GeminiRouteMode.JSON_WORKHORSE -> (WORKHORSE_CHAIN + "gemini-2.5-flash").distinct()
-            GeminiRouteMode.CREATIVE_FLASH -> (listOf("gemini-2.5-flash") + CREATIVE_CHAIN).distinct()
+            GeminiRouteMode.CREATIVE_FLASH -> (CREATIVE_CHAIN + "gemini-2.5-flash").distinct()
         }
         var totalAttempts = 0
         var lastErrorSummary = "All models in waterfall failed."

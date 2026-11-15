@@ -171,11 +171,11 @@ class DomainTests {
 
     @Test
     fun geminiWaterfallRouterVerification() {
-        assertEquals("gemini-3.5-flash-lite", GeminiWaterfallRouter.WORKHORSE_CHAIN.first())
-        assertEquals("gemini-3.8-flash", GeminiWaterfallRouter.CREATIVE_CHAIN.first())
-        assertEquals("gemini-2.5-flash", GeminiWaterfallRouter.FAST_CHAIN.first())
-        assertEquals(4, GeminiWaterfallRouter.WORKHORSE_CHAIN.size)
-        assertEquals(4, GeminiWaterfallRouter.CREATIVE_CHAIN.size)
+        assertEquals("gemini-4-hydrogen", GeminiWaterfallRouter.WORKHORSE_CHAIN.first())
+        assertEquals("gemini-4-hydrogen", GeminiWaterfallRouter.CREATIVE_CHAIN.first())
+        assertEquals("gemini-4-hydrogen", GeminiWaterfallRouter.FAST_CHAIN.first())
+        assertEquals(5, GeminiWaterfallRouter.WORKHORSE_CHAIN.size)
+        assertEquals(5, GeminiWaterfallRouter.CREATIVE_CHAIN.size)
 
         val payload = GeminiWaterfallRouter.buildGenerateContentPayload(
             prompt = "Test prompt",
