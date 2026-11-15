@@ -861,6 +861,7 @@ private fun AssetLockerCard(
                 modifier = Modifier.weight(1f)
             )
         }
+
     }
 }
 
