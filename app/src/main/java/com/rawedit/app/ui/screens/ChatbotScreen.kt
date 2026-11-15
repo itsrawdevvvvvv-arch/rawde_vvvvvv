@@ -145,9 +145,25 @@ fun RawChatbotScreen(
     var currentSessionId by remember {
         mutableStateOf(sessions.firstOrNull()?.id ?: "chat_${System.currentTimeMillis()}")
     }
+    var showHistoryDialog by remember { mutableStateOf(false) }
+    var viewingFile by remember { mutableStateOf<File?>(null) }
+    var selectingText by remember { mutableStateOf<String?>(null) }
+    var previewingWebsite by remember { mutableStateOf<File?>(null) }
+    var showInAppBrowser by remember { mutableStateOf(false) }
+    var browserInitialUrl by remember { mutableStateOf("https://www.instagram.com/rawde_vvvvvv/") }
+    var pendingBrowserContext by remember { mutableStateOf<String?>(null) }
+    var pendingBrowserTitle by remember { mutableStateOf<String?>(null) }
+
+    var inputText by remember { mutableStateOf("") }
+    var pendingAttachment by remember { mutableStateOf<ChatUploadedFile?>(null) }
+    var uploadingFile by remember { mutableStateOf(false) }
     val activeBgSessions by ChatbotBackgroundManager.activeSessions.collectAsState()
     val bgUpdateTick by ChatbotBackgroundManager.updateTick.collectAsState()
     val bgToast by ChatbotBackgroundManager.lastToast.collectAsState()
+    val sending = currentSessionId in activeBgSessions
+    var showAttachChooser by remember { mutableStateOf(false) }
+    var renamingSession by remember { mutableStateOf<ChatSessionMeta?>(null) }
+    var renameDraft by remember { mutableStateOf("") }
     var toastMsg by remember { mutableStateOf<String?>(null) }
 
     var messages by remember(currentSessionId, bgUpdateTick) {
@@ -163,22 +179,6 @@ fun RawChatbotScreen(
             ChatbotBackgroundManager.clearToast()
         }
     }
-    var showHistoryDialog by remember { mutableStateOf(false) }
-    var viewingFile by remember { mutableStateOf<File?>(null) }
-    var selectingText by remember { mutableStateOf<String?>(null) }
-    var previewingWebsite by remember { mutableStateOf<File?>(null) }
-    var showInAppBrowser by remember { mutableStateOf(false) }
-    var browserInitialUrl by remember { mutableStateOf("https://www.instagram.com/rawde_vvvvvv/") }
-    var pendingBrowserContext by remember { mutableStateOf<String?>(null) }
-    var pendingBrowserTitle by remember { mutableStateOf<String?>(null) }
-
-    var inputText by remember { mutableStateOf("") }
-    var pendingAttachment by remember { mutableStateOf<ChatUploadedFile?>(null) }
-    var uploadingFile by remember { mutableStateOf(false) }
-    val sending = currentSessionId in activeBgSessions
-    var showAttachChooser by remember { mutableStateOf(false) }
-    var renamingSession by remember { mutableStateOf<ChatSessionMeta?>(null) }
-    var renameDraft by remember { mutableStateOf("") }
 
     LaunchedEffect(toastMsg) {
         if (toastMsg != null) {
