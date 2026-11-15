@@ -474,11 +474,7 @@ fun AssetLockerScreen(
                                             }
                                         }
                                     },
-                                    onEditNote = { editingNoteTarget = asset }.onFailure { err ->
-                                                toastMsg = err.message ?: "Could not load image for cutout"
-                                            }
-                                        }
-                                    }
+                                    onEditNote = { editingNoteTarget = asset }
                                 )
                             }
                         }
