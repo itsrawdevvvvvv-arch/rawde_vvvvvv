@@ -20,20 +20,10 @@ enum class ReelEditingStyle(
         zipName = "kinetic-explainer-style.zip",
         previewAssetPath = "style_previews/style_kinetic_16_9.png",
         description = "Punchy display headlines, step-by-step builds, subtle ambient float, animated progress bars, card brackets, and Apple/ZIP bouncy spring motion."
-    ),
-    SWISS_GRID_MOTION(
-        id = "swiss_grid_motion",
-        title = "Swiss Grid Motion",
-        subtitle = "Visible structural grid, giant condensed red type",
-        badge = "Editorial & Minimal",
-        zipName = "swiss-grid-motion-style.zip",
-        previewAssetPath = "style_previews/style_swiss_16_9.jpg",
-        description = "Visible thin red/grey guide lines with intersection nodes, giant condensed Anton headlines, tiny tracked micro-captions in cell corners, and photo tiles."
     );
 
     companion object {
-        fun fromId(id: String?): ReelEditingStyle =
-            entries.firstOrNull { it.id.equals(id, ignoreCase = true) } ?: KINETIC_EXPLAINER
+        fun fromId(id: String?): ReelEditingStyle = KINETIC_EXPLAINER
     }
 }
 
@@ -47,28 +37,21 @@ object PromptGenerator {
         assets: List<LocalAssetEntity> = emptyList(),
         palette: PaletteState? = null,
         customFonts: List<String> = emptyList(),
-        style: ReelEditingStyle = ReelEditingStyle.KINETIC_EXPLAINER
+        style: ReelEditingStyle = ReelEditingStyle.KINETIC_EXPLAINER,
+        customPromptNotes: String = "",
+        githubSkills: List<String> = emptyList()
     ): String {
-        return when (style) {
-            ReelEditingStyle.KINETIC_EXPLAINER -> buildKineticExplainerPrompt(
-                fileName = fileName,
-                durationSeconds = durationSeconds,
-                topic = topic,
-                srtText = srtText,
-                assets = assets,
-                palette = palette,
-                customFonts = customFonts
-            )
-            ReelEditingStyle.SWISS_GRID_MOTION -> buildSwissGridPrompt(
-                fileName = fileName,
-                durationSeconds = durationSeconds,
-                topic = topic,
-                srtText = srtText,
-                assets = assets,
-                palette = palette,
-                customFonts = customFonts
-            )
-        }
+        return buildKineticExplainerPrompt(
+            fileName = fileName,
+            durationSeconds = durationSeconds,
+            topic = topic,
+            srtText = srtText,
+            assets = assets,
+            palette = palette,
+            customFonts = customFonts,
+            customPromptNotes = customPromptNotes,
+            githubSkills = githubSkills
+        )
     }
 
     private fun buildKineticExplainerPrompt(
@@ -78,7 +61,9 @@ object PromptGenerator {
         srtText: String,
         assets: List<LocalAssetEntity>,
         palette: PaletteState?,
-        customFonts: List<String>
+        customFonts: List<String>,
+        customPromptNotes: String,
+        githubSkills: List<String>
     ): String {
         val cleanFile = fileName.trim().ifEmpty { "voiceover.mp3" }
         val durationFormatted = String.format(Locale.US, "%.2f", durationSeconds)
@@ -119,6 +104,21 @@ object PromptGenerator {
             "Poppins, Montserrat, Open Sans, Inter, Bebas Neue, Anton, Oswald, Playfair Display, Space Grotesk, JetBrains Mono"
         }
 
+        val customTweaksSection = buildString {
+            if (customPromptNotes.isNotBlank()) {
+                appendLine()
+                appendLine("## CUSTOM USER & CHATBOT DIRECTIVES (Apply Strictly)")
+                appendLine(customPromptNotes.trim())
+            }
+            if (githubSkills.isNotEmpty()) {
+                appendLine()
+                appendLine("## INSTALLED GITHUB SKILLS & TOOLS")
+                githubSkills.forEach { skill ->
+                    appendLine("- $skill")
+                }
+            }
+        }
+
         return """
 You are a senior motion-graphics engineer. Build ONE self-contained HTML reel for the raw_edit offline renderer in **Kinetic Explainer Style**.
 
@@ -131,7 +131,7 @@ You are a senior motion-graphics engineer. Build ONE self-contained HTML reel fo
   2. **Fonts** (bundled offline fonts only):
      A) ZIP Editorial (Bebas Neue / Anton + Inter / Poppins)
      B) Apple Clean Modern (Space Grotesk / Montserrat + Inter)
-     C) Editorial Serif Mix (Playfair Display + Poppins + JetBrains Mono)
+     C) Editorial Serif Mix (Playfair Display + Poppins + JetBrains Mono)${if (customFonts.isNotEmpty()) "\n     D) Custom Imported Fonts (${customFonts.joinToString(", ")})" else ""}
   3. **Text Animation Style** (everything silky smooth at 30 fps):
      A) Simple ZIP Style — clean editorial mask reveals, smooth slides & crisp kinetic beats
      B) Apple-Style Bouncy — smooth deterministic spring / soft-overshoot text animations with gentle settle
@@ -168,7 +168,7 @@ PALETTE: $paletteBlock
 TOPIC / SCRIPT: $topicBlock
 SRT (scene timing source; scene starts = cue starts): $srtBlock
 LOCAL ASSETS (use only these, by exact relative path): $assetsBlock
-
+$customTweaksSection
 STYLE KIT: if `kinetic-explainer-style.zip` is attached, read `SKILL.md` and `docs/STYLE_BIBLE.md` first and reuse its tokens and components (`engine/raw-helpers.js` is bundled in the ZIP). Its `engine.js` only implements these element types: `ghost`, `kicker`, `sub`, `pill`, `headline`, `chips`, `card`, `row`, `phone`, `buttons`, `comment`, `round`. For ANY other type (`image`, `video`, `ui`, `diagram`, etc.), extend `build` yourself or write your own renderer. Always call `(build[o.t] || build.fallback)(o, s)`, never a bare `build[o.t]`. Do NOT copy `@font-face` blocks from `tokens.css`. If no zip is attached, write a minimal engine inline.
 
 ## 5. RENDERER RULES (violations break the render)
@@ -199,96 +199,6 @@ Frames are captured one at a time, out of order, so the page must be a pure func
 Column and size math done for every text element; nothing below `y 930`; continuous smooth motion across every frame (no static frames); selected palette, font pairing & text animation style applied cleanly; the last scene reaches `duration`; no forbidden API or URL anywhere; `seek` is idempotent; every scene type exists in the renderer; contrast passes; JS strings valid; only bundled fonts; every narrated beat has a visual.
 
 OUTPUT: after my 3-choice answer, emit ONLY the single complete `<!DOCTYPE html>` document, nothing truncated.
-        """.trimIndent()
-    }
-
-    private fun buildSwissGridPrompt(
-        fileName: String,
-        durationSeconds: Double,
-        topic: String,
-        srtText: String,
-        assets: List<LocalAssetEntity>,
-        palette: PaletteState?,
-        customFonts: List<String>
-    ): String {
-        val cleanFile = fileName.trim().ifEmpty { "voiceover.mp3" }
-        val durationFormatted = String.format(Locale.US, "%.2f", durationSeconds)
-        val cleanTopic = topic.trim()
-        val hasSrt = srtText.isNotBlank()
-
-        val topicBlock = if (cleanTopic.isNotEmpty()) {
-            cleanTopic
-        } else {
-            "Not specified"
-        }
-
-        val srtBlock = if (hasSrt) {
-            "\n$srtText"
-        } else {
-            "None supplied (distribute scenes evenly across $durationFormatted s matching the script beats)"
-        }
-
-        val assetsBlock = formatAssetsBlock(assets)
-
-        val fontList = if (customFonts.isNotEmpty()) {
-            "Anton (headlines), Montserrat (captions), Unbounded (wide display), plus user-imported fonts: ${customFonts.joinToString(", ")}"
-        } else {
-            "Anton (headlines), Montserrat (captions), Unbounded (wide display)"
-        }
-
-        return """
-You are a senior editorial motion-graphics director. Build ONE self-contained HTML reel for the raw_edit offline renderer in **Swiss Grid Motion Style** (`swiss-grid-motion-style.zip`).
-
-## 0. STEP 1 — ASK 2 QUICK QUESTIONS FIRST, THEN BUILD
-- Do NOT write code yet. Ask ONLY these 2 questions first:
-  1. **Look Selection:**
-     A) Look A "White Grid": `#FFFFFF` background, solid red lines, red Anton headlines, white-on-red text box
-     B) Look B "Grey Dashed Grid": `#D9D9D9` background, dashed red lines with nodes, deep red `#8B191A` Anton, B/W & duotone photo tiles
-     C) Look C "Black / Red / Wide": `#000000` & `#CC0E30` red background, wide extended sans type, technical annotation callouts
-     D) Hybrid Mix: Look A title card -> Look B core beats -> Look C climax beat
-  2. **Content Tone & Accents:**
-     A) Minimalist Editorial (One headline word + one photo tile per beat, tiny corner captions)
-     B) Technical Product Showcase (Bounding boxes with handle nodes, coordinate labels, duotone tiles)
-- Once I reply, emit ONE complete `<!DOCTYPE html>` block immediately with zero conversational filler.
-
-## 1. PRIME DIRECTIVES: SWISS GRID MOTION DESIGN
-1. **The Grid is the Design:** Every scene is constructed on visible thin guide lines with intersection nodes (`line`, `node`). Elements (`rect`, `tile`, `hl`, `wide`, `cap`, `annot`) MUST snap to grid lines or cell edges.
-2. **Every Idea = One Word + One Image:** Every beat shows ONE giant condensed uppercase headline word (`Anton`, e.g. "CREATE.", "WILD.", "SCALE.", "DISCOVER.") and ONE photo/cutout tile. No paragraphs, no bulleted lists, no text-only scenes.
-3. **Typography as Graphic Object:** Oversized, tight line-height (~0.98), uppercase, placed at grid intersections, baseline sitting directly on a horizontal line or filling a cell as a solid red block with white text.
-4. **Micro-Captions in Cell Corners:** 2-3 lines of tiny tracked uppercase text (`Montserrat`, 20-26px, tracking `+0.03em`) in the 4 corner cells (`FRAME 01`, `REC. 03`, `SPEC. 24`).
-5. **Mask-Driven Motion (Fast Expo-Out):** Lines draw in 0.7s, boxes and photo tiles wipe in 0.45-0.6s, headline text slides up 0.6s from an overflow mask, micro-captions fade in 0.5s last. Photos have a subtle continuous drift/zoom (`scale 1.0 -> 1.1`) while on screen so no scene is ever static.
-6. **Restraint:** Only palette colors (white `#FFFFFF`, paper `#F3F2F7`, grey `#D9D9D9`, black `#000000`, red `#C8141C`, deep red `#8B191A`, hot red `#CC0E30`). No shadows, no glows, no emojis, no gradients.
-
-## 2. OPEN SOURCE ASSET TOOLS & INTEGRATIONS (Installed in RawEdit)
-The RawEdit application integrates open-source creative asset studios:
-- **SVG-Edit Vector Engine (`SVG-Edit/svgedit`):** You can generate clean SVG lines, grid nodes, crosshairs, and geometric marks directly.
-- **Emoji Kitchen Fusion Engine (`xsalazar/emoji-kitchen`):** You can use transparent sticker mashups from the 100k+ combinations library (e.g. `https://www.gstatic.com/android/keyboard/emojikitchen/...` or local sticker assets) as graphic badges.
-- **Lottie & Keyframe Vector Animator (`marciogranzotto/lottie-tools`):** You can animate vector line draw-ons and corner coordinate nodes deterministically over time `t`.
-- **Filerobot & tldraw Canvas Studio (`scaleflex/filerobot-image-editor` / `tldraw`):** You can build structured multi-tile photo layouts with technical bounding boxes.
-
-## 3. INPUTS
-DURATION: $durationFormatted seconds (30 fps, 1920x1080)
-FILE NAME: $cleanFile
-TOPIC / SCRIPT: $topicBlock
-SRT: $srtBlock
-LOCAL ASSETS: $assetsBlock
-FONTS: $fontList
-
-## 4. SWISS GRID ENGINE ARCHITECTURE
-Include the deterministic Swiss Grid scene engine inline:
-- Define `<div id="stage">` (1920x1080) and `window.RAW = { duration: $durationFormatted, width: 1920, height: 1080, fps: 30, seek(t) { ... } }`.
-- Supported Element Types:
-  - `line`: `{ t: 'line', x, y, x2, y2, color, dash?, at, dur }` (draws on with fast expo ease)
-  - `node`: `{ t: 'node', x, y, size, shape: 'square'|'circle', color, at }` (pops in at grid intersection)
-  - `rect`: `{ t: 'rect', x, y, w, h, color, anim: 'wipeX'|'wipeY', at, dur }` (color block wipe)
-  - `tile`: `{ t: 'tile', x, y, w, h, src, tone: 'color'|'bw'|'duo', zoom: [1, 1.1], at, dur }` (photo tile with zoom drift)
-  - `hl`: `{ t: 'hl', x, y, text: 'HEADLINE', size: 160, color, box?, at }` (giant condensed text with mask slide-up)
-  - `cap`: `{ t: 'cap', x, y, text: 'LINE 1|LINE 2', size: 22, color, at }` (tiny tracked corner captions)
-  - `annot`: `{ t: 'annot', x, y, w, h, label: 'Surface_01', at }` (white bounding box with 4 corner handles)
-- Pre-render all elements into scenes; `seek(t)` activates the current scene and applies interpolated transforms purely from `t`.
-- Zero forbidden APIs (no `fetch`, no external URLs, no CSS `@keyframes`, no `setTimeout`, no `Math.random`).
-
-OUTPUT: after my choice, output ONLY the single complete `<!DOCTYPE html>` file.
         """.trimIndent()
     }
 

@@ -10,6 +10,7 @@ import android.graphics.Color
 import android.graphics.DashPathEffect
 import android.graphics.Matrix
 import android.graphics.Paint
+import android.graphics.Path
 import android.graphics.PixelFormat
 import android.graphics.Rect
 import android.graphics.RectF
@@ -43,6 +44,7 @@ import java.util.Locale
 import java.util.zip.ZipEntry
 import java.util.zip.ZipOutputStream
 import kotlin.math.abs
+import kotlin.math.hypot
 import kotlin.math.roundToInt
 
 enum class SheetSamplingMode(val label: String, val stepSec: Double, val maxFrames: Int) {
@@ -60,6 +62,26 @@ data class SceneSpan(
 )
 
 @Serializable
+data class PointNorm(
+    val x: Float,
+    val y: Float
+)
+
+/**
+ * Represents a user-drawn circle or freehand loop highlighting an issue on a FLAGGED frame.
+ * Coordinates are normalized (0f..1f) relative to the 16:9 frame so they scale cleanly to
+ * 480x270 thumbnails, 1920x1080 stage coordinates, PDF pages, and ZIP exports.
+ */
+@Serializable
+data class IssueCircle(
+    val centerXNorm: Float,
+    val centerYNorm: Float,
+    val radiusNorm: Float = 0.14f,
+    val pointsNorm: List<PointNorm> = emptyList(),
+    val note: String = ""
+)
+
+@Serializable
 private data class FrameDiagnostics(
     val autoFitCount: Int = 0,
     val notes: List<String> = emptyList(),
@@ -73,7 +95,11 @@ data class KeyframeSample(
     val thumbPath: String,
     val autoFitCount: Int,
     val autoFitNotes: List<String>,
-    val warnings: List<String>
+    val warnings: List<String>,
+    val isFlagged: Boolean = warnings.isNotEmpty() || autoFitCount > 0,
+    val circles: List<IssueCircle> = emptyList(),
+    val userNote: String = "",
+    val annotatedThumbPath: String = ""
 )
 
 data class KeyframeSheetResult(
@@ -81,7 +107,8 @@ data class KeyframeSheetResult(
     val durationSec: Double,
     val totalAutoFits: Int,
     val warningCount: Int,
-    val elapsedMs: Long
+    val elapsedMs: Long,
+    val scenes: List<SceneSpan> = emptyList()
 )
 
 data class ReviewCollageFrame(
@@ -134,6 +161,122 @@ object KeyframeSheetGenerator {
             webView.layoutParams = FrameLayout.LayoutParams(STAGE_W, STAGE_H)
             root.addView(webView)
             setContentView(root)
+        }
+    }
+
+    fun buildFallbackScenes(durationSec: Double, samples: List<KeyframeSample>): List<SceneSpan> {
+        val dur = durationSec.coerceAtLeast(1.0)
+        // Group by sceneLabel if present, else 2.5s segments
+        val labeledGroups = samples.filter { it.sceneLabel.isNotBlank() }.groupBy { it.sceneLabel }
+        if (labeledGroups.isNotEmpty()) {
+            var idx = 1
+            return labeledGroups.entries.map { (label, group) ->
+                val start = group.minOf { it.timeSec }
+                val end = (group.maxOf { it.timeSec } + 0.25).coerceAtMost(dur)
+                SceneSpan(
+                    index = idx++,
+                    start = start,
+                    end = maxOf(start + 0.2, end),
+                    bg = label
+                )
+            }
+        }
+        val step = 2.5
+        val list = mutableListOf<SceneSpan>()
+        var t = 0.0
+        var idx = 1
+        while (t < dur - 0.05) {
+            val next = (t + step).coerceAtMost(dur)
+            list.add(SceneSpan(index = idx++, start = t, end = next, bg = "SCENE"))
+            t = next
+        }
+        return list.ifEmpty { listOf(SceneSpan(1, 0.0, dur, "SCENE")) }
+    }
+
+    /**
+     * Draws the user's red issue circles / freehand loops onto a copy of the sample's thumbnail
+     * and saves it to disk so AI tools (and PDF/ZIP exports) receive the exact circled image.
+     */
+    fun saveAnnotatedThumbnail(sample: KeyframeSample, outDir: File): String {
+        val src = runCatching { BitmapFactory.decodeFile(sample.thumbPath) }.getOrNull() ?: return sample.thumbPath
+        if (sample.circles.isEmpty()) {
+            src.recycle()
+            return sample.thumbPath
+        }
+        outDir.mkdirs()
+        val working = src.copy(Bitmap.Config.ARGB_8888, true)
+        src.recycle()
+        val canvas = Canvas(working)
+        drawIssueCirclesOnCanvas(
+            canvas = canvas,
+            left = 0f,
+            top = 0f,
+            width = working.width.toFloat(),
+            height = working.height.toFloat(),
+            circles = sample.circles
+        )
+        val outFile = File(outDir, String.format(Locale.US, "frame_%04d_circled.jpg", sample.index))
+        FileOutputStream(outFile).use { fos ->
+            working.compress(Bitmap.CompressFormat.JPEG, 92, fos)
+        }
+        working.recycle()
+        return outFile.absolutePath
+    }
+
+    fun drawIssueCirclesOnCanvas(
+        canvas: Canvas,
+        left: Float,
+        top: Float,
+        width: Float,
+        height: Float,
+        circles: List<IssueCircle>
+    ) {
+        if (circles.isEmpty()) return
+        val strokeScale = (width / 480f).coerceAtLeast(0.6f)
+        val haloPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            color = Color.argb(180, 0, 0, 0)
+            style = Paint.Style.STROKE
+            strokeWidth = 7f * strokeScale
+            strokeCap = Paint.Cap.ROUND
+            strokeJoin = Paint.Join.ROUND
+        }
+        val redPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            color = Color.parseColor("#FF3B30")
+            style = Paint.Style.STROKE
+            strokeWidth = 4.2f * strokeScale
+            strokeCap = Paint.Cap.ROUND
+            strokeJoin = Paint.Join.ROUND
+        }
+        val fillTintPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            color = Color.argb(38, 255, 59, 48)
+            style = Paint.Style.FILL
+        }
+
+        for (c in circles) {
+            if (c.pointsNorm.size >= 3) {
+                val path = Path()
+                c.pointsNorm.forEachIndexed { idx, pt ->
+                    val px = left + pt.x.coerceIn(0f, 1f) * width
+                    val py = top + pt.y.coerceIn(0f, 1f) * height
+                    if (idx == 0) path.moveTo(px, py) else path.lineTo(px, py)
+                }
+                // Close loop if endpoints are reasonably close
+                val first = c.pointsNorm.first()
+                val last = c.pointsNorm.last()
+                if (hypot((first.x - last.x).toDouble(), (first.y - last.y).toDouble()) < 0.25) {
+                    path.close()
+                    canvas.drawPath(path, fillTintPaint)
+                }
+                canvas.drawPath(path, haloPaint)
+                canvas.drawPath(path, redPaint)
+            } else {
+                val cx = left + c.centerXNorm.coerceIn(0f, 1f) * width
+                val cy = top + c.centerYNorm.coerceIn(0f, 1f) * height
+                val r = (c.radiusNorm.coerceIn(0.04f, 0.48f) * minOf(width, height)).coerceAtLeast(12f * strokeScale)
+                canvas.drawCircle(cx, cy, r, fillTintPaint)
+                canvas.drawCircle(cx, cy, r, haloPaint)
+                canvas.drawCircle(cx, cy, r, redPaint)
+            }
         }
     }
 
@@ -220,31 +363,46 @@ object KeyframeSheetGenerator {
     ): String {
         val cleanTitle = title.trim().ifBlank { "Untitled Reel" }
         val durStr = String.format(Locale.US, "%.2f", durationSec)
-        val warned = samples.filter { it.warnings.isNotEmpty() }
-        val autoFitted = samples.filter { it.autoFitCount > 0 && it.warnings.isEmpty() }
-        val cleanCount = (samples.size - warned.size - autoFitted.size).coerceAtLeast(0)
+        val flagged = samples.filter { it.isFlagged }
+        val cleanCount = (samples.size - flagged.size).coerceAtLeast(0)
         val totalPages = ((samples.size + FRAMES_PER_PAGE - 1) / FRAMES_PER_PAGE).coerceAtLeast(1)
 
         val errLine = validationError.trim().ifBlank { "None reported" }
         val domWarnings = buildString {
-            if (warned.isNotEmpty()) {
-                warned.take(24).forEach { s ->
+            if (flagged.isNotEmpty()) {
+                flagged.take(32).forEach { s ->
                     val ts = String.format(Locale.US, "%.2fs", s.timeSec)
-                    appendLine("- WARN Frame #${s.index + 1} (t=$ts ${s.sceneLabel}): ${s.warnings.joinToString("; ")}")
+                    val reasons = mutableListOf<String>()
+                    if (s.circles.isNotEmpty()) {
+                        val circleCoords = s.circles.joinToString(", ") { c ->
+                            val cx = (c.centerXNorm * STAGE_W).roundToInt()
+                            val cy = (c.centerYNorm * STAGE_H).roundToInt()
+                            val rad = (c.radiusNorm * STAGE_H).roundToInt()
+                            "USER CIRCLED ISSUE at stage (x=$cx, y=$cy, r=${rad}px)" +
+                                (if (c.note.isNotBlank()) " [${c.note}]" else "")
+                        }
+                        reasons.add(circleCoords)
+                    }
+                    if (s.userNote.isNotBlank()) {
+                        reasons.add("User note: ${s.userNote}")
+                    }
+                    if (s.warnings.isNotEmpty()) {
+                        reasons.add(s.warnings.joinToString("; "))
+                    }
+                    if (s.autoFitNotes.isNotEmpty()) {
+                        reasons.add(s.autoFitNotes.joinToString("; "))
+                    }
+                    if (reasons.isEmpty()) {
+                        reasons.add("Manually FLAGGED by user — inspect red badge/circle on frame #${s.index + 1}")
+                    }
+                    appendLine("- FLAGGED Frame #${s.index + 1} (t=$ts ${s.sceneLabel}): ${reasons.joinToString(" | ")}")
                 }
-            }
-            if (autoFitted.isNotEmpty()) {
-                autoFitted.take(20).forEach { s ->
-                    val ts = String.format(Locale.US, "%.2fs", s.timeSec)
-                    appendLine("- FIT Frame #${s.index + 1} (t=$ts ${s.sceneLabel}): ${s.autoFitNotes.joinToString("; ")}")
-                }
-            }
-            if (warned.isEmpty() && autoFitted.isEmpty()) {
-                appendLine("None flagged by DOM check (inspect contact sheet visually for overlap, contrast, or pacing glitches).")
+            } else {
+                appendLine("All frames marked OK by user (inspect contact sheet visually for any subtle polish).")
             }
         }.trim()
 
-        val framesSummary = "${samples.size} frames across $totalPages page(s) ($cleanCount clean, ${warned.size} WARN, ${autoFitted.size} FIT)"
+        val framesSummary = "${samples.size} frames across $totalPages page(s) ($cleanCount OK, ${flagged.size} FLAGGED)"
 
         val htmlSection = when {
             htmlCode.isBlank() -> "[Attach your current reel .html file with this prompt]"
@@ -254,18 +412,18 @@ object KeyframeSheetGenerator {
 
         return """
 Fix the attached raw_edit reel. Spend tokens on fixing, not talking: no greeting, no progress notes, no recap. Do not rewrite code that works.
-Go through the visuals in detail and give the final downloadable fixed html , fixing all the errors. There are more other errors than the listed find all and fix.
+Go through the visuals in detail and give the final downloadable fixed html , fixing all the errors. Pay special attention to every FLAGGED frame and any RED CIRCLED areas drawn by the user on the contact sheet / frame images.
 
 TITLE: $cleanTitle   DURATION: $durStr s (1920x1080, 30 fps)
 VALIDATION / RUNTIME ERROR: $errLine
-DOM WARNINGS (WARN = edge clip or card overlap; FIT = auto-shrunk, wrapped or lifted text):
+FLAGGED FRAMES & CIRCLED ISSUE AREAS:
 $domWarnings
 FRAMES SUMMARY: $framesSummary
-Attached: ALL contact sheet pages (3x6 grids, 18 frames per page). Inspect every page, not just the first two.
+Attached: ALL contact sheet pages (3x6 grids, 18 frames per page, plus individual circled frame images in ZIP). Inspect every FLAGGED and red-circled frame carefully.
 
 ## STEP 1: SILENT AUDIT
 Find the root cause for each of these before editing anything:
-1. Every WARN/FIT frame. Measure against the 1920x1080 grid with real numbers (element x, y, w, h and font-size from the HTML). Do not guess coordinates.
+1. Every FLAGGED frame and red-circled region. Measure against the 1920x1080 grid with real numbers (element x, y, w, h and font-size from the HTML). Do not guess coordinates.
 2. Every JS/validation error. Typical causes: unsupported element type in `build` (engine.js only supports ghost, kicker, sub, pill, headline, chips, card, row, phone, buttons, comment, round), bad string escaping, forbidden API or URL.
 3. Blank or black frames, including the final frame at t = duration (scenes must be contiguous and the last scene inclusive).
 4. Collisions: brackets extend 34 px outside cards, nothing may sit below y 930 (progress bar at 972..1080), and low-contrast text or icons.
@@ -298,81 +456,22 @@ $htmlSection
     ): List<Pair<KeyframeSample, File>> = withContext(Dispatchers.IO) {
         if (samples.isEmpty()) return@withContext emptyList()
         val cap = maxFrames.coerceIn(1, GroqCodec.MAX_IMAGES_PER_REQUEST)
-        val warned = samples.filter { it.warnings.isNotEmpty() }
-        val fitted = samples.filter { it.autoFitCount > 0 && it.warnings.isEmpty() }
-        val flagged = (warned + fitted).take(cap)
+        val flagged = samples.filter { it.isFlagged }.take(cap)
 
         val chosen = if (flagged.isNotEmpty()) {
             flagged
         } else {
-            val pick = mutableListOf<KeyframeSample>()
-            if (samples.size <= cap) {
-                pick.addAll(samples)
-            } else {
-                for (i in 0 until cap) {
-                    val idx = ((i.toDouble() / (cap - 1).coerceAtLeast(1)) * samples.lastIndex).roundToInt()
-                    val candidate = samples[idx.coerceIn(0, samples.lastIndex)]
-                    if (pick.none { it.index == candidate.index }) {
-                        pick.add(candidate)
-                    }
-                }
-            }
-            pick
+            samples.take(cap)
         }
 
         outDir.mkdirs()
-        val frameW = 640
-        val headerH = 32
-        val stageH = 360
-        val totalH = headerH + stageH
-        val bgPaint = Paint().apply { color = Color.parseColor("#0D0D0F") }
-        val hdrBgPaint = Paint().apply { color = Color.parseColor("#17171A") }
-        val hdrTextPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-            color = Color.parseColor("#F7ECE6")
-            textSize = 18f
-            typeface = Typeface.create(Typeface.MONOSPACE, Typeface.BOLD)
-        }
-        val warnPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-            color = Color.parseColor("#FF8F80")
-            textSize = 17f
-            typeface = Typeface.create(Typeface.MONOSPACE, Typeface.BOLD)
-        }
-        val fitPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-            color = Color.parseColor("#CAA07D")
-            textSize = 17f
-            typeface = Typeface.create(Typeface.MONOSPACE, Typeface.BOLD)
-        }
-        val imgPaint = Paint(Paint.FILTER_BITMAP_FLAG)
-
         val out = mutableListOf<Pair<KeyframeSample, File>>()
         chosen.forEachIndexed { idx, sample ->
-            val src = runCatching { BitmapFactory.decodeFile(sample.thumbPath) }.getOrNull() ?: return@forEachIndexed
-            val outBmp = Bitmap.createBitmap(frameW, totalH, Bitmap.Config.ARGB_8888)
-            val canvas = Canvas(outBmp)
-            canvas.drawRect(0f, 0f, frameW.toFloat(), totalH.toFloat(), bgPaint)
-            canvas.drawRect(0f, 0f, frameW.toFloat(), headerH.toFloat(), hdrBgPaint)
-
-            val tsStr = String.format(Locale.US, "t=%.2fs", sample.timeSec)
-            val sceneStr = sample.sceneLabel.ifBlank { "SCENE" }
-            canvas.drawText("#${sample.index + 1} $tsStr $sceneStr", 12f, 22f, hdrTextPaint)
-
-            val (tag, tagPaint) = when {
-                sample.warnings.isNotEmpty() -> "WARN" to warnPaint
-                sample.autoFitCount > 0 -> "FIT" to fitPaint
-                else -> "SAMPLE" to hdrTextPaint
+            val annotatedPath = saveAnnotatedThumbnail(sample, outDir)
+            val file = File(annotatedPath)
+            if (file.exists()) {
+                out.add(sample to file)
             }
-            val tw = tagPaint.measureText(tag)
-            canvas.drawText(tag, frameW - tw - 12f, 22f, tagPaint)
-
-            canvas.drawBitmap(src, null, RectF(0f, headerH.toFloat(), frameW.toFloat(), totalH.toFloat()), imgPaint)
-            src.recycle()
-
-            val file = File(outDir, String.format(Locale.US, "groq_frame_%02d.jpg", idx + 1))
-            FileOutputStream(file).use { fos ->
-                outBmp.compress(Bitmap.CompressFormat.JPEG, 86, fos)
-            }
-            outBmp.recycle()
-            out.add(sample to file)
         }
         out
     }
@@ -518,44 +617,11 @@ $htmlSection
             picked.any { abs(it.timeSec - candidate.timeSec) < 1.0 }
 
         val warningsFirst = samples
-            .filter { it.warnings.isNotEmpty() }
-            .sortedWith(compareByDescending<KeyframeSample> { it.warnings.size }.thenByDescending { it.autoFitCount }.thenBy { it.timeSec })
+            .filter { it.isFlagged }
+            .sortedWith(compareByDescending<KeyframeSample> { it.circles.size }.thenByDescending { it.warnings.size }.thenByDescending { it.autoFitCount }.thenBy { it.timeSec })
         for (s in warningsFirst) {
             if (picked.size >= 4) break
             if (!tooClose(s)) picked.add(s)
-        }
-
-        val fitsNext = samples
-            .filter { it.warnings.isEmpty() && it.autoFitCount > 0 }
-            .sortedWith(compareByDescending<KeyframeSample> { it.autoFitCount }.thenBy { it.timeSec })
-        for (s in fitsNext) {
-            if (picked.size >= 4) break
-            if (!tooClose(s)) picked.add(s)
-        }
-
-        if (picked.size < 4) {
-            val anchorTargets = mutableListOf<KeyframeSample>()
-            samples.firstOrNull()?.let { anchorTargets.add(it) }
-            val tailTarget = (durationSec - 0.04).coerceAtLeast(0.0)
-            samples.minByOrNull { abs(it.timeSec - tailTarget) }?.let { anchorTargets.add(it) }
-            for (a in anchorTargets) {
-                if (picked.size >= 4) break
-                if (picked.none { it.index == a.index } && !tooClose(a)) {
-                    picked.add(a)
-                }
-            }
-        }
-
-        if (picked.size < 4) {
-            val slots = listOf(0.25, 0.50, 0.75, 0.12, 0.88)
-            for (frac in slots) {
-                if (picked.size >= 4) break
-                val idx = (frac * samples.lastIndex).roundToInt().coerceIn(0, samples.lastIndex)
-                val s = samples[idx]
-                if (picked.none { it.index == s.index } && !tooClose(s)) {
-                    picked.add(s)
-                }
-            }
         }
 
         if (picked.size < 4) {
@@ -598,8 +664,8 @@ $htmlSection
         }
 
         val collageIdxBySampleIdx = collageSamples.mapIndexed { pos, s -> s.index to (pos + 1) }.toMap()
-        val orderedFlagged = (collageSamples.filter { it.warnings.isNotEmpty() || it.autoFitCount > 0 } +
-            samples.filter { (it.warnings.isNotEmpty() || it.autoFitCount > 0) && it.index !in collageIdxBySampleIdx })
+        val orderedFlagged = (collageSamples.filter { it.isFlagged } +
+            samples.filter { it.isFlagged && it.index !in collageIdxBySampleIdx })
             .distinctBy { it.index }
 
         for (s in orderedFlagged) {
@@ -681,13 +747,9 @@ $htmlSection
             val labelText = "#${i + 1}  t=${String.format(Locale.US, "%.2f", f.t)}s"
             c.drawText(labelText, ox + 8f, oy + fh + 15f, txt)
 
-            fill.color = when (f.badge) {
-                "WARN" -> 0xFFE5484D.toInt()
-                "FIT" -> 0xFFF5A524.toInt()
-                else -> 0xFF2E9E5B.toInt()
-            }
-            c.drawRect(ox + cw - 70f, (oy + fh + 2).toFloat(), ox + cw - 6f, (oy + ch - 2).toFloat(), fill)
-            c.drawText(f.badge, ox + cw - 62f, oy + fh + 15f, txt)
+            fill.color = if (f.badge == "FLAGGED" || f.badge == "WARN" || f.badge == "FIT") 0xFFE5484D.toInt() else 0xFF2E9E5B.toInt()
+            c.drawRect(ox + cw - 82f, (oy + fh + 2).toFloat(), ox + cw - 6f, (oy + ch - 2).toFloat(), fill)
+            c.drawText(f.badge, ox + cw - 74f, oy + fh + 15f, txt)
         }
 
         fill.color = Color.WHITE
@@ -712,11 +774,7 @@ $htmlSection
             for (s in picked) {
                 val bmp = runCatching { BitmapFactory.decodeFile(s.thumbPath) }.getOrNull() ?: continue
                 bitmapsToRecycle.add(bmp)
-                val badge = when {
-                    s.warnings.isNotEmpty() -> "WARN"
-                    s.autoFitCount > 0 -> "FIT"
-                    else -> "OK"
-                }
+                val badge = if (s.isFlagged) "FLAGGED" else "OK"
                 val rects = domBundle.rectsBySampleIndex[s.index].orEmpty()
                 collageFrames.add(ReviewCollageFrame(bitmap = bmp, t = s.timeSec, badge = badge, rects = rects))
             }
@@ -806,8 +864,8 @@ $htmlSection
             val activeWeb = requireNotNull(webView) { "WebView initialization failed" }
             waitForFontsAndRaw(activeWeb, cancelled)
 
-            val scenes = extractScenes(activeWeb)
-            val timestamps = buildSampleTimestamps(durationSec, scenes, mode)
+            val extractedScenes = extractScenes(activeWeb)
+            val timestamps = buildSampleTimestamps(durationSec, extractedScenes, mode)
             val samples = ArrayList<KeyframeSample>(timestamps.size)
             var totalAutoFits = 0
             var warningFrames = 0
@@ -832,19 +890,27 @@ $htmlSection
                     }
                 }
 
+                val isFlaggedDefault = diag.warnings.isNotEmpty() || diag.autoFitCount > 0
                 samples.add(
                     KeyframeSample(
                         index = idx,
                         timeSec = tSec,
-                        sceneLabel = resolveSceneLabel(tSec, scenes),
+                        sceneLabel = resolveSceneLabel(tSec, extractedScenes),
                         thumbPath = thumbFile.absolutePath,
                         autoFitCount = diag.autoFitCount,
                         autoFitNotes = diag.notes,
-                        warnings = diag.warnings
+                        warnings = diag.warnings,
+                        isFlagged = isFlaggedDefault
                     )
                 )
 
                 onProgress(idx + 1, timestamps.size, tSec, thumbFile.absolutePath)
+            }
+
+            val resolvedScenes = if (extractedScenes.isNotEmpty()) {
+                extractedScenes
+            } else {
+                buildFallbackScenes(durationSec, samples)
             }
 
             return KeyframeSheetResult(
@@ -852,7 +918,8 @@ $htmlSection
                 durationSec = durationSec,
                 totalAutoFits = totalAutoFits,
                 warningCount = warningFrames,
-                elapsedMs = System.currentTimeMillis() - startedMs
+                elapsedMs = System.currentTimeMillis() - startedMs,
+                scenes = resolvedScenes
             )
         } finally {
             withContext(Dispatchers.Main) {
@@ -928,6 +995,33 @@ $htmlSection
                     zos.closeEntry()
                 }
 
+                // Also include individual circled/flagged frame images so the AI tool gets high-res circled images directly!
+                val flaggedWithCircles = samples.filter { it.isFlagged }
+                for (sample in flaggedWithCircles) {
+                    val src = runCatching { BitmapFactory.decodeFile(sample.thumbPath) }.getOrNull() ?: continue
+                    val working = src.copy(Bitmap.Config.ARGB_8888, true)
+                    src.recycle()
+                    if (sample.circles.isNotEmpty()) {
+                        drawIssueCirclesOnCanvas(
+                            canvas = Canvas(working),
+                            left = 0f,
+                            top = 0f,
+                            width = working.width.toFloat(),
+                            height = working.height.toFloat(),
+                            circles = sample.circles
+                        )
+                    }
+                    val entryName = if (sample.circles.isNotEmpty()) {
+                        String.format(Locale.US, "flagged_frames/frame_%02d_t%.2fs_CIRCLED.jpg", sample.index + 1, sample.timeSec)
+                    } else {
+                        String.format(Locale.US, "flagged_frames/frame_%02d_t%.2fs_FLAGGED.jpg", sample.index + 1, sample.timeSec)
+                    }
+                    zos.putNextEntry(ZipEntry(entryName))
+                    working.compress(Bitmap.CompressFormat.JPEG, 92, zos)
+                    zos.closeEntry()
+                    working.recycle()
+                }
+
                 zos.putNextEntry(ZipEntry("frame_report.txt"))
                 val report = buildTextReport(samples, title, durationSec)
                 zos.write(report.toByteArray(Charsets.UTF_8))
@@ -986,14 +1080,24 @@ $htmlSection
         appendLine("raw_edit Pre-Render Frame Report")
         appendLine("Title: $title")
         appendLine("Duration: ${String.format(Locale.US, "%.2f", durationSec)}s")
-        appendLine("Captured frames: ${samples.size}")
+        appendLine("Captured frames: ${samples.size} (${samples.count { !it.isFlagged }} OK, ${samples.count { it.isFlagged }} FLAGGED)")
         appendLine()
         samples.forEach { s ->
             val ts = String.format(Locale.US, "%.2fs", s.timeSec)
-            val status = when {
-                s.warnings.isNotEmpty() -> "WARN: ${s.warnings.joinToString("; ")}"
-                s.autoFitCount > 0 -> "AUTO-FIT(${s.autoFitCount}): ${s.autoFitNotes.joinToString("; ")}"
-                else -> "OK"
+            val status = if (s.isFlagged) {
+                val parts = mutableListOf<String>()
+                if (s.circles.isNotEmpty()) {
+                    val cStr = s.circles.joinToString(", ") { c ->
+                        "CIRCLED(x=${(c.centerXNorm * STAGE_W).roundToInt()},y=${(c.centerYNorm * STAGE_H).roundToInt()},r=${(c.radiusNorm * STAGE_H).roundToInt()})"
+                    }
+                    parts.add(cStr)
+                }
+                if (s.userNote.isNotBlank()) parts.add("Note: ${s.userNote}")
+                if (s.warnings.isNotEmpty()) parts.add("WARN: ${s.warnings.joinToString("; ")}")
+                if (s.autoFitNotes.isNotEmpty()) parts.add("AUTO-FIT: ${s.autoFitNotes.joinToString("; ")}")
+                "FLAGGED" + (if (parts.isNotEmpty()) " -> ${parts.joinToString(" | ")}" else "")
+            } else {
+                "OK"
             }
             appendLine("#${String.format(Locale.US, "%03d", s.index + 1)} | t=$ts | ${s.sceneLabel} | $status")
         }
@@ -1010,12 +1114,7 @@ $htmlSection
         val borderWarn = Paint(Paint.ANTI_ALIAS_FLAG).apply {
             color = Color.parseColor("#FF8F80")
             style = Paint.Style.STROKE
-            strokeWidth = 4f
-        }
-        val borderFit = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-            color = Color.parseColor("#CAA07D")
-            style = Paint.Style.STROKE
-            strokeWidth = 3f
+            strokeWidth = 4.5f
         }
         val titlePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
             color = Color.parseColor("#F7ECE6")
@@ -1033,12 +1132,7 @@ $htmlSection
             typeface = Typeface.create(Typeface.MONOSPACE, Typeface.BOLD)
         }
         val statusOkPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-            color = Color.parseColor("#A99D95")
-            textSize = 18f
-            typeface = Typeface.create(Typeface.MONOSPACE, Typeface.BOLD)
-        }
-        val statusFitPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-            color = Color.parseColor("#CAA07D")
+            color = Color.parseColor("#4E9B6E")
             textSize = 18f
             typeface = Typeface.create(Typeface.MONOSPACE, Typeface.BOLD)
         }
@@ -1078,7 +1172,7 @@ $htmlSection
             p.titlePaint
         )
         canvas.drawText(
-            "$totalFrames total keyframes  |  Cite exact timestamps (e.g. t=4.50s) to Cloud AI to fix only broken scenes",
+            "$totalFrames total keyframes  |  FLAGGED frames & RED CIRCLES show exact issues to fix",
             marginX,
             84f,
             p.subPaint
@@ -1102,10 +1196,10 @@ $htmlSection
                 if (sample.sceneLabel.isNotBlank()) "  ${sample.sceneLabel}" else ""
             canvas.drawText(headStr, left + 12f, top + 27f, p.badgeTextPaint)
 
-            val (stLabel, stPaint) = when {
-                sample.warnings.isNotEmpty() -> "WARN" to p.statusWarnPaint
-                sample.autoFitCount > 0 -> "FIT" to p.statusFitPaint
-                else -> "OK" to p.statusOkPaint
+            val (stLabel, stPaint) = if (sample.isFlagged) {
+                (if (sample.circles.isNotEmpty()) "FLAGGED \u25CE" else "FLAGGED") to p.statusWarnPaint
+            } else {
+                "OK" to p.statusOkPaint
             }
             val stW = stPaint.measureText(stLabel)
             canvas.drawText(stLabel, left + cardW - stW - 12f, top + 27f, stPaint)
@@ -1125,17 +1219,25 @@ $htmlSection
                 thumb.recycle()
             }
 
+            // Draw any user-circled issue areas right on top of the frame in the PDF / ZIP page!
+            if (sample.isFlagged && sample.circles.isNotEmpty()) {
+                drawIssueCirclesOnCanvas(
+                    canvas = canvas,
+                    left = imgLeft,
+                    top = imgTop,
+                    width = targetW,
+                    height = targetH,
+                    circles = sample.circles
+                )
+            }
+
             val overlayLabel = tsStr
             val ow = p.badgeTextPaint.measureText(overlayLabel)
             val pillRect = RectF(imgLeft + 6f, imgTop + targetH - 30f, imgLeft + ow + 18f, imgTop + targetH - 6f)
             canvas.drawRoundRect(pillRect, 6f, 6f, p.pillBgPaint)
             canvas.drawText(overlayLabel, imgLeft + 12f, imgTop + targetH - 11f, p.badgeTextPaint)
 
-            val borderPaint = when {
-                sample.warnings.isNotEmpty() -> p.borderWarn
-                sample.autoFitCount > 0 -> p.borderFit
-                else -> p.borderDefault
-            }
+            val borderPaint = if (sample.isFlagged) p.borderWarn else p.borderDefault
             canvas.drawRoundRect(cardRect, 14f, 14f, borderPaint)
         }
     }
@@ -1199,7 +1301,6 @@ $htmlSection
         if (probe.isEmpty()) base else base.copy(warnings = (base.warnings + probe).distinct().take(8))
     }
 
-    /** Extra deterministic checks (text-text overlap, contrast, clipped text, broken images). */
     private suspend fun runProbe(webView: WebView): List<String> = withContext(Dispatchers.Main) {
         val d = CompletableDeferred<String>()
         webView.evaluateJavascript(PROBE_JS) { res -> d.complete(res ?: "\"[]\"") }
@@ -1208,11 +1309,9 @@ $htmlSection
         runCatching { jsonParser.decodeFromString<List<String>>(unquoted) }.getOrDefault(emptyList())
     }
 
-    /** Issues that remain in the source code (warnings + runtime auto-fits). Used to verify AI patches. */
     fun countIssues(samples: List<KeyframeSample>): Int =
-        samples.sumOf { it.warnings.size + it.autoFitNotes.size }
+        samples.count { it.isFlagged }
 
-    /** Collapses per-frame flag lines into one line per (selector, issue): sel|x,y,wxh|issue|times. */
     fun compressFlagLines(lines: List<String>): String {
         val groups = LinkedHashMap<String, MutableList<String>>()
         val firstRect = HashMap<String, String>()

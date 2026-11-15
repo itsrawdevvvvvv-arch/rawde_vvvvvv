@@ -117,7 +117,6 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.io.File
-import java.util.zip.ZipInputStream
 
 private const val LARGE_EDITOR_THRESHOLD = 15_000
 private const val HELPER_ENTRY_PATH = "kinetic-explainer-style/engine/raw-helpers.js"
@@ -145,28 +144,6 @@ private suspend fun readClipboardText(context: Context): String {
             }
         }
     }
-}
-
-private suspend fun readRawHelperFromStylePack(
-    context: Context,
-    packName: String = CacheManager.STYLE_PACK_ASSET_NAME,
-    targetEntryPath: String = HELPER_ENTRY_PATH
-): String = withContext(Dispatchers.IO) {
-    runCatching {
-        context.assets.open(packName).use { input ->
-            ZipInputStream(input).use { zis ->
-                var entry = zis.nextEntry
-                while (entry != null) {
-                    if (entry.name == targetEntryPath) {
-                        return@use zis.bufferedReader(Charsets.UTF_8).readText()
-                    }
-                    zis.closeEntry()
-                    entry = zis.nextEntry
-                }
-                ""
-            }
-        }
-    }.getOrDefault("")
 }
 
 @Composable
@@ -200,6 +177,7 @@ fun AddVoiceScreen(
     var srtCueCount by remember(project.id) { mutableStateOf(project.srtCueCount) }
     var srtError by remember { mutableStateOf<String?>(null) }
     var transcribingAudio by remember { mutableStateOf(false) }
+    var showSrtEditor by remember { mutableStateOf(false) }
 
     var topic by remember(project.id) {
         mutableStateOf(if (project.topic.startsWith(CacheManager.TOPIC_FILE_PREFIX)) "" else project.topic)
@@ -266,8 +244,9 @@ fun AddVoiceScreen(
                 if (raw.isBlank()) {
                     srtError = "Selected SRT file is empty or unreadable."
                 } else if (parsed.valid) {
-                    srtText = parsed.promptSnippet
+                    srtText = parsed.cleanedSrt
                     srtCueCount = parsed.cueCount
+                    toastMsg = "Loaded 100% of SRT (${parsed.cueCount} cues)"
                 } else {
                     srtError = parsed.error ?: "Invalid SRT file."
                 }
@@ -284,9 +263,7 @@ fun AddVoiceScreen(
             animationSpec = infiniteRepeatable(tween(1400, easing = LinearEasing), RepeatMode.Restart),
             label = "dash"
         )
-    } else {
-        null
-    }
+    } else null
     val dashIntervals = remember { floatArrayOf(16f, 12f) }
 
     Box(
@@ -430,7 +407,7 @@ fun AddVoiceScreen(
                                     )
                                     Spacer(modifier = Modifier.height(3.dp))
                                     Text(
-                                        text = "MP3, M4A, WAV, AAC  \u2022  1s to 20m",
+                                        text = "MP3, M4A, WAV, AAC  \u2022  Up to 500 MB",
                                         style = RawTypography.labelMedium
                                     )
                                 }
@@ -453,60 +430,108 @@ fun AddVoiceScreen(
                 }
             }
 
-            // Optional SRT file card (28dp borderless)
-            Row(
+            // Optional SRT file card
+            Column(
                 modifier = Modifier
                     .fillMaxWidth()
                     .clip(RoundedCornerShape(28.dp))
                     .background(RawColors.CardSurface)
-                    .clickable { srtPicker.launch(arrayOf("*/*")) }
-                    .padding(horizontal = 17.dp, vertical = 18.dp),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(14.dp)
+                    .padding(horizontal = 17.dp, vertical = 16.dp),
+                verticalArrangement = Arrangement.spacedBy(10.dp)
             ) {
-                Box(
+                Row(
                     modifier = Modifier
-                        .size(46.dp)
-                        .clip(CircleShape)
-                        .background(RawColors.RaisedCard),
-                    contentAlignment = Alignment.Center
+                        .fillMaxWidth()
+                        .clickable { srtPicker.launch(arrayOf("*/*")) },
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(14.dp)
                 ) {
-                    RawIcon(RawIconType.SRT, size = 21.dp, tint = RawColors.TextPrimary)
+                    Box(
+                        modifier = Modifier
+                            .size(46.dp)
+                            .clip(CircleShape)
+                            .background(RawColors.RaisedCard),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        RawIcon(RawIconType.SRT, size = 21.dp, tint = RawColors.TextPrimary)
+                    }
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            text = "Add or Generate 100% SRT",
+                            fontFamily = BricolageFamily,
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 18.sp,
+                            color = RawColors.TextPrimary
+                        )
+                        Spacer(modifier = Modifier.height(2.dp))
+                        Text(
+                            text = if (srtCueCount > 0) "$srtCueCount subtitle cues ready (100% full script)" else "Import .srt file or generate 100% below",
+                            fontFamily = BricolageFamily,
+                            fontWeight = FontWeight.SemiBold,
+                            fontSize = 13.5.sp,
+                            color = if (srtCueCount > 0) RawColors.Tan else RawColors.TextMuted
+                        )
+                    }
+                    if (srtCueCount > 0) {
+                        RawSecondaryButton(
+                            text = "Remove",
+                            height = 40.dp,
+                            isDanger = true,
+                            fillWidth = false,
+                            onClick = {
+                                srtText = ""
+                                srtCueCount = 0
+                                showSrtEditor = false
+                            }
+                        )
+                    } else {
+                        CircleActionButton(
+                            icon = RawIconType.PLUS,
+                            size = 38.dp,
+                            onClick = { srtPicker.launch(arrayOf("*/*")) }
+                        )
+                    }
                 }
-                Column(modifier = Modifier.weight(1f)) {
-                    Text(
-                        text = "Add SRT file (optional)",
-                        fontFamily = BricolageFamily,
-                        fontWeight = FontWeight.Bold,
-                        fontSize = 18.5.sp,
-                        color = RawColors.TextPrimary
-                    )
-                    Spacer(modifier = Modifier.height(3.dp))
-                    Text(
-                        text = if (srtCueCount > 0) "$srtCueCount subtitle cues attached" else "Gives Cloud AI exact timing per word",
-                        fontFamily = BricolageFamily,
-                        fontWeight = FontWeight.SemiBold,
-                        fontSize = 13.5.sp,
-                        lineHeight = 18.sp,
-                        color = if (srtCueCount > 0) RawColors.Tan else RawColors.TextMuted
-                    )
-                }
+
                 if (srtCueCount > 0) {
-                    RawSecondaryButton(
-                        text = "Remove",
-                        height = 46.dp,
-                        isDanger = true,
-                        fillWidth = false,
-                        onClick = {
-                            srtText = ""
-                            srtCueCount = 0
-                        }
-                    )
-                } else {
-                    CircleActionButton(
-                        icon = RawIconType.PLUS,
-                        size = 38.dp,
-                        onClick = { srtPicker.launch(arrayOf("*/*")) }
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        RawSecondaryButton(
+                            text = if (showSrtEditor) "Hide SRT Preview" else "View / Edit Full SRT ($srtCueCount cues)",
+                            height = 38.dp,
+                            onClick = { showSrtEditor = !showSrtEditor },
+                            modifier = Modifier.weight(1f)
+                        )
+                    }
+                }
+
+                if (showSrtEditor) {
+                    OutlinedTextField(
+                        value = srtText,
+                        onValueChange = { updated ->
+                            srtText = updated
+                            val parsed = SrtParser.parse(updated)
+                            if (parsed.valid) srtCueCount = parsed.cueCount
+                        },
+                        textStyle = TextStyle(
+                            fontFamily = JetBrainsMonoFamily,
+                            fontSize = 12.sp,
+                            lineHeight = 18.sp,
+                            color = RawColors.TextPrimary
+                        ),
+                        minLines = 6,
+                        maxLines = 12,
+                        shape = RoundedCornerShape(18.dp),
+                        colors = OutlinedTextFieldDefaults.colors(
+                            focusedBorderColor = RawColors.Tan,
+                            unfocusedBorderColor = RawColors.Divider,
+                            focusedContainerColor = RawColors.RaisedCard,
+                            unfocusedContainerColor = RawColors.RaisedCard,
+                            cursorColor = RawColors.Tan
+                        ),
+                        modifier = Modifier.fillMaxWidth()
                     )
                 }
             }
@@ -515,80 +540,112 @@ fun AddVoiceScreen(
                 Text(text = msg, style = RawTypography.bodyMedium, color = RawColors.ErrorCoral)
             }
 
-            if (audioPath.isNotBlank()) {
-                Row(
+            // 100% Full Audio / Script SRT Generator Card
+            if (audioPath.isNotBlank() || topic.isNotBlank()) {
+                Column(
                     modifier = Modifier
                         .fillMaxWidth()
                         .clip(RoundedCornerShape(24.dp))
                         .background(RawColors.RaisedCard)
                         .padding(horizontal = 16.dp, vertical = 14.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(12.dp)
+                    verticalArrangement = Arrangement.spacedBy(10.dp)
                 ) {
-                    Box(
-                        modifier = Modifier
-                            .size(40.dp)
-                            .clip(CircleShape)
-                            .background(RawColors.AccentSoft),
-                        contentAlignment = Alignment.Center
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(12.dp)
                     ) {
-                        RawIcon(type = RawIconType.SPARK, size = 18.dp, tint = RawColors.Tan)
-                    }
-                    Column(modifier = Modifier.weight(1f)) {
-                        Text(
-                            text = "Word-by-word transcription",
-                            fontFamily = BricolageFamily,
-                            fontWeight = FontWeight.Bold,
-                            fontSize = 15.sp,
-                            color = RawColors.TextPrimary
-                        )
-                        Text(
-                            text = if (transcribingAudio) "Transcribing with Gemini AI..." else "Generate precise word timestamps via Gemini AI",
-                            fontFamily = BricolageFamily,
-                            fontSize = 12.5.sp,
-                            lineHeight = 16.5.sp,
-                            color = RawColors.TextMuted
-                        )
-                    }
-                    if (transcribingAudio) {
-                        CircularProgressIndicator(
-                            color = RawColors.Tan,
-                            strokeWidth = 2.dp,
-                            modifier = Modifier.size(24.dp)
-                        )
-                    } else {
-                        RawSecondaryButton(
-                            text = if (srtCueCount > 0) "Regenerate" else "Transcribe",
-                            height = 38.dp,
-                            fillWidth = false,
-                            onClick = {
-                                val key = if (geminiApiKey.isNotBlank()) geminiApiKey else groqApiKey
-                                if (key.isBlank()) {
-                                    onOpenGeminiKey()
+                        Box(
+                            modifier = Modifier
+                                .size(40.dp)
+                                .clip(CircleShape)
+                                .background(RawColors.AccentSoft),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            RawIcon(type = RawIconType.SPARK, size = 18.dp, tint = RawColors.Tan)
+                        }
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                text = "100% Complete SRT Generator",
+                                fontFamily = BricolageFamily,
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 15.5.sp,
+                                color = RawColors.TextPrimary
+                            )
+                            Text(
+                                text = if (transcribingAudio) {
+                                    "Transcribing 100% of audio & verifying full duration..."
                                 } else {
-                                    transcribingAudio = true
-                                    srtError = null
-                                    scope.launch {
-                                        val f = File(audioPath)
-                                        val res = router.transcribeAudioWordByWord(key, f)
-                                        transcribingAudio = false
-                                        res.onSuccess { parsed ->
-                                            srtText = parsed.cleanedSrt
-                                            srtCueCount = parsed.cueCount
-                                            if (topic.isBlank()) {
-                                                topic = parsed.cleanedSrt.lines()
-                                                    .filter { it.isNotBlank() && !it.contains("-->") && it.toIntOrNull() == null }
-                                                    .joinToString(" ")
-                                                    .take(200)
+                                    "Multi-pass full-duration AI transcription + 100% script sync"
+                                },
+                                fontFamily = BricolageFamily,
+                                fontSize = 12.5.sp,
+                                lineHeight = 16.5.sp,
+                                color = RawColors.TextMuted
+                            )
+                        }
+                    }
+
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        if (audioPath.isNotBlank()) {
+                            RawSecondaryButton(
+                                text = if (transcribingAudio) "Transcribing..." else if (srtCueCount > 0) "Re-Transcribe Audio (100%)" else "Transcribe Audio (100%)",
+                                height = 42.dp,
+                                enabled = !transcribingAudio,
+                                onClick = {
+                                    val key = if (geminiApiKey.isNotBlank()) geminiApiKey else groqApiKey
+                                    if (key.isBlank()) {
+                                        onOpenGeminiKey()
+                                    } else {
+                                        transcribingAudio = true
+                                        srtError = null
+                                        scope.launch {
+                                            val f = File(audioPath)
+                                            val res = router.transcribeAudioWordByWord(
+                                                apiKey = key,
+                                                audioFile = f,
+                                                knownDurationSec = audioDuration,
+                                                scriptHint = topic
+                                            )
+                                            transcribingAudio = false
+                                            res.onSuccess { parsed ->
+                                                srtText = parsed.cleanedSrt
+                                                srtCueCount = parsed.cueCount
+                                                if (topic.isBlank()) {
+                                                    topic = parsed.cues.joinToString(" ") { it.text }
+                                                }
+                                                toastMsg = "100% SRT ready (${parsed.cueCount} cues, ${String.format("%.1fs", parsed.coveredDurationSec)})"
+                                            }.onFailure { err ->
+                                                srtError = err.message ?: "Transcription failed."
                                             }
-                                            toastMsg = "Generated ${parsed.cueCount} word cues"
-                                        }.onFailure { err ->
-                                            srtError = err.message ?: "Transcription failed."
                                         }
                                     }
-                                }
-                            }
-                        )
+                                },
+                                modifier = Modifier.weight(1f)
+                            )
+                        }
+
+                        if (topic.isNotBlank()) {
+                            RawSecondaryButton(
+                                text = "Sync 100% Script \u2192 SRT",
+                                height = 42.dp,
+                                enabled = !transcribingAudio,
+                                onClick = {
+                                    val targetDur = if (audioDuration >= 1.0) audioDuration else 15.0
+                                    val generated = SrtParser.generateFullScriptSrt(topic, targetDur)
+                                    if (generated.valid) {
+                                        srtText = generated.cleanedSrt
+                                        srtCueCount = generated.cueCount
+                                        toastMsg = "Generated 100% SRT from script (${generated.cueCount} cues)"
+                                    } else {
+                                        srtError = generated.error
+                                    }
+                                },
+                                modifier = Modifier.weight(1f)
+                            )
+                        }
                     }
                 }
             }
@@ -686,7 +743,7 @@ fun AddVoiceScreen(
                     OutlinedTextField(
                         value = topic,
                         onValueChange = { topic = it },
-                        placeholder = { Text("Paste your script or topic here...", color = RawColors.TextMuted) },
+                        placeholder = { Text("Paste your full script or topic here...", color = RawColors.TextMuted) },
                         textStyle = TextStyle(
                             fontFamily = JetBrainsMonoFamily,
                             fontWeight = FontWeight.Medium,
@@ -742,9 +799,26 @@ fun AddVoiceScreen(
                     }
                     savingVoice = true
                     scope.launch {
+                        // If user pasted a script but didn't generate an SRT yet, auto-generate 100% SRT from their script!
+                        val finalSrtText: String
+                        val finalCueCount: Int
+                        if (srtText.isBlank() && topic.isNotBlank()) {
+                            val autoSrt = SrtParser.generateFullScriptSrt(topic, audioDuration)
+                            if (autoSrt.valid) {
+                                finalSrtText = autoSrt.cleanedSrt
+                                finalCueCount = autoSrt.cueCount
+                            } else {
+                                finalSrtText = srtText
+                                finalCueCount = srtCueCount
+                            }
+                        } else {
+                            finalSrtText = srtText
+                            finalCueCount = srtCueCount
+                        }
+
                         val (storedTopic, storedSrt) = withContext(Dispatchers.IO) {
                             cacheManager.persistTopicText(project.id, topic) to
-                                cacheManager.persistSrtText(project.id, srtText)
+                                cacheManager.persistSrtText(project.id, finalSrtText)
                         }
                         val baseTitle = audioName.substringBeforeLast('.').ifBlank { project.title }
                         onSave(
@@ -755,7 +829,7 @@ fun AddVoiceScreen(
                                 audioSizeBytes = audioSize,
                                 audioDurationSec = audioDuration,
                                 srtText = storedSrt,
-                                srtCueCount = srtCueCount,
+                                srtCueCount = finalCueCount,
                                 topic = storedTopic
                             )
                         )
@@ -780,6 +854,8 @@ fun CopyPromptScreen(
     attachedAssets: List<LocalAssetEntity>,
     palette: PaletteState,
     cacheManager: CacheManager,
+    customPromptNotes: String = "",
+    onOpenChatbot: () -> Unit = {},
     onBack: () -> Unit
 ) {
     val context = LocalContext.current
@@ -807,13 +883,29 @@ fun CopyPromptScreen(
         }
     }
 
-    val customFontNames = remember {
-        cacheManager.listCustomFonts().map { it.nameWithoutExtension }
+    var customFontsFiles by remember {
+        mutableStateOf(cacheManager.listCustomFonts())
+    }
+    val customFontNames = remember(customFontsFiles) {
+        customFontsFiles.map { it.nameWithoutExtension }
+    }
+    val githubSkillNames = remember {
+        cacheManager.listGithubSkillFiles().map { it.nameWithoutExtension }
     }
 
-    var selectedStyle by remember { mutableStateOf(ReelEditingStyle.KINETIC_EXPLAINER) }
+    val selectedStyle = ReelEditingStyle.KINETIC_EXPLAINER
 
-    val promptText = remember(project.audioName, project.audioDurationSec, resolvedTopic, resolvedSrt, attachedAssets, palette, customFontNames, selectedStyle) {
+    val promptText = remember(
+        project.audioName,
+        project.audioDurationSec,
+        resolvedTopic,
+        resolvedSrt,
+        attachedAssets,
+        palette,
+        customFontNames,
+        customPromptNotes,
+        githubSkillNames
+    ) {
         PromptGenerator.buildPrompt(
             fileName = project.audioName,
             durationSeconds = project.audioDurationSec.coerceAtLeast(1.0),
@@ -822,7 +914,9 @@ fun CopyPromptScreen(
             assets = attachedAssets,
             palette = palette,
             customFonts = customFontNames,
-            style = selectedStyle
+            style = selectedStyle,
+            customPromptNotes = customPromptNotes,
+            githubSkills = githubSkillNames
         )
     }
     val displayPrompt = remember(promptText) {
@@ -850,6 +944,22 @@ fun CopyPromptScreen(
         if (toastMsg != null) {
             delay(1900)
             toastMsg = null
+        }
+    }
+
+    val fontPicker = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.OpenDocument()
+    ) { uri ->
+        if (uri != null) {
+            scope.launch {
+                val res = withContext(Dispatchers.IO) { cacheManager.importCustomFonts(uri) }
+                res.onSuccess { importedList ->
+                    customFontsFiles = cacheManager.listCustomFonts()
+                    toastMsg = "Imported ${importedList.size} custom font(s): ${importedList.joinToString { it.name }}"
+                }.onFailure { err ->
+                    toastMsg = err.message ?: "Could not import font (.ttf, .otf, or .zip)"
+                }
+            }
         }
     }
 
@@ -897,7 +1007,32 @@ fun CopyPromptScreen(
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 CircleActionButton(icon = RawIconType.BACK, onClick = onBack, size = 48.dp)
-                RawPixelMascot(kind = PixelMascotKind.ZIP_BOT, size = 40.dp)
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    RawPressButton(onClick = onOpenChatbot) {
+                        Row(
+                            modifier = Modifier
+                                .clip(CircleShape)
+                                .background(RawColors.AccentSoft)
+                                .border(1.dp, RawColors.AccentBorder, CircleShape)
+                                .padding(horizontal = 12.dp, vertical = 7.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(6.dp)
+                        ) {
+                            RawIcon(RawIconType.SPARK, size = 14.dp, tint = RawColors.Tan)
+                            Text(
+                                text = "Tweak with AI Chatbot",
+                                fontFamily = BricolageFamily,
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 13.sp,
+                                color = RawColors.Tan
+                            )
+                        }
+                    }
+                    RawPixelMascot(kind = PixelMascotKind.ZIP_BOT, size = 40.dp)
+                }
             }
 
             KineticHeading(
@@ -912,7 +1047,7 @@ fun CopyPromptScreen(
                 color = RawColors.TextMuted
             )
 
-            // Context summary pills: attached assets + active Studio Palette
+            // Context summary pills: attached assets + active Studio Palette + custom fonts
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -965,118 +1100,84 @@ fun CopyPromptScreen(
                 }
             }
 
-            // 16:9 Style Selector Header
-            Text(
-                text = "SELECT EDITING STYLE (16:9 SAMPLE)",
-                fontFamily = JetBrainsMonoFamily,
-                fontWeight = FontWeight.Bold,
-                fontSize = 11.5.sp,
-                color = RawColors.Tan
-            )
-
-            // 16:9 Style Cards Row
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(10.dp)
+            // Custom Font Upload / Import Card (.ttf, .otf, or Font .zip)
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(26.dp))
+                    .background(RawColors.CardSurface)
+                    .padding(16.dp),
+                verticalArrangement = Arrangement.spacedBy(10.dp)
             ) {
-                ReelEditingStyle.entries.forEach { st ->
-                    val isSel = selectedStyle == st
-                    val sampleBmp = remember(st) {
-                        runCatching {
-                            context.assets.open(st.previewAssetPath).use { stream ->
-                                BitmapFactory.decodeStream(stream)
-                            }
-                        }.getOrNull()
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            text = "Custom Fonts (${customFontsFiles.size} imported)",
+                            fontFamily = BricolageFamily,
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 17.sp,
+                            color = RawColors.TextPrimary
+                        )
+                        Text(
+                            text = "Import .ttf, .otf, or Google Fonts .zip — bundled into Style ZIP & offline renderer",
+                            fontFamily = BricolageFamily,
+                            fontSize = 12.5.sp,
+                            color = RawColors.TextMuted
+                        )
                     }
+                    Spacer(modifier = Modifier.width(8.dp))
+                    RawSecondaryButton(
+                        text = "Upload Font",
+                        height = 40.dp,
+                        leadingIcon = RawIconType.PLUS,
+                        fillWidth = false,
+                        onClick = { fontPicker.launch(arrayOf("*/*")) }
+                    )
+                }
 
-                    Column(
+                if (customFontsFiles.isNotEmpty()) {
+                    Row(
                         modifier = Modifier
-                            .weight(1f)
-                            .clip(RoundedCornerShape(18.dp))
-                            .background(if (isSel) RawColors.AccentSoft else RawColors.CardSurface)
-                            .border(
-                                width = if (isSel) 2.dp else 1.dp,
-                                color = if (isSel) RawColors.Tan else RawColors.Divider,
-                                shape = RoundedCornerShape(18.dp)
-                            )
-                            .clickable {
-                                selectedStyle = st
-                                haptic.performHapticFeedback(HapticFeedbackType.LongPress)
-                            }
-                            .padding(10.dp),
-                        verticalArrangement = Arrangement.spacedBy(8.dp)
+                            .fillMaxWidth()
+                            .horizontalScroll(rememberScrollState()),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
-                        // 16:9 Preview Image
-                        Box(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .aspectRatio(16f / 9f)
-                                .clip(RoundedCornerShape(10.dp))
-                                .background(Color.Black)
-                        ) {
-                            if (sampleBmp != null) {
-                                Image(
-                                    bitmap = sampleBmp.asImageBitmap(),
-                                    contentDescription = st.title,
-                                    modifier = Modifier.fillMaxSize(),
-                                    contentScale = ContentScale.Crop
-                                )
-                            }
-                            // Badge overlay
-                            Box(
+                        customFontsFiles.forEach { fontFile ->
+                            Row(
                                 modifier = Modifier
-                                    .align(Alignment.TopEnd)
-                                    .padding(4.dp)
-                                    .clip(RoundedCornerShape(4.dp))
-                                    .background(Color(0xDD121212))
-                                    .padding(horizontal = 6.dp, vertical = 2.dp)
+                                    .clip(CircleShape)
+                                    .background(RawColors.RaisedCard)
+                                    .padding(start = 12.dp, end = 8.dp, top = 6.dp, bottom = 6.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(6.dp)
                             ) {
                                 Text(
-                                    text = st.badge,
+                                    text = fontFile.name,
                                     fontFamily = JetBrainsMonoFamily,
-                                    fontSize = 9.sp,
-                                    fontWeight = FontWeight.Bold,
-                                    color = if (isSel) RawColors.Tan else RawColors.TextMuted
+                                    fontWeight = FontWeight.SemiBold,
+                                    fontSize = 11.5.sp,
+                                    color = RawColors.Tan
                                 )
-                            }
-                        }
-
-                        // Title and selection check
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.SpaceBetween,
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Text(
-                                text = st.title,
-                                fontFamily = BricolageFamily,
-                                fontWeight = FontWeight.Bold,
-                                fontSize = 14.5.sp,
-                                color = if (isSel) RawColors.Tan else RawColors.TextPrimary,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis,
-                                modifier = Modifier.weight(1f)
-                            )
-                            Box(
-                                modifier = Modifier
-                                    .size(18.dp)
-                                    .clip(CircleShape)
-                                    .background(if (isSel) RawColors.Tan else RawColors.RaisedCard),
-                                contentAlignment = Alignment.Center
-                            ) {
-                                if (isSel) {
-                                    RawIcon(RawIconType.CHECK, size = 11.dp, tint = Color.Black)
+                                Box(
+                                    modifier = Modifier
+                                        .size(20.dp)
+                                        .clip(CircleShape)
+                                        .background(RawColors.ErrorSoft)
+                                        .clickable {
+                                            cacheManager.deleteCustomFont(fontFile.name)
+                                            customFontsFiles = cacheManager.listCustomFonts()
+                                            toastMsg = "Removed ${fontFile.name}"
+                                        },
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    RawIcon(RawIconType.CLOSE, size = 11.dp, tint = RawColors.ErrorCoral)
                                 }
                             }
                         }
-
-                        Text(
-                            text = st.description,
-                            style = RawTypography.labelMedium.copy(fontSize = 11.sp, lineHeight = 14.5.sp),
-                            color = RawColors.TextMuted,
-                            maxLines = 2,
-                            overflow = TextOverflow.Ellipsis
-                        )
                     }
                 }
             }
@@ -1087,6 +1188,14 @@ fun CopyPromptScreen(
                 animationSpec = tween(if (animEnabled) 220 else 0, easing = RawEasings.Morph),
                 label = "zip_card_bd"
             )
+            val sampleBmp = remember {
+                runCatching {
+                    context.assets.open(selectedStyle.previewAssetPath).use { stream ->
+                        BitmapFactory.decodeStream(stream)
+                    }
+                }.getOrNull()
+            }
+
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -1100,6 +1209,39 @@ fun CopyPromptScreen(
                     .padding(18.dp),
                 verticalArrangement = Arrangement.spacedBy(12.dp)
             ) {
+                if (sampleBmp != null) {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .aspectRatio(16f / 9f)
+                            .clip(RoundedCornerShape(16.dp))
+                            .background(Color.Black)
+                    ) {
+                        Image(
+                            bitmap = sampleBmp.asImageBitmap(),
+                            contentDescription = selectedStyle.title,
+                            modifier = Modifier.fillMaxSize(),
+                            contentScale = ContentScale.Crop
+                        )
+                        Box(
+                            modifier = Modifier
+                                .align(Alignment.TopEnd)
+                                .padding(8.dp)
+                                .clip(CircleShape)
+                                .background(Color(0xDD121212))
+                                .padding(horizontal = 10.dp, vertical = 4.dp)
+                        ) {
+                            Text(
+                                text = selectedStyle.title,
+                                fontFamily = JetBrainsMonoFamily,
+                                fontSize = 10.5.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = RawColors.Tan
+                            )
+                        }
+                    }
+                }
+
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     verticalAlignment = Alignment.CenterVertically,
@@ -1125,10 +1267,10 @@ fun CopyPromptScreen(
                             overflow = TextOverflow.Ellipsis
                         )
                         Text(
-                            text = if (selectedStyle == ReelEditingStyle.KINETIC_EXPLAINER) {
-                                "Includes engine/raw-helpers.js"
+                            text = if (cacheManager.hasStylePackOverrides()) {
+                                "Customized via AI Chatbot + Custom Fonts"
                             } else {
-                                "Includes engine/engine.js (Swiss grid)"
+                                "Includes SKILL.md, engine/raw-helpers.js & custom fonts"
                             },
                             style = RawTypography.labelMedium
                         )
@@ -1140,7 +1282,7 @@ fun CopyPromptScreen(
                             .padding(horizontal = 11.dp, vertical = 6.dp)
                     ) {
                         Text(
-                            text = if (zipSaved) "Saved" else if (selectedStyle == ReelEditingStyle.KINETIC_EXPLAINER) "552 KB" else "356 KB",
+                            text = if (zipSaved) "Saved" else "Style ZIP",
                             fontFamily = JetBrainsMonoFamily,
                             fontWeight = FontWeight.SemiBold,
                             fontSize = 11.5.sp,
@@ -1155,13 +1297,8 @@ fun CopyPromptScreen(
                     onClick = {
                         showHelperDialog = true
                         scope.launch {
-                            helperCode = if (selectedStyle == ReelEditingStyle.KINETIC_EXPLAINER) {
-                                readRawHelperFromStylePack(context, CacheManager.STYLE_PACK_KINETIC, "kinetic-explainer-style/engine/raw-helpers.js")
-                                    .ifBlank { "// raw-helpers.js missing from bundle" }
-                            } else {
-                                readRawHelperFromStylePack(context, CacheManager.STYLE_PACK_SWISS, "swiss-grid-motion-style/engine/engine.js")
-                                    .ifBlank { "// engine.js missing from bundle" }
-                            }
+                            helperCode = cacheManager.readStylePackEntryText(HELPER_ENTRY_PATH)
+                                .ifBlank { "// raw-helpers.js missing from bundle" }
                         }
                     }
                 ) {
@@ -1175,7 +1312,7 @@ fun CopyPromptScreen(
                     ) {
                         RawIcon(type = RawIconType.CODE, size = 14.dp, tint = RawColors.Tan)
                         Text(
-                            text = if (selectedStyle == ReelEditingStyle.KINETIC_EXPLAINER) "Inspect helper: RAW.syncVideo(...)" else "Inspect engine: Swiss Grid Engine",
+                            text = "Inspect helper: RAW.syncVideo(...)",
                             fontFamily = JetBrainsMonoFamily,
                             fontWeight = FontWeight.SemiBold,
                             fontSize = 12.sp,
@@ -1885,7 +2022,7 @@ fun CodePasteScreen(
                             )
                             Spacer(modifier = Modifier.width(8.dp))
                             Text(
-                                text = "Contact sheet (auto-fit & PDF)",
+                                text = "Contact sheet carousel & Scenes",
                                 fontFamily = BricolageFamily,
                                 fontWeight = FontWeight.Bold,
                                 fontSize = 16.sp,

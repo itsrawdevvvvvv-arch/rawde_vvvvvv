@@ -13,6 +13,7 @@ import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.horizontalScroll
@@ -50,12 +51,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.geometry.Offset
-import androidx.compose.ui.graphics.BlendMode
-import androidx.compose.ui.graphics.Brush
-import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.CompositingStrategy
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.input.pointer.pointerInput
@@ -67,18 +63,18 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import androidx.compose.ui.util.lerp
 import com.rawedit.app.data.local.UserProfile
 import com.rawedit.app.ui.icons.PixelMascotKind
 import com.rawedit.app.ui.icons.PixelSparkle
 import com.rawedit.app.ui.icons.RawIcon
 import com.rawedit.app.ui.icons.RawIconType
 import com.rawedit.app.ui.icons.RawPixelMascot
-import com.rawedit.app.ui.motion.FeatheredScrollEdges
 import com.rawedit.app.ui.motion.RawEasings
+import com.rawedit.app.ui.motion.RawPressButton
 import com.rawedit.app.ui.motion.TiltedAccentPill
 import com.rawedit.app.ui.motion.rememberAnimationsEnabled
 import com.rawedit.app.ui.theme.BricolageFamily
+import com.rawedit.app.ui.theme.JetBrainsMonoFamily
 import com.rawedit.app.ui.theme.RawColors
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -107,10 +103,10 @@ private fun Modifier.vhRise(
     this
 } else {
     graphicsLayer {
-        val raw = ((clockMs.value - delayMs) / 620f).coerceIn(0f, 1f)
+        val raw = ((clockMs.value - delayMs) / 520f).coerceIn(0f, 1f)
         val eased = RawEasings.Morph.transform(raw)
         alpha = eased
-        translationY = (1f - eased) * 20.dp.toPx()
+        translationY = (1f - eased) * 16.dp.toPx()
     }
 }
 
@@ -118,20 +114,21 @@ private fun Modifier.vhRise(
 fun HomeScreen(
     userProfile: UserProfile,
     reelsCount: Int,
-    onStartNewReel: (Offset) -> Unit
+    onStartNewReel: (Offset) -> Unit,
+    onOpenChatbot: () -> Unit = {}
 ) {
     val animEnabled = rememberAnimationsEnabled()
     val scrollState = rememberScrollState()
     var tvIndex by remember { mutableIntStateOf(0) }
 
-    val entranceClock = remember { Animatable(if (animEnabled) 0f else 950f) }
+    val entranceClock = remember { Animatable(if (animEnabled) 0f else 850f) }
     val entranceState: State<Float>? = if (animEnabled) entranceClock.asState() else null
     LaunchedEffect(animEnabled) {
         if (animEnabled) {
             entranceClock.snapTo(0f)
-            entranceClock.animateTo(950f, tween(durationMillis = 950, easing = LinearEasing))
+            entranceClock.animateTo(850f, tween(durationMillis = 850, easing = LinearEasing))
         } else {
-            entranceClock.snapTo(950f)
+            entranceClock.snapTo(850f)
         }
     }
 
@@ -142,18 +139,6 @@ fun HomeScreen(
             targetValue = (2.0 * PI).toFloat(),
             animationSpec = infiniteRepeatable(tween(3400, easing = LinearEasing), RepeatMode.Restart),
             label = "vh_bob"
-        )
-    } else {
-        null
-    }
-
-    val shimmerState: State<Float>? = if (animEnabled) {
-        val inf = rememberInfiniteTransition(label = "home_shimmer")
-        inf.animateFloat(
-            initialValue = 0f,
-            targetValue = 1f,
-            animationSpec = infiniteRepeatable(tween(2400, easing = LinearEasing), RepeatMode.Restart),
-            label = "shimmer_sweep"
         )
     } else {
         null
@@ -203,20 +188,46 @@ fun HomeScreen(
                     ),
                 horizontalAlignment = Alignment.Start
             ) {
-                // Meta line (.e-meta)
-                Text(
-                    text = "Studio  \u00B7  $displayName  \u00B7  $reelsCount $reelsWord  \u00B7  offline",
-                    fontFamily = BricolageFamily,
-                    fontWeight = FontWeight.SemiBold,
-                    fontSize = 14.sp,
-                    color = RawColors.TextMuted,
-                    modifier = Modifier.vhRise(entranceState, 0)
-                )
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .vhRise(entranceState, 0),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        text = "Studio  \u00B7  $displayName  \u00B7  $reelsCount $reelsWord",
+                        fontFamily = BricolageFamily,
+                        fontWeight = FontWeight.SemiBold,
+                        fontSize = 14.sp,
+                        color = RawColors.TextMuted,
+                        modifier = Modifier.weight(1f)
+                    )
+                    RawPressButton(onClick = onOpenChatbot) {
+                        Row(
+                            modifier = Modifier
+                                .clip(CircleShape)
+                                .background(RawColors.AccentSoft)
+                                .border(1.dp, RawColors.AccentBorder, CircleShape)
+                                .padding(horizontal = 12.dp, vertical = 6.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(6.dp)
+                        ) {
+                            RawIcon(RawIconType.SPARK, size = 14.dp, tint = RawColors.Tan)
+                            Text(
+                                text = "AI Assistant",
+                                fontFamily = JetBrainsMonoFamily,
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 11.5.sp,
+                                color = RawColors.Tan
+                            )
+                        }
+                    }
+                }
 
                 Spacer(modifier = Modifier.height(if (isCompact) 10.dp else 14.dp))
 
-                // Big Type headline (.e-h1)
-                Column(modifier = Modifier.vhRise(entranceState, 65)) {
+                Column(modifier = Modifier.vhRise(entranceState, 60)) {
                     Text(
                         text = "Make",
                         style = headlineStyle,
@@ -246,12 +257,11 @@ fun HomeScreen(
 
                 Spacer(modifier = Modifier.height(if (isCompact) 18.dp else 26.dp))
 
-                // Horizontal step chips (.e-chips)
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
                         .horizontalScroll(rememberScrollState())
-                        .vhRise(entranceState, 130),
+                        .vhRise(entranceState, 120),
                     horizontalArrangement = Arrangement.spacedBy(10.dp)
                 ) {
                     HOME_STEP_CHIPS.forEachIndexed { idx, chip ->
@@ -279,7 +289,6 @@ fun HomeScreen(
 
                 Spacer(modifier = Modifier.height(if (isCompact) 14.dp else 18.dp))
 
-                // Subtitle (.e-sub)
                 Text(
                     text = "Voice in, reel out. Nothing leaves the phone.",
                     fontFamily = BricolageFamily,
@@ -289,17 +298,16 @@ fun HomeScreen(
                     color = RawColors.TextMuted,
                     modifier = Modifier
                         .widthIn(max = 290.dp)
-                        .vhRise(entranceState, 195)
+                        .vhRise(entranceState, 180)
                 )
 
                 Spacer(modifier = Modifier.weight(1f))
 
-                // Mascot stage (.e-stage)
                 Box(
                     modifier = Modifier
                         .fillMaxWidth()
                         .height(if (isCompact) 152.dp else 176.dp)
-                        .vhRise(entranceState, 260)
+                        .vhRise(entranceState, 240)
                 ) {
                     Box(
                         modifier = Modifier
@@ -362,28 +370,18 @@ fun HomeScreen(
 
                 Spacer(modifier = Modifier.height(6.dp))
 
-                // Interactive slide-to-start bar (#eslide + #eknob)
                 HomeSlideCreateBar(
-                    shimmerState = shimmerState,
                     animEnabled = animEnabled,
                     onTriggered = onStartNewReel,
-                    modifier = Modifier.vhRise(entranceState, 325)
+                    modifier = Modifier.vhRise(entranceState, 300)
                 )
             }
         }
-
-        FeatheredScrollEdges(
-            scrollState = scrollState,
-            topHeight = 0.dp,
-            bottomHeight = 138.dp,
-            alwaysShowBottom = true
-        )
     }
 }
 
 @Composable
 private fun HomeSlideCreateBar(
-    shimmerState: State<Float>?,
     animEnabled: Boolean,
     onTriggered: (Offset) -> Unit,
     modifier: Modifier = Modifier
@@ -443,27 +441,7 @@ private fun HomeSlideCreateBar(
                 fontSize = 15.5.sp,
                 color = RawColors.TextMuted,
                 maxLines = 1,
-                softWrap = false,
-                modifier = Modifier
-                    .graphicsLayer { compositingStrategy = CompositingStrategy.Offscreen }
-                    .drawWithContent {
-                        drawContent()
-                        if (shimmerState != null) {
-                            val p = shimmerState.value
-                            val band = size.width * 0.45f
-                            val cx = lerp(-band, size.width + band, p)
-                            drawRect(
-                                brush = Brush.horizontalGradient(
-                                    0f to Color.Transparent,
-                                    0.5f to RawColors.Cream,
-                                    1f to Color.Transparent,
-                                    startX = cx - band,
-                                    endX = cx + band
-                                ),
-                                blendMode = BlendMode.SrcAtop
-                            )
-                        }
-                    }
+                softWrap = false
             )
         }
 

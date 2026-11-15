@@ -221,55 +221,7 @@ fun BoxScope.FeatheredScrollEdges(
     bottomHeight: Dp = 112.dp,
     alwaysShowBottom: Boolean = false
 ) {
-    val animEnabled = rememberAnimationsEnabled()
-    val showTop by remember { derivedStateOf { canScrollBackward() } }
-    val showBottom by remember(alwaysShowBottom) {
-        derivedStateOf { alwaysShowBottom || canScrollForward() }
-    }
-    val topAlphaState = animateFloatAsState(
-        targetValue = if (showTop) 1f else 0f,
-        animationSpec = tween(if (animEnabled) 220 else 0),
-        label = "fz_top"
-    )
-    val bottomAlphaState = animateFloatAsState(
-        targetValue = if (showBottom) 1f else 0f,
-        animationSpec = tween(if (animEnabled) 220 else 0),
-        label = "fz_bot"
-    )
-
-    val topBrush = remember {
-        Brush.verticalGradient(
-            0f to RawColors.BgPrimary,
-            0.48f to RawColors.BgPrimary.copy(alpha = 0.78f),
-            1f to Color.Transparent
-        )
-    }
-    val bottomBrush = remember {
-        Brush.verticalGradient(
-            0f to Color.Transparent,
-            0.42f to RawColors.BgPrimary.copy(alpha = 0.78f),
-            0.84f to RawColors.BgPrimary,
-            1f to RawColors.BgPrimary
-        )
-    }
-
-    Box(
-        modifier = Modifier
-            .align(Alignment.TopCenter)
-            .fillMaxWidth()
-            .padding(top = topOffset)
-            .height(topHeight)
-            .graphicsLayer { alpha = topAlphaState.value }
-            .background(topBrush)
-    )
-    Box(
-        modifier = Modifier
-            .align(Alignment.BottomCenter)
-            .fillMaxWidth()
-            .height(bottomHeight)
-            .graphicsLayer { alpha = bottomAlphaState.value }
-            .background(bottomBrush)
-    )
+    // No-op on low-end devices to eliminate GPU overdraw during scrolling
 }
 
 @Composable

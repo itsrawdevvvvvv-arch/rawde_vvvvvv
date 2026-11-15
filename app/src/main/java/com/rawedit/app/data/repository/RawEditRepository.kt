@@ -26,6 +26,20 @@ class RawEditRepository(
     suspend fun getProject(id: Long): ProjectEntity? = projectDao.getById(id)
     suspend fun getVideo(id: Long): VideoEntity? = videoDao.getById(id)
 
+    suspend fun getAllProjectsSync(): List<ProjectEntity> = projectDao.getAllSync()
+    suspend fun getAllVideosSync(): List<VideoEntity> = videoDao.getAllSync()
+    suspend fun getAllAssetsSync(): List<LocalAssetEntity> = assetDao.getAllSync()
+
+    suspend fun restoreDatabaseEntities(
+        projects: List<ProjectEntity>,
+        videos: List<VideoEntity>,
+        assets: List<LocalAssetEntity>
+    ) {
+        if (projects.isNotEmpty()) projectDao.insertAll(projects)
+        if (videos.isNotEmpty()) videoDao.insertAll(videos)
+        if (assets.isNotEmpty()) assetDao.insertAll(assets)
+    }
+
     suspend fun createEmptyProject(title: String = "Untitled Reel"): Long {
         val now = System.currentTimeMillis()
         return projectDao.insert(

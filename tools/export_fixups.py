@@ -276,6 +276,22 @@ def fix_ai_router_compat():
         print("  autoFixLoop onProgress -> onRound")
 
 
+
+def fix_broken_string_literals():
+    """Models keep emitting Kotlin strings broken across a real newline."""
+    fixed_any = False
+    for p in (root / "app/src/main/java").rglob("*.kt"):
+        s = p.read_text()
+        s2 = re.sub(r'(appendLine\("[^"\n]*:)\n(\$\{[^"\n]*\}"\))', r'\1\\n\2', s)
+        s2 = re.sub(r'(\bText\(text = "[^"\n]*:)\n(\$\{[^"\n]*\}"\))', r'\1\\n\2', s2)
+        if s2 != s:
+            p.write_text(s2)
+            fixed_any = True
+            print(f"  broken string literals joined in {p.name}")
+    if not fixed_any:
+        pass
+
+
 STEPS = [
     fix_version,
     fix_navigation,
@@ -287,6 +303,7 @@ STEPS = [
     fix_circle_button_danger,
     fix_card_border_color,
     fix_ai_router_compat,
+    fix_broken_string_literals,
 ]
 
 for step in STEPS:

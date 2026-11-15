@@ -30,6 +30,7 @@ import com.rawedit.app.data.local.LocalAssetEntity
 import com.rawedit.app.data.local.ProjectEntity
 import com.rawedit.app.data.local.UserProfile
 import com.rawedit.app.data.repository.RawEditRepository
+import com.rawedit.app.domain.GeminiWaterfallRouter
 import com.rawedit.app.domain.GroqClient
 import com.rawedit.app.domain.GroqCodec
 import com.rawedit.app.domain.GroqHardLimitException
@@ -41,7 +42,6 @@ import com.rawedit.app.ui.components.RawBottomNavBar
 import com.rawedit.app.ui.components.RawToastBanner
 import com.rawedit.app.ui.motion.RawScreenTransition
 import com.rawedit.app.ui.motion.RawTabMorphTransition
-import com.rawedit.app.domain.GeminiWaterfallRouter
 import com.rawedit.app.ui.screens.AddVoiceScreen
 import com.rawedit.app.ui.screens.AiQuotaDialog
 import com.rawedit.app.ui.screens.AssetLockerScreen
@@ -55,6 +55,7 @@ import com.rawedit.app.ui.screens.OnboardingScreen
 import com.rawedit.app.ui.screens.PaletteScreen
 import com.rawedit.app.ui.screens.ProfileScreen
 import com.rawedit.app.ui.screens.ProfileSetupScreen
+import com.rawedit.app.ui.screens.RawChatbotScreen
 import com.rawedit.app.ui.screens.RenderingScreen
 import com.rawedit.app.ui.screens.ResultScreen
 import com.rawedit.app.ui.screens.WebBrowserAssetScreen
@@ -81,6 +82,7 @@ private sealed interface AppRoute {
     data class CopyPrompt(val projectId: Long) : AppRoute
     data class CodePaste(val projectId: Long) : AppRoute
     data class KeyframeSheet(val projectId: Long) : AppRoute
+    data class Chatbot(val projectId: Long? = null) : AppRoute
     data class Rendering(val projectId: Long) : AppRoute
     data class Result(val videoId: Long, val celebrate: Boolean) : AppRoute
 }
@@ -363,6 +365,9 @@ private fun MainAuthenticatedHost(
                                                     }
                                                 }
                                             }
+                                        },
+                                        onOpenChatbot = {
+                                            pushRoute(AppRoute.Chatbot(projects.firstOrNull()?.id))
                                         }
                                     )
                                 }
@@ -406,6 +411,8 @@ private fun MainAuthenticatedHost(
                                     userProfile = userProfile,
                                     videos = videos,
                                     cacheManager = container.cacheManager,
+                                    userPreferences = container.userPreferences,
+                                    repository = container.repository,
                                     onUpdateName = { newName ->
                                         scope.launch { container.userPreferences.updateUserName(newName) }
                                     },
@@ -414,7 +421,10 @@ private fun MainAuthenticatedHost(
                                     },
                                     onOpenGroqKey = { openGroqDialog(switchMode = false) },
                                     onSwitchGroqKey = { openGroqDialog(switchMode = true) },
-                                    onRefreshGroqQuota = { refreshGroqQuota(silent = false) }
+                                    onRefreshGroqQuota = { refreshGroqQuota(silent = false) },
+                                    onOpenChatbot = {
+                                        pushRoute(AppRoute.Chatbot(projects.firstOrNull()?.id))
+                                    }
                                 )
                             }
                         }
@@ -450,6 +460,7 @@ private fun MainAuthenticatedHost(
                             onOpenCopyPrompt = { pushRoute(AppRoute.CopyPrompt(proj.id)) },
                             onOpenCodePaste = { pushRoute(AppRoute.CodePaste(proj.id)) },
                             onOpenKeyframeSheet = { pushRoute(AppRoute.KeyframeSheet(proj.id)) },
+                            onOpenChatbot = { pushRoute(AppRoute.Chatbot(proj.id)) },
                             onSwipeCreate = { _ ->
                                 pushRoute(AppRoute.Rendering(proj.id))
                             }
@@ -594,6 +605,8 @@ private fun MainAuthenticatedHost(
                             attachedAssets = attachedAssets,
                             palette = activePalette,
                             cacheManager = container.cacheManager,
+                            customPromptNotes = userProfile.customPromptNotes,
+                            onOpenChatbot = { pushRoute(AppRoute.Chatbot(proj.id)) },
                             onBack = ::popRoute
                         )
                     }
@@ -675,6 +688,22 @@ private fun MainAuthenticatedHost(
                             }
                         )
                     }
+                }
+
+                is AppRoute.Chatbot -> {
+                    RawChatbotScreen(
+                        userProfile = userProfile,
+                        allProjects = projects,
+                        initialProjectId = route.projectId,
+                        allAssets = allAssets,
+                        activePalette = activePalette,
+                        cacheManager = container.cacheManager,
+                        userPreferences = container.userPreferences,
+                        repository = container.repository,
+                        geminiRouter = geminiRouter,
+                        onOpenApiKeySettings = { openGroqDialog(switchMode = false) },
+                        onBack = ::popRoute
+                    )
                 }
 
                 is AppRoute.Rendering -> {
@@ -799,14 +828,14 @@ private fun MainAuthenticatedHost(
                     GroqLimiter.reset()
                     container.userPreferences.clearGroqSession()
                     showGroqKeyDialog = false
-                    hostToastMsg = "Groq API key cleared"
+                    hostToastMsg = "Groq key removed"
                 }
             },
             onClearGeminiKey = {
                 scope.launch {
                     container.userPreferences.clearGeminiSession()
                     showGroqKeyDialog = false
-                    hostToastMsg = "Gemini API key cleared"
+                    hostToastMsg = "Gemini key removed"
                 }
             },
             onDismiss = { showGroqKeyDialog = false }

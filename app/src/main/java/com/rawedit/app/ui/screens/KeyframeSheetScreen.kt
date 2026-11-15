@@ -3,11 +3,9 @@ package com.rawedit.app.ui.screens
 import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
-import android.content.Intent
 import android.os.Build
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
-import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.animateFloat
@@ -19,46 +17,40 @@ import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.detectDragGestures
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.lazy.grid.GridCells
-import androidx.compose.foundation.lazy.grid.GridItemSpan
-import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
-import androidx.compose.foundation.lazy.grid.itemsIndexed
-import androidx.compose.foundation.lazy.grid.rememberLazyGridState
+import androidx.compose.foundation.pager.HorizontalPager
+import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.CircularProgressIndicator
-import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.State
-import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
@@ -70,7 +62,12 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.StrokeJoin
+import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalHapticFeedback
@@ -79,33 +76,17 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import androidx.compose.ui.window.Dialog
-import androidx.compose.ui.window.DialogProperties
-import androidx.core.content.FileProvider
 import coil.compose.AsyncImage
 import coil.request.CachePolicy
 import coil.request.ImageRequest
 import com.rawedit.app.data.CacheManager
 import com.rawedit.app.data.local.ProjectEntity
 import com.rawedit.app.data.local.UserProfile
-import com.rawedit.app.domain.CodeValidator
-import com.rawedit.app.domain.GeminiWaterfallRouter
-import com.rawedit.app.domain.GroqAutoFixStatus
-import com.rawedit.app.domain.GroqClient
-import com.rawedit.app.domain.GroqCodec
-import com.rawedit.app.domain.GroqCooldownException
-import com.rawedit.app.domain.GroqHardLimitException
-import com.rawedit.app.domain.GroqLimitKind
-import com.rawedit.app.domain.GroqLimiter
-import com.rawedit.app.domain.GroqPromptTooLargeException
-import com.rawedit.app.domain.GroqReviewResult
-import com.rawedit.app.domain.GroqUi
-import com.rawedit.app.domain.UnifiedAiRouter
-import com.rawedit.app.domain.HtmlVersionStore
+import com.rawedit.app.domain.IssueCircle
 import com.rawedit.app.domain.KeyframeSample
 import com.rawedit.app.domain.KeyframeSheetGenerator
 import com.rawedit.app.domain.KeyframeSheetResult
-import com.rawedit.app.domain.SheetReviewResult
+import com.rawedit.app.domain.PointNorm
 import com.rawedit.app.domain.SheetSamplingMode
 import com.rawedit.app.ui.components.BigPrimaryButton
 import com.rawedit.app.ui.components.CircleActionButton
@@ -116,9 +97,6 @@ import com.rawedit.app.ui.icons.PixelMascotKind
 import com.rawedit.app.ui.icons.RawIcon
 import com.rawedit.app.ui.icons.RawIconType
 import com.rawedit.app.ui.icons.RawPixelMascot
-import com.rawedit.app.ui.motion.FeatheredScrollEdges
-import com.rawedit.app.ui.motion.KineticHeading
-import com.rawedit.app.ui.motion.RawEasings
 import com.rawedit.app.ui.motion.RawPressButton
 import com.rawedit.app.ui.motion.rememberAnimationsEnabled
 import com.rawedit.app.ui.theme.BricolageFamily
@@ -133,6 +111,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.io.File
 import java.util.Locale
+import kotlin.math.hypot
 
 @Composable
 fun KeyframeSheetScreen(
@@ -154,10 +133,8 @@ fun KeyframeSheetScreen(
     val context = LocalContext.current
     val haptic = LocalHapticFeedback.current
     val scope = rememberCoroutineScope()
-    val geminiRouter = remember { GeminiWaterfallRouter(context) }
-    val hasActiveAi = (userProfile?.hasActiveAiKey ?: false) || apiKey.isNotBlank()
     val animEnabled = rememberAnimationsEnabled()
-    val gridState = rememberLazyGridState()
+    val mainScroll = rememberScrollState()
 
     var resolvedHtml by remember(project.id) {
         mutableStateOf(if (project.code.startsWith(CacheManager.CODE_FILE_PREFIX)) "" else project.code)
@@ -192,7 +169,6 @@ fun KeyframeSheetScreen(
     var selectedModeIndex by remember { mutableIntStateOf(0) }
     val selectedMode = SheetSamplingMode.entries[selectedModeIndex]
     var captureGen by remember { mutableIntStateOf(1) }
-    var flaggedOnly by remember { mutableStateOf(false) }
 
     var capturing by remember { mutableStateOf(true) }
     var progressDone by remember { mutableIntStateOf(0) }
@@ -200,71 +176,42 @@ fun KeyframeSheetScreen(
     var progressTimeSec by remember { mutableStateOf(0.0) }
     var livePreviewPath by remember { mutableStateOf<String?>(null) }
     var sheetResult by remember { mutableStateOf<KeyframeSheetResult?>(null) }
+    var editableSamples by remember { mutableStateOf<List<KeyframeSample>>(emptyList()) }
     var captureError by remember { mutableStateOf<String?>(null) }
 
-    var inspectingIndex by remember { mutableStateOf<Int?>(null) }
-
-    var aiBusy by remember { mutableStateOf(false) }
-    var aiAction by remember { mutableStateOf("") }
-    var fixProgress by remember { mutableStateOf("") }
-    var undoTick by remember { mutableIntStateOf(0) }
-    val versions = remember(resolvedHtml.hashCode(), undoTick) { HtmlVersionStore.list(context, project.id) }
-    var reviewResult by remember { mutableStateOf<SheetReviewResult?>(null) }
-    var lastReview by remember(project.id, resolvedHtml.hashCode()) { mutableStateOf<GroqReviewResult?>(null) }
-    var needsStructuralPrompt by remember { mutableStateOf(false) }
-    var aiError by remember { mutableStateOf<String?>(null) }
-
-    val groqUi by GroqLimiter.ui.collectAsState()
-    val limiterNow by produceState(System.currentTimeMillis(), groqUi) {
-        while (groqUi !is GroqUi.Ready) {
-            value = System.currentTimeMillis()
-            delay(1000)
-        }
-    }
-    val (limiterLabel, canTapAi) = when (val s = groqUi) {
-        GroqUi.Ready -> {
-            if (quotaExhausted) "Daily limit \u2022 Switch key" to false else "AI ready" to true
-        }
-        is GroqUi.Cooling -> {
-            val sec = ((s.untilMs - limiterNow) / 1000L).coerceAtLeast(0L)
-            if (sec == 0L) {
-                GroqLimiter.markReadyIfNotHardBlocked()
-                "AI ready" to true
-            } else {
-                "Cooling ${sec}s" to false
-            }
-        }
-        is GroqUi.HardBlocked -> {
-            if (s.untilMs <= limiterNow) {
-                GroqLimiter.currentHardBlock(limiterNow)
-                "AI ready" to true
-            } else {
-                val msg = if (s.kind == GroqLimitKind.CREDITS) {
-                    "Credits out \u2022 Switch key"
-                } else {
-                    "Daily limit \u2022 resets ${GroqCodec.formatDurationShort(s.untilMs - limiterNow)}"
-                }
-                msg to false
-            }
-        }
-    }
-    val isHardBlockedUi = groqUi is GroqUi.HardBlocked || (quotaExhausted && groqUi is GroqUi.Ready)
+    var circleDrawEnabled by remember { mutableStateOf(false) }
+    val activeDragPoints = remember { mutableStateListOf<PointNorm>() }
 
     var exportBusy by remember { mutableStateOf(false) }
     var toastMsg by remember { mutableStateOf<String?>(null) }
     var promptCopied by remember { mutableStateOf(false) }
-    var showPatchDialog by remember { mutableStateOf(false) }
-    var patchDraft by remember { mutableStateOf("") }
-    var patchBusy by remember { mutableStateOf(false) }
-    var patchError by remember { mutableStateOf<String?>(null) }
     var pendingPdfFile by remember { mutableStateOf<File?>(null) }
     var pendingZipFile by remember { mutableStateOf<File?>(null) }
 
     LaunchedEffect(toastMsg) {
         if (toastMsg != null) {
-            delay(1900)
+            delay(2000)
             toastMsg = null
         }
+    }
+
+    fun updateSampleInList(sampleIndex: Int, transform: (KeyframeSample) -> KeyframeSample) {
+        val next = editableSamples.map { s ->
+            if (s.index == sampleIndex) {
+                val updated = transform(s)
+                if (updated.circles.isNotEmpty()) {
+                    scope.launch(Dispatchers.IO) {
+                        KeyframeSheetGenerator.saveAnnotatedThumbnail(updated, cacheManager.sheetTempDir(project.id))
+                    }
+                }
+                updated
+            } else s
+        }
+        editableSamples = next
+        sheetResult = sheetResult?.copy(
+            samples = next,
+            warningCount = next.count { it.isFlagged }
+        )
     }
 
     val pdfSaveLauncher = rememberLauncherForActivityResult(
@@ -279,7 +226,7 @@ fun KeyframeSheetScreen(
                 exportBusy = false
                 res.onSuccess {
                     haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-                    toastMsg = "PDF saved: ${safeFileBase}_contact_sheet.pdf"
+                    toastMsg = "PDF saved"
                 }.onFailure { err ->
                     toastMsg = err.message ?: "Could not save PDF"
                 }
@@ -299,7 +246,7 @@ fun KeyframeSheetScreen(
                 exportBusy = false
                 res.onSuccess {
                     haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-                    toastMsg = "ZIP saved: ${safeFileBase}_contact_sheet.zip"
+                    toastMsg = "ZIP saved"
                 }.onFailure { err ->
                     toastMsg = err.message ?: "Could not save ZIP"
                 }
@@ -322,15 +269,12 @@ fun KeyframeSheetScreen(
         capturing = true
         captureError = null
         sheetResult = null
-        reviewResult = null
-        needsStructuralPrompt = false
-        aiError = null
+        editableSamples = emptyList()
         progressDone = 0
         progressTotal = 0
         progressTimeSec = 0.0
         livePreviewPath = null
-        flaggedOnly = false
-        inspectingIndex = null
+        circleDrawEnabled = false
 
         try {
             val result = KeyframeSheetGenerator.captureKeyframes(
@@ -349,6 +293,7 @@ fun KeyframeSheetScreen(
                 cancelled = { isScreenDisposed || !this@LaunchedEffect.isActive }
             )
             sheetResult = result
+            editableSamples = result.samples
             capturing = false
         } catch (_: CancellationException) {
         } catch (t: Throwable) {
@@ -359,42 +304,26 @@ fun KeyframeSheetScreen(
         }
     }
 
-    fun exportPdf(share: Boolean) {
-        val result = sheetResult ?: return
-        if (exportBusy) return
+    fun downloadPdf() {
+        if (editableSamples.isEmpty() || exportBusy) return
         exportBusy = true
         scope.launch {
             runCatching {
                 val outName = "${safeFileBase}_contact_sheet.pdf"
                 val outFile = File(cacheManager.sharedPacksDir, outName)
                 KeyframeSheetGenerator.buildPdfContactSheet(
-                    samples = result.samples,
+                    samples = editableSamples,
                     title = project.title.ifBlank { "Untitled Reel" },
                     outPdfFile = outFile
                 )
                 outFile to outName
             }.onSuccess { (pdfFile, fileName) ->
-                if (share) {
-                    exportBusy = false
-                    val uri = FileProvider.getUriForFile(
-                        context,
-                        "${context.packageName}.fileprovider",
-                        pdfFile
-                    )
-                    val intent = Intent(Intent.ACTION_SEND).apply {
-                        type = "application/pdf"
-                        putExtra(Intent.EXTRA_STREAM, uri)
-                        putExtra(Intent.EXTRA_SUBJECT, fileName)
-                        clipData = ClipData.newRawUri(fileName, uri)
-                        addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
-                    }
-                    context.startActivity(Intent.createChooser(intent, "Share PDF Contact Sheet"))
-                } else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
                     val dlRes = cacheManager.saveFileToDownloads(pdfFile, fileName, "application/pdf")
                     exportBusy = false
                     dlRes.onSuccess {
                         haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-                        toastMsg = "contact-sheet.pdf saved"
+                        toastMsg = "PDF saved to Downloads"
                     }.onFailure {
                         pendingPdfFile = pdfFile
                         pdfSaveLauncher.launch(fileName)
@@ -411,43 +340,28 @@ fun KeyframeSheetScreen(
         }
     }
 
-    fun exportZip(share: Boolean) {
+    fun downloadZip() {
         val result = sheetResult ?: return
-        if (exportBusy) return
+        if (editableSamples.isEmpty() || exportBusy) return
         exportBusy = true
         scope.launch {
             runCatching {
                 val outName = "${safeFileBase}_contact_sheet.zip"
                 val outFile = File(cacheManager.sharedPacksDir, outName)
                 KeyframeSheetGenerator.buildContactSheetZip(
-                    samples = result.samples,
+                    samples = editableSamples,
                     title = project.title.ifBlank { "Untitled Reel" },
                     durationSec = result.durationSec,
                     outZipFile = outFile
                 )
                 outFile to outName
             }.onSuccess { (zipFile, fileName) ->
-                if (share) {
-                    exportBusy = false
-                    val uri = FileProvider.getUriForFile(
-                        context,
-                        "${context.packageName}.fileprovider",
-                        zipFile
-                    )
-                    val intent = Intent(Intent.ACTION_SEND).apply {
-                        type = "application/zip"
-                        putExtra(Intent.EXTRA_STREAM, uri)
-                        putExtra(Intent.EXTRA_SUBJECT, fileName)
-                        clipData = ClipData.newRawUri(fileName, uri)
-                        addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
-                    }
-                    context.startActivity(Intent.createChooser(intent, "Share Contact Sheet ZIP"))
-                } else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
                     val dlRes = cacheManager.saveFileToDownloads(zipFile, fileName, "application/zip")
                     exportBusy = false
                     dlRes.onSuccess {
                         haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-                        toastMsg = "frames.zip saved"
+                        toastMsg = "ZIP saved to Downloads"
                     }.onFailure {
                         pendingZipFile = zipFile
                         zipSaveLauncher.launch(fileName)
@@ -469,35 +383,32 @@ fun KeyframeSheetScreen(
             .fillMaxSize()
             .background(RawColors.BgPrimary)
             .statusBarsPadding()
+            .imePadding()
     ) {
         Column(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(horizontal = 18.dp),
-            verticalArrangement = Arrangement.spacedBy(10.dp)
+            verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
+            // Minimal Top Bar (Contact Sheet only)
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .height(62.dp),
+                    .height(58.dp),
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                CircleActionButton(icon = RawIconType.BACK, onClick = onBack, size = 48.dp)
-                RawPixelMascot(kind = PixelMascotKind.LENS_BOT, size = 40.dp)
+                CircleActionButton(icon = RawIconType.BACK, onClick = onBack, size = 44.dp)
+                Text(
+                    text = "Contact Sheet",
+                    fontFamily = BricolageFamily,
+                    fontWeight = FontWeight.Bold,
+                    fontSize = 20.sp,
+                    color = RawColors.TextPrimary
+                )
+                RawPixelMascot(kind = PixelMascotKind.LENS_BOT, size = 36.dp)
             }
-
-            KineticHeading(
-                words = listOf("Contact", "sheet"),
-                style = RawTypography.headlineLarge,
-                highlightLastWord = true
-            )
-
-            Text(
-                text = "Live DOM auto-fit ran on every frame, fully on-device. Zero API cost.",
-                style = RawTypography.bodyLarge.copy(fontSize = 15.5.sp),
-                color = RawColors.TextMuted
-            )
 
             MorphingFilterChips(
                 options = SheetSamplingMode.entries.map { it.label },
@@ -531,9 +442,7 @@ fun KeyframeSheetScreen(
                                 animationSpec = infiniteRepeatable(tween(1500, easing = LinearEasing), RepeatMode.Restart),
                                 label = "scan_pos"
                             )
-                        } else {
-                            null
-                        }
+                        } else null
                         val thumb = livePreviewPath
                         val thumbExists = remember(thumb) { thumb != null && File(thumb).exists() }
 
@@ -611,7 +520,7 @@ fun KeyframeSheetScreen(
                             Column(
                                 modifier = Modifier
                                     .fillMaxWidth()
-                                    .clip(RoundedCornerShape(28.dp))
+                                    .clip(RoundedCornerShape(24.dp))
                                     .background(RawColors.CardSurface)
                                     .padding(18.dp)
                             ) {
@@ -622,9 +531,9 @@ fun KeyframeSheetScreen(
                                 ) {
                                     Text(
                                         text = if (progressTotal > 0) {
-                                            "Capturing & auto-fitting $progressDone / $progressTotal"
+                                            "Capturing $progressDone / $progressTotal"
                                         } else {
-                                            "Preparing bundled fonts & auto-fit..."
+                                            "Preparing frames..."
                                         },
                                         style = RawTypography.labelMedium
                                     )
@@ -672,20 +581,18 @@ fun KeyframeSheetScreen(
                                 text = "Capture stopped",
                                 fontFamily = BricolageFamily,
                                 fontWeight = FontWeight.Bold,
-                                fontSize = 30.sp,
-                                lineHeight = 32.sp,
-                                letterSpacing = (-0.8).sp,
+                                fontSize = 28.sp,
                                 color = RawColors.TextPrimary
                             )
                             Text(
                                 text = captureError.orEmpty(),
-                                style = RawTypography.bodyLarge.copy(fontSize = 15.5.sp),
+                                style = RawTypography.bodyLarge.copy(fontSize = 15.sp),
                                 color = RawColors.TextMuted
                             )
                             Spacer(modifier = Modifier.height(6.dp))
                             BigPrimaryButton(
                                 text = "Retry capture",
-                                height = 58.dp,
+                                height = 56.dp,
                                 leadingIcon = RawIconType.REFRESH,
                                 onClick = { captureGen++ },
                                 modifier = Modifier.width(210.dp)
@@ -695,627 +602,186 @@ fun KeyframeSheetScreen(
 
                     sheetResult != null -> {
                         val res = sheetResult!!
-                        val flaggedSamples = remember(res.samples) {
-                            res.samples.filter { it.warnings.isNotEmpty() || it.autoFitCount > 0 }
-                        }
-                        val visibleSamples = if (flaggedOnly) flaggedSamples else res.samples
+                        val pagerState = rememberPagerState(
+                            initialPage = 0,
+                            pageCount = { editableSamples.size.coerceAtLeast(1) }
+                        )
 
-                        LazyVerticalGrid(
-                            state = gridState,
-                            columns = GridCells.Fixed(2),
-                            modifier = Modifier.fillMaxSize(),
-                            contentPadding = PaddingValues(top = 4.dp, bottom = 118.dp),
-                            verticalArrangement = Arrangement.spacedBy(10.dp),
-                            horizontalArrangement = Arrangement.spacedBy(10.dp)
+                        Column(
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .verticalScroll(mainScroll)
+                                .padding(bottom = 104.dp),
+                            verticalArrangement = Arrangement.spacedBy(14.dp)
                         ) {
-                            // Summary & Flagged Filter Header
-                            item(span = { GridItemSpan(2) }) {
+                            if (editableSamples.isNotEmpty()) {
+                                // Clean Instagram-Style Carousel Card
                                 Column(
                                     modifier = Modifier
                                         .fillMaxWidth()
-                                        .clip(RoundedCornerShape(28.dp))
+                                        .clip(RoundedCornerShape(26.dp))
                                         .background(RawColors.CardSurface)
-                                        .padding(18.dp),
+                                        .padding(14.dp),
                                     verticalArrangement = Arrangement.spacedBy(12.dp)
                                 ) {
+                                    HorizontalPager(
+                                        state = pagerState,
+                                        userScrollEnabled = !circleDrawEnabled,
+                                        modifier = Modifier.fillMaxWidth()
+                                    ) { pageIdx ->
+                                        val sample = editableSamples.getOrNull(pageIdx) ?: return@HorizontalPager
+                                        MinimalCarouselFrameSlide(
+                                            sample = sample,
+                                            pageIdx = pageIdx,
+                                            totalPages = editableSamples.size,
+                                            cacheKeyTag = "${captureGen}_${selectedMode.name}",
+                                            circleDrawEnabled = circleDrawEnabled,
+                                            activeDragPoints = activeDragPoints,
+                                            onToggleFlagged = { targetFlagged ->
+                                                haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                                                updateSampleInList(sample.index) { old ->
+                                                    old.copy(isFlagged = targetFlagged)
+                                                }
+                                                if (!targetFlagged) circleDrawEnabled = false
+                                            },
+                                            onToggleCircleDrawMode = {
+                                                if (!sample.isFlagged) {
+                                                    updateSampleInList(sample.index) { it.copy(isFlagged = true) }
+                                                }
+                                                circleDrawEnabled = !circleDrawEnabled
+                                            },
+                                            onAddCircle = { newCircle ->
+                                                updateSampleInList(sample.index) { old ->
+                                                    old.copy(
+                                                        isFlagged = true,
+                                                        circles = old.circles + newCircle
+                                                    )
+                                                }
+                                                toastMsg = "Issue circled"
+                                            },
+                                            onUndoCircle = {
+                                                updateSampleInList(sample.index) { old ->
+                                                    old.copy(circles = old.circles.dropLast(1))
+                                                }
+                                            },
+                                            onClearCircles = {
+                                                updateSampleInList(sample.index) { old ->
+                                                    old.copy(circles = emptyList())
+                                                }
+                                            }
+                                        )
+                                    }
+
+                                    // Minimal Prev / Dots / Next
                                     Row(
                                         modifier = Modifier.fillMaxWidth(),
                                         horizontalArrangement = Arrangement.SpaceBetween,
                                         verticalAlignment = Alignment.CenterVertically
                                     ) {
-                                        Text(
-                                            text = "${res.samples.size} frames  \u2022  ${String.format(Locale.US, "%.1fs", res.durationSec)}",
-                                            fontFamily = BricolageFamily,
-                                            fontWeight = FontWeight.Bold,
-                                            fontSize = 20.sp,
-                                            color = RawColors.TextPrimary
+                                        CircleActionButton(
+                                            icon = RawIconType.CHEVRON_LEFT,
+                                            size = 36.dp,
+                                            enabled = pagerState.currentPage > 0,
+                                            onClick = {
+                                                scope.launch {
+                                                    pagerState.animateScrollToPage((pagerState.currentPage - 1).coerceAtLeast(0))
+                                                }
+                                            }
                                         )
-                                        val isClean = res.warningCount == 0 && res.totalAutoFits == 0
-                                        val badgeLabel = when {
-                                            res.warningCount > 0 -> "${res.warningCount} WARN"
-                                            res.totalAutoFits > 0 -> "${res.totalAutoFits} AUTO-FIT"
-                                            else -> "CLEAN"
-                                        }
-                                        Box(
-                                            modifier = Modifier
-                                                .clip(CircleShape)
-                                                .background(if (isClean) RawColors.AccentSoft else RawColors.RaisedCard)
-                                                .padding(horizontal = 12.dp, vertical = 6.dp)
-                                        ) {
-                                            Text(
-                                                text = badgeLabel,
-                                                fontFamily = JetBrainsMonoFamily,
-                                                fontWeight = FontWeight.SemiBold,
-                                                fontSize = 11.5.sp,
-                                                style = TextStyle(fontFeatureSettings = "tnum"),
-                                                color = if (isClean) RawColors.Tan else RawColors.TextMuted
-                                            )
-                                        }
-                                    }
 
-                                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                                        SheetTogglePill(
-                                            label = "All (${res.samples.size})",
-                                            selected = !flaggedOnly,
-                                            onClick = { flaggedOnly = false }
-                                        )
-                                        SheetTogglePill(
-                                            label = "Flagged (${flaggedSamples.size})",
-                                            selected = flaggedOnly,
-                                            onClick = { flaggedOnly = true }
+                                        Row(
+                                            horizontalArrangement = Arrangement.spacedBy(5.dp),
+                                            verticalAlignment = Alignment.CenterVertically
+                                        ) {
+                                            val total = editableSamples.size
+                                            val cur = pagerState.currentPage
+                                            val windowStart = (cur - 4).coerceAtLeast(0)
+                                            val windowEnd = (windowStart + 8).coerceAtMost(total - 1)
+                                            for (idx in windowStart..windowEnd) {
+                                                val s = editableSamples[idx]
+                                                val isActiveDot = idx == cur
+                                                Box(
+                                                    modifier = Modifier
+                                                        .size(if (isActiveDot) 8.dp else 6.dp)
+                                                        .clip(CircleShape)
+                                                        .background(
+                                                            when {
+                                                                isActiveDot -> RawColors.Tan
+                                                                s.isFlagged -> RawColors.ErrorCoral
+                                                                else -> RawColors.TextMuted.copy(alpha = 0.35f)
+                                                            }
+                                                        )
+                                                )
+                                            }
+                                        }
+
+                                        CircleActionButton(
+                                            icon = RawIconType.CHEVRON_RIGHT,
+                                            size = 36.dp,
+                                            enabled = pagerState.currentPage < editableSamples.lastIndex,
+                                            onClick = {
+                                                scope.launch {
+                                                    pagerState.animateScrollToPage((pagerState.currentPage + 1).coerceAtMost(editableSamples.lastIndex))
+                                                }
+                                            }
                                         )
                                     }
                                 }
                             }
 
-                            // Groq Two-Stage AI Frame Inspector Card (optional)
-                            item(span = { GridItemSpan(2) }) {
-                                Column(
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .clip(RoundedCornerShape(28.dp))
-                                        .background(RawColors.CardSurface)
-                                        .padding(18.dp),
-                                    verticalArrangement = Arrangement.spacedBy(10.dp)
+                            // ONLY 3 Export Actions: Copy Prompt, Download ZIP, Download PDF
+                            Column(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clip(RoundedCornerShape(24.dp))
+                                    .background(RawColors.CardSurface)
+                                    .padding(16.dp),
+                                verticalArrangement = Arrangement.spacedBy(10.dp)
+                            ) {
+                                BigPrimaryButton(
+                                    text = if (promptCopied) "Prompt copied!" else "Copy prompt",
+                                    height = 50.dp,
+                                    leadingIcon = if (promptCopied) RawIconType.CHECK else RawIconType.COPY,
+                                    onClick = {
+                                        val fixPrompt = KeyframeSheetGenerator.buildFixPrompt(
+                                            samples = editableSamples,
+                                            title = project.title.ifBlank { "Untitled Reel" },
+                                            durationSec = res.durationSec,
+                                            htmlCode = resolvedHtml
+                                        )
+                                        val cb = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+                                        cb.setPrimaryClip(ClipData.newPlainText("raw_edit fix prompt", fixPrompt))
+                                        haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                                        promptCopied = true
+                                        toastMsg = "Prompt copied"
+                                        scope.launch {
+                                            delay(2000)
+                                            promptCopied = false
+                                        }
+                                    }
+                                )
+
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.spacedBy(10.dp)
                                 ) {
-                                    Row(
-                                        modifier = Modifier.fillMaxWidth(),
-                                        horizontalArrangement = Arrangement.SpaceBetween,
-                                        verticalAlignment = Alignment.CenterVertically
-                                    ) {
-                                            Row(
-                                            verticalAlignment = Alignment.CenterVertically,
-                                            horizontalArrangement = Arrangement.spacedBy(8.dp),
-                                            modifier = Modifier.weight(1f)
-                                        ) {
-                                            RawIcon(RawIconType.SPARK, size = 18.dp, tint = RawColors.Tan)
-                                            Column {
-                                                Text(
-                                                    text = "AI Frame Review & Auto-Fix",
-                                                    fontFamily = BricolageFamily,
-                                                    fontWeight = FontWeight.Bold,
-                                                    fontSize = 18.sp,
-                                                    color = RawColors.TextPrimary
-                                                )
-                                                Text(
-                                                    text = when {
-                                                        !hasActiveAi -> "Optional \u2022 Add AI key"
-                                                        userProfile != null -> userProfile.quotaSummaryText()
-                                                        groqUi is GroqUi.Cooling -> "$limiterLabel \u2022 $quotaBadgeText"
-                                                        isHardBlockedUi -> limiterLabel
-                                                        else -> "$limiterLabel \u2022 $quotaBadgeText"
-                                                    },
-                                                    style = RawTypography.labelMedium,
-                                                    color = when {
-                                                        isHardBlockedUi && userProfile?.hasGeminiKey != true -> RawColors.ErrorCoral
-                                                        groqUi is GroqUi.Cooling -> RawColors.Tan
-                                                        else -> RawColors.TextMuted
-                                                    }
-                                                )
-                                            }
-                                        }
-                                        if (isHardBlockedUi && userProfile?.hasGeminiKey != true) {
-                                            Box(
-                                                modifier = Modifier
-                                                    .clip(CircleShape)
-                                                    .background(RawColors.ErrorSoft)
-                                                    .border(1.dp, RawColors.ErrorBorder, CircleShape)
-                                                    .clickable(onClick = onSwitchGroqKey)
-                                                    .padding(horizontal = 12.dp, vertical = 7.dp)
-                                            ) {
-                                                Text(
-                                                    text = "Switch",
-                                                    fontFamily = BricolageFamily,
-                                                    fontWeight = FontWeight.Bold,
-                                                    fontSize = 12.5.sp,
-                                                    color = RawColors.ErrorCoral
-                                                )
-                                            }
-                                        } else {
-                                            CircleActionButton(
-                                                icon = RawIconType.KEY,
-                                                size = 38.dp,
-                                                backgroundColor = if (apiKey.isNotBlank()) RawColors.AccentSoft else RawColors.RaisedCard,
-                                                iconTint = if (apiKey.isNotBlank()) RawColors.Tan else RawColors.TextMuted,
-                                                onClick = onOpenGroqKey
-                                            )
-                                        }
-                                    }
-
-                                    Row(
-                                        modifier = Modifier.fillMaxWidth(),
-                                        horizontalArrangement = Arrangement.spacedBy(10.dp)
-                                    ) {
-                                        RawSecondaryButton(
-                                            text = if (aiBusy && aiAction == "review") "Reviewing..." else "AI review",
-                                            height = 48.dp,
-                                            enabled = !aiBusy && (!hasActiveAi || canTapAi || isHardBlockedUi || userProfile?.hasGeminiKey == true),
-                                            leadingIcon = RawIconType.LENS,
-                                            onClick = {
-                                                if (!hasActiveAi) {
-                                                    onOpenGroqKey()
-                                                    return@RawSecondaryButton
-                                                }
-                                                if (isHardBlockedUi && userProfile?.hasGeminiKey != true) {
-                                                    onSwitchGroqKey()
-                                                    return@RawSecondaryButton
-                                                }
-                                                if (!canTapAi && userProfile?.hasGeminiKey != true) {
-                                                    toastMsg = limiterLabel
-                                                    return@RawSecondaryButton
-                                                }
-                                                aiBusy = true
-                                                aiAction = "review"
-                                                aiError = null
-                                                needsStructuralPrompt = false
-                                                scope.launch {
-                                                    val profile = userProfile ?: UserProfile(geminiApiKey = apiKey)
-                                                    val review = UnifiedAiRouter.reviewContactSheet(
-                                                        geminiRouter = geminiRouter,
-                                                        userProfile = profile,
-                                                        samples = res.samples,
-                                                        durationSec = res.durationSec,
-                                                        htmlHash = resolvedHtml.hashCode()
-                                                    )
-                                                    aiBusy = false
-                                                    aiAction = ""
-                                                    review.onSuccess { r ->
-                                                        onRefreshGroqQuota()
-                                                        lastReview = r.cachedReview
-                                                        reviewResult = r
-                                                        toastMsg = if (r.issues.isEmpty()) r.summary else "Found ${r.issues.size} visual issue(s)"
-                                                    }.onFailure { err ->
-                                                        when (err) {
-                                                            is GroqCooldownException -> {
-                                                                val msg = "Rate window full \u2014 retry in ${err.waitSec}s"
-                                                                aiError = msg
-                                                                toastMsg = msg
-                                                            }
-                                                            is GroqHardLimitException -> {
-                                                                aiError = err.message
-                                                            }
-                                                            is GroqPromptTooLargeException -> {
-                                                                aiError = "Too many flags to send; fix the top ones first."
-                                                                toastMsg = "Too many flags to send; fix the top ones first"
-                                                            }
-                                                            else -> {
-                                                                aiError = err.message ?: "AI inspection failed."
-                                                            }
-                                                        }
-                                                    }
-                                                }
-                                            },
-                                            modifier = Modifier.weight(1f)
-                                        )
-
-                                        BigPrimaryButton(
-                                            text = if (aiBusy && aiAction == "fix") fixProgress.ifBlank { "Patching..." } else "Auto-fix",
-                                            height = 48.dp,
-                                            enabled = !aiBusy && (!hasActiveAi || canTapAi || isHardBlockedUi || userProfile?.hasGeminiKey == true),
-                                            leadingIcon = RawIconType.SPARK,
-                                            containerColor = RawColors.Tan,
-                                            contentColor = RawColors.Ink,
-                                            onClick = {
-                                                if (!hasActiveAi) {
-                                                    onOpenGroqKey()
-                                                    return@BigPrimaryButton
-                                                }
-                                                if (isHardBlockedUi && userProfile?.hasGeminiKey != true) {
-                                                    onSwitchGroqKey()
-                                                    return@BigPrimaryButton
-                                                }
-                                                if (!canTapAi && userProfile?.hasGeminiKey != true) {
-                                                    toastMsg = limiterLabel
-                                                    return@BigPrimaryButton
-                                                }
-                                                aiBusy = true
-                                                aiAction = "fix"
-                                                aiError = null
-                                                needsStructuralPrompt = false
-                                                scope.launch {
-                                                    val htmlBeforeFix = resolvedHtml
-                                                    fixProgress = "Patching..."
-                                                    val profile = userProfile ?: UserProfile(geminiApiKey = apiKey)
-                                                    val outcomeRes = UnifiedAiRouter.autoFixLoop(
-                                                        geminiRouter = geminiRouter,
-                                                        userProfile = profile,
-                                                        samples = res.samples,
-                                                        htmlCode = htmlBeforeFix,
-                                                        durationSec = res.durationSec,
-                                                        lastReview = lastReview,
-                                                        maxRounds = 3,
-                                                        validator = { candidateHtml ->
-                                                            CodeValidator.validateFull(context, cacheManager, candidateHtml)
-                                                        },
-                                                        recapture = { candidateHtml ->
-                                                            fixProgress = "Verifying..."
-                                                            KeyframeSheetGenerator.captureKeyframes(
-                                                                context = context,
-                                                                cacheManager = cacheManager,
-                                                                projectId = project.id,
-                                                                rawHtml = candidateHtml,
-                                                                durationSec = res.durationSec,
-                                                                mode = selectedMode,
-                                                                onProgress = { _, _, _, _ -> },
-                                                                cancelled = { isScreenDisposed }
-                                                            ).samples
-                                                        },
-                                                        onRound = { round, issuesNow ->
-                                                            fixProgress = "Round $round: $issuesNow issues left"
-                                                        }
-                                                    )
-                                                    aiBusy = false
-                                                    aiAction = ""
-                                                    fixProgress = ""
-                                                    outcomeRes.onSuccess { outcome ->
-                                                        onRefreshGroqQuota()
-                                                        when (outcome.status) {
-                                                            GroqAutoFixStatus.APPLIED -> {
-                                                                val validated = outcome.validation
-                                                                if (validated != null) {
-                                                                    HtmlVersionStore.save(context, project.id, htmlBeforeFix, "Before AI fix")
-                                                                    resolvedHtml = validated.cleanedHtml
-                                                                    onApplyFixedHtml(validated.cleanedHtml, validated.durationSec)
-                                                                    undoTick++
-                                                                }
-                                                                reviewResult = null
-                                                                lastReview = null
-                                                                aiError = null
-                                                                needsStructuralPrompt = false
-                                                                toastMsg = "Fixed: ${outcome.issuesBefore} \u2192 ${outcome.issuesAfter} issues in ${outcome.roundsRun} round(s), ${outcome.editsApplied} edits"
-                                                            }
-                                                            GroqAutoFixStatus.NOTHING_TO_FIX -> {
-                                                                aiError = null
-                                                                needsStructuralPrompt = false
-                                                                toastMsg = outcome.failureSummary.ifBlank { "No issues found." }
-                                                            }
-                                                            GroqAutoFixStatus.STRUCTURAL -> {
-                                                                needsStructuralPrompt = true
-                                                                aiError = outcome.failureSummary.ifBlank {
-                                                                    "Needs structural changes. Copy the targeted Cloud AI fix prompt below."
-                                                                }
-                                                            }
-                                                            GroqAutoFixStatus.NOTHING_MATCHED -> {
-                                                                needsStructuralPrompt = false
-                                                                aiError = "No patches applied: ${outcome.failureSummary}".trim()
-                                                            }
-                                                        }
-                                                        if (outcome.roundsRun > 0) captureGen++
-                                                    }.onFailure { err ->
-                                                        when (err) {
-                                                            is GroqCooldownException -> {
-                                                                val msg = "Rate window full \u2014 retry in ${err.waitSec}s"
-                                                                aiError = msg
-                                                                toastMsg = msg
-                                                            }
-                                                            is GroqHardLimitException -> {
-                                                                aiError = err.message
-                                                            }
-                                                            is GroqPromptTooLargeException -> {
-                                                                aiError = "Too many flags to send; fix the top ones first."
-                                                                toastMsg = "Too many flags to send; fix the top ones first"
-                                                            }
-                                                            else -> {
-                                                                aiError = err.message ?: "Groq AI auto-fix failed (HTML kept safe)."
-                                                            }
-                                                        }
-                                                    }
-                                                }
-                                            },
-                                            modifier = Modifier.weight(1f)
-                                        )
-                                    }
-
-                                    if (versions.isNotEmpty() && !aiBusy) {
-                                        RawSecondaryButton(
-                                            text = "Undo last AI fix",
-                                            height = 44.dp,
-                                            leadingIcon = RawIconType.UNDO,
-                                            onClick = {
-                                                val v = versions.firstOrNull() ?: return@RawSecondaryButton
-                                                scope.launch {
-                                                    val prevHtml = HtmlVersionStore.readHtml(v)
-                                                    val vr = CodeValidator.validateFull(context, cacheManager, prevHtml)
-                                                    if (vr.isValid) {
-                                                        HtmlVersionStore.save(context, project.id, resolvedHtml, "Before undo")
-                                                        HtmlVersionStore.remove(v)
-                                                        resolvedHtml = vr.cleanedHtml
-                                                        onApplyFixedHtml(vr.cleanedHtml, vr.durationSec)
-                                                        reviewResult = null
-                                                        lastReview = null
-                                                        undoTick++
-                                                        captureGen++
-                                                        toastMsg = "Restored previous version"
-                                                    } else {
-                                                        toastMsg = "Could not restore: ${vr.summaryMessage}"
-                                                    }
-                                                }
-                                            }
-                                        )
-                                    }
-
-                                    aiError?.let { msg ->
-                                        Column(
-                                            modifier = Modifier
-                                                .fillMaxWidth()
-                                                .clip(RoundedCornerShape(16.dp))
-                                                .background(RawColors.ErrorSoft)
-                                                .padding(12.dp),
-                                            verticalArrangement = Arrangement.spacedBy(8.dp)
-                                        ) {
-                                            Text(
-                                                text = msg,
-                                                fontFamily = BricolageFamily,
-                                                fontWeight = FontWeight.SemiBold,
-                                                fontSize = 13.5.sp,
-                                                color = RawColors.ErrorCoral
-                                            )
-                                            if (needsStructuralPrompt) {
-                                                RawSecondaryButton(
-                                                    text = if (promptCopied) "Copied fix prompt!" else "Copy Cloud AI fix prompt",
-                                                    height = 42.dp,
-                                                    leadingIcon = if (promptCopied) RawIconType.CHECK else RawIconType.COPY,
-                                                    onClick = {
-                                                        val fixPrompt = KeyframeSheetGenerator.buildFixPrompt(
-                                                            samples = res.samples,
-                                                            title = project.title.ifBlank { "Untitled Reel" },
-                                                            durationSec = res.durationSec,
-                                                            htmlCode = resolvedHtml
-                                                        )
-                                                        val cb = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
-                                                        cb.setPrimaryClip(ClipData.newPlainText("raw_edit fix prompt", fixPrompt))
-                                                        haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-                                                        promptCopied = true
-                                                        toastMsg = "Prompt B + HTML copied"
-                                                        scope.launch {
-                                                            delay(2000)
-                                                            promptCopied = false
-                                                        }
-                                                    }
-                                                )
-                                            }
-                                            if (isHardBlockedUi) {
-                                                RawSecondaryButton(
-                                                    text = "Gemini API Settings",
-                                                    height = 42.dp,
-                                                    leadingIcon = RawIconType.KEY,
-                                                    onClick = onSwitchGroqKey
-                                                )
-                                            }
-                                        }
-                                    }
-
-                                    reviewResult?.let { rev ->
-                                        Text(
-                                            text = rev.summary,
-                                            fontFamily = BricolageFamily,
-                                            fontWeight = FontWeight.SemiBold,
-                                            fontSize = 14.sp,
-                                            color = RawColors.TextPrimary
-                                        )
-                                        rev.issues.forEach { issue ->
-                                            Row(
-                                                modifier = Modifier
-                                                    .fillMaxWidth()
-                                                    .clip(RoundedCornerShape(18.dp))
-                                                    .background(RawColors.RaisedCard)
-                                                    .clickable {
-                                                        val idxFromSample = issue.sampleIndex.takeIf { it in res.samples.indices }
-                                                        val frameNum = Regex("\\d+").find(issue.frame)?.value?.toIntOrNull()
-                                                        if (idxFromSample != null) {
-                                                            inspectingIndex = idxFromSample
-                                                        } else if (frameNum != null && res.samples.isNotEmpty()) {
-                                                            inspectingIndex = (frameNum - 1).coerceIn(0, res.samples.lastIndex)
-                                                        }
-                                                    }
-                                                    .padding(12.dp),
-                                                verticalAlignment = Alignment.CenterVertically,
-                                                horizontalArrangement = Arrangement.spacedBy(10.dp)
-                                            ) {
-                                                Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                                                    Text(
-                                                        text = "${issue.frame}  \u2022  ${issue.time}",
-                                                        fontFamily = JetBrainsMonoFamily,
-                                                        fontWeight = FontWeight.Bold,
-                                                        fontSize = 12.sp,
-                                                        color = RawColors.Tan
-                                                    )
-                                                    if (issue.problem.isNotBlank()) {
-                                                        Text(
-                                                            text = issue.problem,
-                                                            fontFamily = BricolageFamily,
-                                                            fontWeight = FontWeight.SemiBold,
-                                                            fontSize = 13.5.sp,
-                                                            color = RawColors.TextPrimary
-                                                        )
-                                                    }
-                                                    if (issue.fix.isNotBlank()) {
-                                                        Text(
-                                                            text = "Fix: ${issue.fix}",
-                                                            fontFamily = BricolageFamily,
-                                                            fontWeight = FontWeight.Medium,
-                                                            fontSize = 12.5.sp,
-                                                            color = RawColors.TextMuted
-                                                        )
-                                                    }
-                                                }
-                                                RawIcon(RawIconType.CHEVRON_RIGHT, size = 16.dp, tint = RawColors.TextMuted)
-                                            }
-                                        }
-                                    }
-                                }
-                            }
-
-                            // Offline Cloud AI Export Card (.tiles)
-                            item(span = { GridItemSpan(2) }) {
-                                Column(
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .clip(RoundedCornerShape(28.dp))
-                                        .background(RawColors.CardSurface)
-                                        .padding(18.dp),
-                                    verticalArrangement = Arrangement.spacedBy(10.dp)
-                                ) {
-                                    Column {
-                                        Text(
-                                            text = "Export sheet for Cloud AI",
-                                            fontFamily = BricolageFamily,
-                                            fontWeight = FontWeight.Bold,
-                                            fontSize = 19.sp,
-                                            color = RawColors.TextPrimary
-                                        )
-                                        Text(
-                                            text = "0 API cost",
-                                            style = RawTypography.labelMedium
-                                        )
-                                    }
-
-                                    Row(
-                                        modifier = Modifier.fillMaxWidth(),
-                                        horizontalArrangement = Arrangement.spacedBy(10.dp)
-                                    ) {
-                                        ExportTileButton(
-                                            text = "Download PDF",
-                                            enabled = !exportBusy,
-                                            icon = RawIconType.DOWNLOAD,
-                                            onClick = { exportPdf(share = false) },
-                                            modifier = Modifier.weight(1f)
-                                        )
-                                        ExportTileButton(
-                                            text = "Share PDF",
-                                            enabled = !exportBusy,
-                                            icon = RawIconType.SHARE,
-                                            onClick = { exportPdf(share = true) },
-                                            modifier = Modifier.weight(1f)
-                                        )
-                                    }
-
-                                    Row(
-                                        modifier = Modifier.fillMaxWidth(),
-                                        horizontalArrangement = Arrangement.spacedBy(10.dp)
-                                    ) {
-                                        ExportTileButton(
-                                            text = "Download ZIP",
-                                            enabled = !exportBusy,
-                                            icon = RawIconType.DOWNLOAD,
-                                            onClick = { exportZip(share = false) },
-                                            modifier = Modifier.weight(1f)
-                                        )
-                                        ExportTileButton(
-                                            text = "Share ZIP",
-                                            enabled = !exportBusy,
-                                            icon = RawIconType.SHARE,
-                                            onClick = { exportZip(share = true) },
-                                            modifier = Modifier.weight(1f)
-                                        )
-                                    }
-
-                                    BigPrimaryButton(
-                                        text = if (promptCopied) "Copied fix prompt!" else "Copy targeted AI fix prompt",
-                                        height = 50.dp,
-                                        leadingIcon = if (promptCopied) RawIconType.CHECK else RawIconType.COPY,
-                                        onClick = {
-                                            val fixPrompt = KeyframeSheetGenerator.buildFixPrompt(
-                                                samples = res.samples,
-                                                title = project.title.ifBlank { "Untitled Reel" },
-                                                durationSec = res.durationSec,
-                                                htmlCode = resolvedHtml
-                                            )
-                                            val cb = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
-                                            cb.setPrimaryClip(ClipData.newPlainText("raw_edit fix prompt", fixPrompt))
-                                            haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-                                            promptCopied = true
-                                            toastMsg = "Prompt B + HTML copied"
-                                            scope.launch {
-                                                delay(2000)
-                                                promptCopied = false
-                                            }
-                                        }
+                                    ExportTileButton(
+                                        text = "Download ZIP",
+                                        enabled = !exportBusy,
+                                        icon = RawIconType.DOWNLOAD,
+                                        onClick = { downloadZip() },
+                                        modifier = Modifier.weight(1f)
                                     )
-
-                                    RawSecondaryButton(
-                                        text = "Paste AI patch (<<<SEARCH)",
-                                        height = 46.dp,
-                                        leadingIcon = RawIconType.CODE,
-                                        onClick = {
-                                            patchError = null
-                                            showPatchDialog = true
-                                        }
-                                    )
-                                }
-                            }
-
-                            if (flaggedOnly && flaggedSamples.isEmpty()) {
-                                item(span = { GridItemSpan(2) }) {
-                                    Column(
-                                        modifier = Modifier
-                                            .fillMaxWidth()
-                                            .clip(RoundedCornerShape(28.dp))
-                                            .background(RawColors.CardSurface)
-                                            .border(1.dp, RawColors.AccentBorder, RoundedCornerShape(28.dp))
-                                            .padding(20.dp),
-                                        horizontalAlignment = Alignment.CenterHorizontally,
-                                        verticalArrangement = Arrangement.spacedBy(8.dp)
-                                    ) {
-                                        RawPixelMascot(kind = PixelMascotKind.LENS_BOT, size = 48.dp)
-                                        Text(
-                                            text = "All ${res.samples.size} frames look clean",
-                                            style = RawTypography.titleMedium,
-                                            color = RawColors.Tan
-                                        )
-                                        Text(
-                                            text = "No edge clips or auto-fit resizes were flagged.",
-                                            style = RawTypography.bodyMedium
-                                        )
-                                        Spacer(modifier = Modifier.height(4.dp))
-                                        RawSecondaryButton(
-                                            text = "Show all frames",
-                                            height = 46.dp,
-                                            fillWidth = false,
-                                            onClick = { flaggedOnly = false }
-                                        )
-                                    }
-                                }
-                            } else {
-                                itemsIndexed(
-                                    items = visibleSamples,
-                                    key = { _, item -> "${captureGen}_${item.index}" }
-                                ) { _, sample ->
-                                    ContactSheetFrameTile(
-                                        sample = sample,
-                                        cacheKeyTag = "${captureGen}_${selectedMode.name}",
-                                        onClick = { inspectingIndex = sample.index }
+                                    ExportTileButton(
+                                        text = "Download PDF",
+                                        enabled = !exportBusy,
+                                        icon = RawIconType.DOWNLOAD,
+                                        onClick = { downloadPdf() },
+                                        modifier = Modifier.weight(1f)
                                     )
                                 }
                             }
                         }
-
-                        FeatheredScrollEdges(
-                            gridState = gridState,
-                            topHeight = 34.dp,
-                            bottomHeight = 112.dp,
-                            alwaysShowBottom = true
-                        )
                     }
                 }
             }
@@ -1334,14 +800,14 @@ fun KeyframeSheetScreen(
             ) {
                 RawSecondaryButton(
                     text = "Fix code",
-                    height = 58.dp,
+                    height = 56.dp,
                     onClick = onEditCode,
                     modifier = Modifier.weight(1f)
                 )
                 val hasAudio = project.audioUri.isNotBlank() && project.audioDurationSec > 0.0
                 BigPrimaryButton(
                     text = if (hasAudio) "Render video" else "Add audio first",
-                    height = 58.dp,
+                    height = 56.dp,
                     enabled = hasAudio && !capturing,
                     onClick = onRenderNow,
                     modifier = Modifier.weight(1f)
@@ -1354,458 +820,340 @@ fun KeyframeSheetScreen(
             modifier = Modifier
                 .align(Alignment.BottomCenter)
                 .navigationBarsPadding()
-                .padding(bottom = 90.dp)
+                .padding(bottom = 86.dp)
         )
-    }
-
-    // Zoom Inspection Modal (.pn.mdl)
-    val activeIdx = inspectingIndex
-    val samplesList = sheetResult?.samples
-    if (activeIdx != null && samplesList != null) {
-        val sample = samplesList.getOrNull(activeIdx)
-        if (sample != null) {
-            Dialog(
-                onDismissRequest = { inspectingIndex = null },
-                properties = DialogProperties(usePlatformDefaultWidth = false)
-            ) {
-                Column(
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .background(RawColors.BgPrimary.copy(alpha = 0.98f))
-                        .statusBarsPadding()
-                        .navigationBarsPadding()
-                        .padding(horizontal = 20.dp, vertical = 24.dp),
-                    verticalArrangement = Arrangement.spacedBy(14.dp)
-                ) {
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Text(
-                            text = String.format(
-                                Locale.US,
-                                "Frame #%02d  \u2022  t=%.2fs  \u2022  %s",
-                                sample.index + 1,
-                                sample.timeSec,
-                                sample.sceneLabel.ifBlank { "SCENE" }
-                            ),
-                            fontFamily = BricolageFamily,
-                            fontWeight = FontWeight.Bold,
-                            fontSize = 24.sp,
-                            lineHeight = 28.sp,
-                            letterSpacing = (-0.6).sp,
-                            color = RawColors.TextPrimary,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis,
-                            modifier = Modifier.weight(1f)
-                        )
-                        Spacer(modifier = Modifier.width(10.dp))
-                        CircleActionButton(
-                            icon = RawIconType.CLOSE,
-                            size = 38.dp,
-                            onClick = { inspectingIndex = null }
-                        )
-                    }
-
-                    Box(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .aspectRatio(16f / 9f)
-                            .clip(RoundedCornerShape(24.dp))
-                            .background(Color.Black)
-                            .border(
-                                1.5.dp,
-                                when {
-                                    sample.warnings.isNotEmpty() -> RawColors.ErrorCoral
-                                    sample.autoFitCount > 0 -> RawColors.Tan.copy(alpha = 0.65f)
-                                    else -> RawColors.Divider
-                                },
-                                RoundedCornerShape(24.dp)
-                            )
-                    ) {
-                        AsyncImage(
-                            model = ImageRequest.Builder(context)
-                                .data(File(sample.thumbPath))
-                                .size(960, 540)
-                                .memoryCacheKey("${sample.thumbPath}_zoom_${captureGen}_${selectedMode.name}")
-                                .diskCachePolicy(CachePolicy.DISABLED)
-                                .build(),
-                            contentDescription = "Zoomed keyframe",
-                            contentScale = ContentScale.Fit,
-                            modifier = Modifier.fillMaxSize()
-                        )
-                    }
-
-                    Column(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .heightIn(max = 180.dp)
-                            .verticalScroll(rememberScrollState()),
-                        verticalArrangement = Arrangement.spacedBy(8.dp)
-                    ) {
-                        sample.warnings.forEach { w ->
-                            Box(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .clip(RoundedCornerShape(16.dp))
-                                    .background(RawColors.ErrorSoft)
-                                    .padding(horizontal = 12.dp, vertical = 10.dp)
-                            ) {
-                                Text(
-                                    text = "WARNING: $w",
-                                    fontFamily = JetBrainsMonoFamily,
-                                    fontWeight = FontWeight.Medium,
-                                    fontSize = 13.sp,
-                                    lineHeight = 20.sp,
-                                    style = TextStyle(fontFeatureSettings = "tnum"),
-                                    color = RawColors.ErrorCoral
-                                )
-                            }
-                        }
-                        sample.autoFitNotes.forEach { note ->
-                            Box(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .clip(RoundedCornerShape(16.dp))
-                                    .background(RawColors.RaisedCard)
-                                    .padding(horizontal = 12.dp, vertical = 10.dp)
-                            ) {
-                                Text(
-                                    text = "AUTO-FIT: $note",
-                                    fontFamily = JetBrainsMonoFamily,
-                                    fontWeight = FontWeight.Medium,
-                                    fontSize = 13.sp,
-                                    lineHeight = 20.sp,
-                                    style = TextStyle(fontFeatureSettings = "tnum"),
-                                    color = RawColors.Tan
-                                )
-                            }
-                        }
-                        Box(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .clip(RoundedCornerShape(16.dp))
-                                .background(RawColors.RaisedCard)
-                                .padding(horizontal = 12.dp, vertical = 10.dp)
-                        ) {
-                            Text(
-                                text = "OK - all other text inside margins",
-                                fontFamily = JetBrainsMonoFamily,
-                                fontWeight = FontWeight.Medium,
-                                fontSize = 13.sp,
-                                style = TextStyle(fontFeatureSettings = "tnum"),
-                                color = RawColors.TextMuted
-                            )
-                        }
-                        Box(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .clip(RoundedCornerShape(16.dp))
-                                .background(RawColors.RaisedCard)
-                                .padding(horizontal = 12.dp, vertical = 10.dp)
-                        ) {
-                            Text(
-                                text = "OK - no external resources requested",
-                                fontFamily = JetBrainsMonoFamily,
-                                fontWeight = FontWeight.Medium,
-                                fontSize = 13.sp,
-                                style = TextStyle(fontFeatureSettings = "tnum"),
-                                color = RawColors.TextMuted
-                            )
-                        }
-                    }
-
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(10.dp)
-                    ) {
-                        RawSecondaryButton(
-                            text = "Prev frame",
-                            height = 56.dp,
-                            leadingIcon = RawIconType.CHEVRON_LEFT,
-                            onClick = {
-                                inspectingIndex = (sample.index - 1 + samplesList.size) % samplesList.size
-                            },
-                            modifier = Modifier.weight(1f)
-                        )
-                        RawPressButton(
-                            onClick = {
-                                inspectingIndex = (sample.index + 1) % samplesList.size
-                            },
-                            modifier = Modifier.weight(1f)
-                        ) {
-                            Row(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .height(56.dp)
-                                    .clip(CircleShape)
-                                    .background(RawColors.RaisedCard),
-                                horizontalArrangement = Arrangement.Center,
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                Text("Next frame", style = RawTypography.labelLarge)
-                                Spacer(modifier = Modifier.width(6.dp))
-                                RawIcon(RawIconType.CHEVRON_RIGHT, size = 18.dp, tint = RawColors.TextPrimary)
-                            }
-                        }
-                    }
-                }
-            }
-        }
-    }
-
-    if (showPatchDialog) {
-        Dialog(
-            onDismissRequest = { if (!patchBusy) showPatchDialog = false },
-            properties = DialogProperties(usePlatformDefaultWidth = false)
-        ) {
-            Box(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 16.dp)
-                    .imePadding()
-            ) {
-                Column(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .clip(RoundedCornerShape(30.dp))
-                        .background(RawColors.CardSurface)
-                        .border(1.dp, RawColors.Divider, RoundedCornerShape(30.dp))
-                        .padding(20.dp)
-                        .verticalScroll(rememberScrollState()),
-                    verticalArrangement = Arrangement.spacedBy(12.dp)
-                ) {
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Column(modifier = Modifier.weight(1f)) {
-                            Text(
-                                text = "Apply Search / Replace Patch",
-                                fontFamily = BricolageFamily,
-                                fontWeight = FontWeight.Bold,
-                                fontSize = 20.sp,
-                                color = RawColors.TextPrimary
-                            )
-                            Text(
-                                text = "Paste Claude Option A blocks (<<<SEARCH ... ===REPLACE ... >>>).",
-                                style = RawTypography.labelMedium,
-                                color = RawColors.TextMuted
-                            )
-                        }
-                        CircleActionButton(
-                            icon = RawIconType.CLOSE,
-                            size = 36.dp,
-                            onClick = { if (!patchBusy) showPatchDialog = false }
-                        )
-                    }
-
-                    OutlinedTextField(
-                        value = patchDraft,
-                        onValueChange = {
-                            patchDraft = it
-                            patchError = null
-                        },
-                        placeholder = {
-                            Text(
-                                text = "<<<SEARCH\nexact text from HTML\n===REPLACE\nupdated text\n>>>",
-                                fontFamily = JetBrainsMonoFamily,
-                                fontSize = 12.sp,
-                                color = RawColors.TextMuted
-                            )
-                        },
-                        textStyle = TextStyle(
-                            fontFamily = JetBrainsMonoFamily,
-                            fontSize = 12.5.sp,
-                            color = RawColors.TextPrimary
-                        ),
-                        shape = RoundedCornerShape(20.dp),
-                        colors = OutlinedTextFieldDefaults.colors(
-                            focusedBorderColor = RawColors.Tan,
-                            unfocusedBorderColor = RawColors.Divider,
-                            focusedContainerColor = RawColors.BgPrimary,
-                            unfocusedContainerColor = RawColors.BgPrimary,
-                            cursorColor = RawColors.Tan
-                        ),
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .heightIn(min = 160.dp, max = 260.dp)
-                    )
-
-                    patchError?.let { errTxt ->
-                        Text(
-                            text = errTxt,
-                            fontFamily = BricolageFamily,
-                            fontWeight = FontWeight.SemiBold,
-                            fontSize = 13.sp,
-                            color = RawColors.ErrorCoral
-                        )
-                    }
-
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(10.dp)
-                    ) {
-                        RawSecondaryButton(
-                            text = "Cancel",
-                            height = 48.dp,
-                            enabled = !patchBusy,
-                            onClick = { showPatchDialog = false },
-                            modifier = Modifier.weight(1f)
-                        )
-                        BigPrimaryButton(
-                            text = if (patchBusy) "Applying..." else "Apply patch",
-                            height = 48.dp,
-                            enabled = !patchBusy,
-                            leadingIcon = RawIconType.CHECK,
-                            containerColor = RawColors.Tan,
-                            contentColor = RawColors.Ink,
-                            onClick = {
-                                val patches = GroqCodec.parseClaudeSearchReplacePatches(patchDraft)
-                                if (patches.isEmpty()) {
-                                    patchError = "No valid <<<SEARCH ... ===REPLACE ... >>> blocks found."
-                                    return@BigPrimaryButton
-                                }
-                                val applyOutcome = GroqCodec.applyExactOnceEdits(resolvedHtml, patches)
-                                if (applyOutcome.failedEdits.isNotEmpty()) {
-                                    val firstFail = applyOutcome.failedEdits.first()
-                                    patchError = "Patch failed (${firstFail.reason}): ${firstFail.edit.find.take(90)}"
-                                    return@BigPrimaryButton
-                                }
-                                if (applyOutcome.appliedCount == 0) {
-                                    patchError = "No changes matched in current HTML."
-                                    return@BigPrimaryButton
-                                }
-                                patchBusy = true
-                                patchError = null
-                                scope.launch {
-                                    val validation = CodeValidator.validateFull(context, cacheManager, applyOutcome.updatedHtml)
-                                    patchBusy = false
-                                    if (validation.isValid) {
-                                        resolvedHtml = validation.cleanedHtml
-                                        onApplyFixedHtml(validation.cleanedHtml, validation.durationSec)
-                                        reviewResult = null
-                                        aiError = null
-                                        showPatchDialog = false
-                                        patchDraft = ""
-                                        toastMsg = "Applied ${applyOutcome.appliedCount} patch(es) \u2014 re-capturing"
-                                        captureGen++
-                                    } else {
-                                        patchError = "Patched HTML failed check (rolled back): ${validation.summaryMessage}"
-                                    }
-                                }
-                            },
-                            modifier = Modifier.weight(1f)
-                        )
-                    }
-                }
-            }
-        }
     }
 }
 
 @Composable
-private fun ContactSheetFrameTile(
+private fun MinimalCarouselFrameSlide(
     sample: KeyframeSample,
+    pageIdx: Int,
+    totalPages: Int,
     cacheKeyTag: String,
-    onClick: () -> Unit
+    circleDrawEnabled: Boolean,
+    activeDragPoints: MutableList<PointNorm>,
+    onToggleFlagged: (Boolean) -> Unit,
+    onToggleCircleDrawMode: () -> Unit,
+    onAddCircle: (IssueCircle) -> Unit,
+    onUndoCircle: () -> Unit,
+    onClearCircles: () -> Unit
 ) {
     val context = LocalContext.current
-    val hasWarn = sample.warnings.isNotEmpty()
-    val hasFit = sample.autoFitCount > 0
-    val frameBorder = when {
-        hasWarn -> RawColors.ErrorCoral
-        hasFit -> RawColors.Tan.copy(alpha = 0.65f)
-        else -> Color.Transparent
-    }
-    val (statusLabel, statusBg, statusFg) = when {
-        hasWarn -> Triple("WARN", RawColors.ErrorSoft, RawColors.ErrorCoral)
-        hasFit -> Triple("FIT", RawColors.AccentSoft, RawColors.Tan)
-        else -> Triple("OK", RawColors.PillGrey, RawColors.TextMuted)
-    }
 
-    RawPressButton(onClick = onClick) {
-        Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .clip(RoundedCornerShape(24.dp))
-                .background(RawColors.CardSurface)
-                .padding(10.dp),
-            verticalArrangement = Arrangement.spacedBy(7.dp)
+    Column(
+        modifier = Modifier.fillMaxWidth(),
+        verticalArrangement = Arrangement.spacedBy(10.dp)
+    ) {
+        // Minimal Header: Frame # + Timestamp | OK / FLAGGED Toggle
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
         ) {
+            Text(
+                text = String.format(Locale.US, "#%02d \u2022 %.2fs", sample.index + 1, sample.timeSec),
+                fontFamily = BricolageFamily,
+                fontWeight = FontWeight.Bold,
+                fontSize = 15.5.sp,
+                color = RawColors.TextPrimary,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.weight(1f)
+            )
+
             Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
+                modifier = Modifier
+                    .clip(CircleShape)
+                    .background(RawColors.RaisedCard)
+                    .padding(3.dp),
+                horizontalArrangement = Arrangement.spacedBy(3.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                Text(
-                    text = String.format(Locale.US, "#%02d t=%.2fs", sample.index + 1, sample.timeSec),
-                    fontFamily = JetBrainsMonoFamily,
-                    fontWeight = FontWeight.Medium,
-                    fontSize = 11.5.sp,
-                    style = TextStyle(fontFeatureSettings = "tnum"),
-                    color = RawColors.TextMuted,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                    modifier = Modifier.weight(1f)
-                )
                 Box(
                     modifier = Modifier
                         .clip(CircleShape)
-                        .background(statusBg)
-                        .padding(horizontal = 8.dp, vertical = 3.dp)
+                        .background(if (!sample.isFlagged) Color(0xFF2E9E5B) else Color.Transparent)
+                        .clickable { onToggleFlagged(false) }
+                        .padding(horizontal = 11.dp, vertical = 5.dp)
                 ) {
                     Text(
-                        text = statusLabel,
+                        text = "\u2713 OK",
                         fontFamily = JetBrainsMonoFamily,
-                        fontWeight = FontWeight.SemiBold,
-                        fontSize = 10.5.sp,
-                        style = TextStyle(fontFeatureSettings = "tnum"),
-                        color = statusFg
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 11.sp,
+                        color = if (!sample.isFlagged) Color.White else RawColors.TextMuted
+                    )
+                }
+                Box(
+                    modifier = Modifier
+                        .clip(CircleShape)
+                        .background(if (sample.isFlagged) RawColors.ErrorCoral else Color.Transparent)
+                        .clickable { onToggleFlagged(true) }
+                        .padding(horizontal = 11.dp, vertical = 5.dp)
+                ) {
+                    Text(
+                        text = "\u2691 FLAGGED",
+                        fontFamily = JetBrainsMonoFamily,
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 11.sp,
+                        color = if (sample.isFlagged) Color.Black else RawColors.TextMuted
+                    )
+                }
+            }
+        }
+
+        // 16:9 Carousel Image + Issue Circle Overlay
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .aspectRatio(16f / 9f)
+                .clip(RoundedCornerShape(18.dp))
+                .background(Color.Black)
+                .border(
+                    width = if (sample.isFlagged) 2.dp else 1.dp,
+                    color = if (sample.isFlagged) RawColors.ErrorCoral else RawColors.Divider,
+                    shape = RoundedCornerShape(18.dp)
+                )
+                .then(
+                    if (circleDrawEnabled) {
+                        Modifier
+                            .pointerInput(sample.index, circleDrawEnabled) {
+                                detectDragGestures(
+                                    onDragStart = { offset ->
+                                        activeDragPoints.clear()
+                                        val nx = (offset.x / size.width.toFloat()).coerceIn(0f, 1f)
+                                        val ny = (offset.y / size.height.toFloat()).coerceIn(0f, 1f)
+                                        activeDragPoints.add(PointNorm(nx, ny))
+                                    },
+                                    onDrag = { change, _ ->
+                                        change.consume()
+                                        val nx = (change.position.x / size.width.toFloat()).coerceIn(0f, 1f)
+                                        val ny = (change.position.y / size.height.toFloat()).coerceIn(0f, 1f)
+                                        activeDragPoints.add(PointNorm(nx, ny))
+                                    },
+                                    onDragEnd = {
+                                        if (activeDragPoints.isNotEmpty()) {
+                                            val pts = activeDragPoints.toList()
+                                            val minX = pts.minOf { it.x }
+                                            val maxX = pts.maxOf { it.x }
+                                            val minY = pts.minOf { it.y }
+                                            val maxY = pts.maxOf { it.y }
+                                            val cx = (minX + maxX) * 0.5f
+                                            val cy = (minY + maxY) * 0.5f
+                                            val span = hypot((maxX - minX).toDouble(), (maxY - minY).toDouble()).toFloat() * 0.5f
+                                            val rad = span.coerceIn(0.08f, 0.45f)
+                                            onAddCircle(
+                                                IssueCircle(
+                                                    centerXNorm = cx,
+                                                    centerYNorm = cy,
+                                                    radiusNorm = rad,
+                                                    pointsNorm = pts
+                                                )
+                                            )
+                                            activeDragPoints.clear()
+                                        }
+                                    },
+                                    onDragCancel = {
+                                        activeDragPoints.clear()
+                                    }
+                                )
+                            }
+                            .pointerInput(sample.index, circleDrawEnabled) {
+                                detectTapGestures { offset ->
+                                    val nx = (offset.x / size.width.toFloat()).coerceIn(0f, 1f)
+                                    val ny = (offset.y / size.height.toFloat()).coerceIn(0f, 1f)
+                                    onAddCircle(
+                                        IssueCircle(
+                                            centerXNorm = nx,
+                                            centerYNorm = ny,
+                                            radiusNorm = 0.14f
+                                        )
+                                    )
+                                }
+                            }
+                    } else Modifier
+                )
+        ) {
+            val tileReq = remember(sample.thumbPath, cacheKeyTag) {
+                ImageRequest.Builder(context)
+                    .data(File(sample.thumbPath))
+                    .size(960, 540)
+                    .memoryCacheKey("${sample.thumbPath}_$cacheKeyTag")
+                    .diskCachePolicy(CachePolicy.DISABLED)
+                    .build()
+            }
+            AsyncImage(
+                model = tileReq,
+                contentDescription = "Frame ${sample.index + 1}",
+                contentScale = ContentScale.Fit,
+                modifier = Modifier.fillMaxSize()
+            )
+
+            Canvas(modifier = Modifier.fillMaxSize()) {
+                val w = size.width
+                val h = size.height
+                for (c in sample.circles) {
+                    if (c.pointsNorm.size >= 3) {
+                        val p = Path()
+                        c.pointsNorm.forEachIndexed { idx, pt ->
+                            val px = pt.x * w
+                            val py = pt.y * h
+                            if (idx == 0) p.moveTo(px, py) else p.lineTo(px, py)
+                        }
+                        drawPath(
+                            path = p,
+                            color = Color.Black.copy(alpha = 0.65f),
+                            style = Stroke(width = 7.dp.toPx(), cap = StrokeCap.Round, join = StrokeJoin.Round)
+                        )
+                        drawPath(
+                            path = p,
+                            color = Color(0xFFFF3B30),
+                            style = Stroke(width = 3.5.dp.toPx(), cap = StrokeCap.Round, join = StrokeJoin.Round)
+                        )
+                    } else {
+                        val cx = c.centerXNorm * w
+                        val cy = c.centerYNorm * h
+                        val r = c.radiusNorm * minOf(w, h)
+                        drawCircle(
+                            color = Color(0x28FF3B30),
+                            radius = r,
+                            center = Offset(cx, cy)
+                        )
+                        drawCircle(
+                            color = Color.Black.copy(alpha = 0.65f),
+                            radius = r,
+                            center = Offset(cx, cy),
+                            style = Stroke(width = 6.dp.toPx())
+                        )
+                        drawCircle(
+                            color = Color(0xFFFF3B30),
+                            radius = r,
+                            center = Offset(cx, cy),
+                            style = Stroke(width = 3.5.dp.toPx())
+                        )
+                    }
+                }
+
+                if (activeDragPoints.size >= 2) {
+                    val livePath = Path()
+                    activeDragPoints.forEachIndexed { idx, pt ->
+                        val px = pt.x * w
+                        val py = pt.y * h
+                        if (idx == 0) livePath.moveTo(px, py) else livePath.lineTo(px, py)
+                    }
+                    drawPath(
+                        path = livePath,
+                        color = Color(0xFFFF3B30),
+                        style = Stroke(width = 4.dp.toPx(), cap = StrokeCap.Round, join = StrokeJoin.Round)
                     )
                 }
             }
 
             Box(
                 modifier = Modifier
-                    .fillMaxWidth()
-                    .aspectRatio(16f / 9f)
-                    .clip(RoundedCornerShape(16.dp))
-                    .background(Color.Black)
-                    .then(
-                        if (frameBorder != Color.Transparent) {
-                            Modifier.border(1.5.dp, frameBorder, RoundedCornerShape(16.dp))
-                        } else Modifier
-                    )
+                    .align(Alignment.TopEnd)
+                    .padding(8.dp)
+                    .clip(CircleShape)
+                    .background(Color.Black.copy(alpha = 0.7f))
+                    .padding(horizontal = 9.dp, vertical = 3.dp)
             ) {
-                val tileReq = remember(sample.thumbPath, cacheKeyTag) {
-                    ImageRequest.Builder(context)
-                        .data(File(sample.thumbPath))
-                        .size(480, 270)
-                        .memoryCacheKey("${sample.thumbPath}_$cacheKeyTag")
-                        .diskCachePolicy(CachePolicy.DISABLED)
-                        .build()
-                }
-                AsyncImage(
-                    model = tileReq,
-                    contentDescription = "Frame ${sample.index + 1}",
-                    contentScale = ContentScale.Crop,
-                    modifier = Modifier.fillMaxSize()
+                Text(
+                    text = "${pageIdx + 1} / $totalPages",
+                    fontFamily = JetBrainsMonoFamily,
+                    fontWeight = FontWeight.Bold,
+                    fontSize = 11.sp,
+                    color = Color.White
                 )
             }
 
-            Text(
-                text = if (sample.sceneLabel.isNotBlank()) sample.sceneLabel else String.format(Locale.US, "%.2fs", sample.timeSec),
-                fontFamily = JetBrainsMonoFamily,
-                fontWeight = FontWeight.Medium,
-                fontSize = 11.5.sp,
-                style = TextStyle(fontFeatureSettings = "tnum"),
-                color = RawColors.TextMuted,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis
-            )
+            if (circleDrawEnabled) {
+                Box(
+                    modifier = Modifier
+                        .align(Alignment.TopStart)
+                        .padding(8.dp)
+                        .clip(CircleShape)
+                        .background(Color(0xDDFF3B30))
+                        .padding(horizontal = 9.dp, vertical = 3.dp)
+                ) {
+                    Text(
+                        text = "Draw circle",
+                        fontFamily = JetBrainsMonoFamily,
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 10.5.sp,
+                        color = Color.White
+                    )
+                }
+            }
+        }
+
+        // Single clean Circle Issue row — no text walls or bloated fields when flagged
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            RawPressButton(onClick = onToggleCircleDrawMode) {
+                Row(
+                    modifier = Modifier
+                        .clip(CircleShape)
+                        .background(if (circleDrawEnabled) RawColors.ErrorCoral else RawColors.RaisedCard)
+                        .border(
+                            width = 1.dp,
+                            color = if (sample.isFlagged) RawColors.ErrorCoral else RawColors.Divider,
+                            shape = CircleShape
+                        )
+                        .padding(horizontal = 13.dp, vertical = 7.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
+                    RawIcon(
+                        type = RawIconType.EDIT,
+                        size = 13.dp,
+                        tint = if (circleDrawEnabled) Color.Black else RawColors.ErrorCoral
+                    )
+                    Text(
+                        text = if (circleDrawEnabled) "Done" else if (sample.circles.isEmpty()) "Circle issue" else "Circle (${sample.circles.size})",
+                        fontFamily = BricolageFamily,
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 12.5.sp,
+                        color = if (circleDrawEnabled) Color.Black else RawColors.TextPrimary
+                    )
+                }
+            }
+
+            if (sample.circles.isNotEmpty()) {
+                Box(
+                    modifier = Modifier
+                        .clip(CircleShape)
+                        .background(RawColors.RaisedCard)
+                        .clickable { onUndoCircle() }
+                        .padding(horizontal = 12.dp, vertical = 7.dp)
+                ) {
+                    Text(
+                        text = "Undo",
+                        fontFamily = BricolageFamily,
+                        fontWeight = FontWeight.SemiBold,
+                        fontSize = 12.5.sp,
+                        color = RawColors.TextPrimary
+                    )
+                }
+                Box(
+                    modifier = Modifier
+                        .clip(CircleShape)
+                        .background(RawColors.ErrorSoft)
+                        .clickable { onClearCircles() }
+                        .padding(horizontal = 12.dp, vertical = 7.dp)
+                ) {
+                    Text(
+                        text = "Clear",
+                        fontFamily = BricolageFamily,
+                        fontWeight = FontWeight.SemiBold,
+                        fontSize = 12.5.sp,
+                        color = RawColors.ErrorCoral
+                    )
+                }
+            }
         }
     }
 }
@@ -1845,35 +1193,5 @@ private fun ExportTileButton(
                 softWrap = false
             )
         }
-    }
-}
-
-@Composable
-private fun SheetTogglePill(
-    label: String,
-    selected: Boolean,
-    onClick: () -> Unit
-) {
-    val bg by animateColorAsState(
-        targetValue = if (selected) RawColors.Tan else RawColors.RaisedCard,
-        animationSpec = tween(200, easing = RawEasings.Morph),
-        label = "sh_tog_bg"
-    )
-    Box(
-        modifier = Modifier
-            .height(40.dp)
-            .clip(CircleShape)
-            .background(bg)
-            .clickable(onClick = onClick)
-            .padding(horizontal = 16.dp),
-        contentAlignment = Alignment.Center
-    ) {
-        Text(
-            text = label,
-            fontFamily = BricolageFamily,
-            fontWeight = FontWeight.Bold,
-            fontSize = 14.sp,
-            color = if (selected) RawColors.Ink else RawColors.TextMuted
-        )
     }
 }

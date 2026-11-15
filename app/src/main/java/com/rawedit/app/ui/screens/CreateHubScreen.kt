@@ -99,6 +99,7 @@ fun CreateHubScreen(
     onOpenCopyPrompt: () -> Unit,
     onOpenCodePaste: () -> Unit,
     onOpenKeyframeSheet: () -> Unit,
+    onOpenChatbot: () -> Unit = {},
     onSwipeCreate: (Offset) -> Unit
 ) {
     val animEnabled = rememberAnimationsEnabled()
@@ -125,7 +126,7 @@ fun CreateHubScreen(
                 val srtNote = if (project.srtCueCount > 0) " \u2022 ${project.srtCueCount} SRT cues" else ""
                 "${project.audioName}$srtNote"
             } else {
-                "Pick MP3, M4A, WAV or AAC (optional SRT)"
+                "Pick MP3, M4A, WAV or AAC + 100% SRT generator"
             },
             statusText = if (hasAudio) "Ready" else "Needed",
             statusDone = hasAudio,
@@ -135,11 +136,11 @@ fun CreateHubScreen(
         StepRowModel(
             number = 2,
             icon = RawIconType.BOX,
-            title = "Asset locker",
+            title = "Asset locker & fonts",
             subtitle = if (attachedAssetCount > 0) {
-                "$attachedAssetCount local media attached \u2022 offline"
+                "$attachedAssetCount local media attached \u2022 custom fonts"
             } else {
-                "Images, PNG cutouts & video clips"
+                "Images, PNG cutouts, video clips & custom .ttf/.otf fonts"
             },
             statusText = if (attachedAssetCount > 0) "Attached ($attachedAssetCount)" else "Optional",
             statusDone = attachedAssetCount > 0,
@@ -149,8 +150,8 @@ fun CreateHubScreen(
         StepRowModel(
             number = 3,
             icon = RawIconType.ZIP,
-            title = "Copy prompt",
-            subtitle = "Download style pack ZIP + copy prompt into Cloud AI",
+            title = "Copy prompt & Style ZIP",
+            subtitle = "Download Style Pack ZIP, upload custom fonts & copy prompt",
             statusText = if (hasAudio) "Ready" else "Step 1 first",
             statusDone = hasAudio,
             enabled = hasAudio,
@@ -197,13 +198,38 @@ fun CreateHubScreen(
                         onClick = onBack,
                         size = 48.dp
                     )
-                    CircleActionButton(
-                        icon = RawIconType.TRASH,
-                        onClick = { showDeleteConfirm = true },
-                        size = 48.dp,
-                        backgroundColor = RawColors.ErrorSoft,
-                        iconTint = RawColors.ErrorCoral
-                    )
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(10.dp)
+                    ) {
+                        RawPressButton(onClick = onOpenChatbot) {
+                            Row(
+                                modifier = Modifier
+                                    .clip(CircleShape)
+                                    .background(RawColors.AccentSoft)
+                                    .border(1.dp, RawColors.AccentBorder, CircleShape)
+                                    .padding(horizontal = 14.dp, vertical = 10.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(6.dp)
+                            ) {
+                                RawIcon(RawIconType.SPARK, size = 16.dp, tint = RawColors.Tan)
+                                Text(
+                                    text = "AI Chatbot",
+                                    fontFamily = BricolageFamily,
+                                    fontWeight = FontWeight.Bold,
+                                    fontSize = 14.sp,
+                                    color = RawColors.Tan
+                                )
+                            }
+                        }
+                        CircleActionButton(
+                            icon = RawIconType.TRASH,
+                            onClick = { showDeleteConfirm = true },
+                            size = 48.dp,
+                            backgroundColor = RawColors.ErrorSoft,
+                            iconTint = RawColors.ErrorCoral
+                        )
+                    }
                 }
             }
 
@@ -366,10 +392,10 @@ fun CreateHubScreen(
                                 noBlink = true
                             )
                             Text(
-                                text = "Preview contact sheet (auto-fit & PDF)",
+                                text = "Contact sheet carousel & Scenes editor",
                                 fontFamily = BricolageFamily,
                                 fontWeight = FontWeight.Bold,
-                                fontSize = 17.5.sp,
+                                fontSize = 17.sp,
                                 color = RawColors.TextPrimary,
                                 modifier = Modifier.weight(1f)
                             )

@@ -162,10 +162,10 @@ fun AssetLockerScreen(
         contract = ActivityResultContracts.OpenDocument()
     ) { uri ->
         if (uri != null) {
-            val res = cacheManager.importCustomFont(uri)
-            res.onSuccess { f ->
+            val res = cacheManager.importCustomFonts(uri)
+            res.onSuccess { files ->
                 customFontsList = cacheManager.listCustomFonts()
-                toastMsg = "Imported font ${f.name}"
+                toastMsg = if (files.size == 1) "Imported font ${files.first().name}" else "Imported ${files.size} fonts"
             }.onFailure { err ->
                 toastMsg = err.message ?: "Could not import font."
             }
@@ -304,7 +304,7 @@ fun AssetLockerScreen(
                                 onClick = onOpenWebBrowser
                             )
                             RawSecondaryButton(
-                                text = "Import Custom Font (.ttf / .otf)",
+                                text = "Import Custom Font (.ttf / .otf / .zip)",
                                 height = 50.dp,
                                 leadingIcon = RawIconType.CODE,
                                 onClick = { fontPicker.launch(arrayOf("*/*")) }

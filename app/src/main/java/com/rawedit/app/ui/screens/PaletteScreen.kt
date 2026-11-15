@@ -9,7 +9,6 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -32,7 +31,6 @@ import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -234,6 +232,7 @@ fun PaletteScreen(
                 .padding(start = 18.dp, end = 18.dp, top = 8.dp, bottom = 128.dp),
             verticalArrangement = Arrangement.spacedBy(14.dp)
         ) {
+            // Clean header without Gemini Free API Key button
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -249,88 +248,7 @@ fun PaletteScreen(
                     letterSpacing = 0.8.sp,
                     color = RawColors.TextMuted
                 )
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(10.dp)
-                ) {
-                    RawPixelMascot(kind = PixelMascotKind.PEEKING_CAT, size = 34.dp)
-                    Row(
-                        modifier = Modifier
-                            .clip(CircleShape)
-                            .background(
-                                if (hasGeminiKey) RawColors.AccentSoft else RawColors.RaisedCard
-                            )
-                            .border(
-                                width = 1.dp,
-                                color = Color.Transparent,
-                                shape = CircleShape
-                            )
-                            .clickable {
-                                onOpenGeminiKey()
-                            }
-                            .padding(horizontal = 12.dp, vertical = 7.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(6.dp)
-                    ) {
-                        RawIcon(
-                            type = RawIconType.KEY,
-                            size = 14.dp,
-                            tint = if (hasGeminiKey) RawColors.Tan else RawColors.TextMuted
-                        )
-                        Text(
-                            text = if (!hasGeminiKey) "Add Gemini key" else "Gemini Free \u2022 1,040 RPD",
-                            fontFamily = JetBrainsMonoFamily,
-                            fontWeight = FontWeight.Bold,
-                            fontSize = 11.5.sp,
-                            color = if (hasGeminiKey) RawColors.Tan else RawColors.TextMuted,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis
-                        )
-                    }
-                }
-            }
-
-            if (!hasGeminiKey) {
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .clip(RoundedCornerShape(24.dp))
-                        .background(RawColors.CardSurface)
-                        .clickable { onOpenGeminiKey() }
-                        .padding(horizontal = 16.dp, vertical = 14.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(12.dp)
-                ) {
-                    RawIcon(type = RawIconType.KEY, size = 18.dp, tint = RawColors.Tan)
-                    Column(modifier = Modifier.weight(1f)) {
-                        Text(
-                            text = "Offline starter palette #${currentPalette.numFormatted}",
-                            fontFamily = BricolageFamily,
-                            fontWeight = FontWeight.Bold,
-                            fontSize = 15.sp,
-                            color = RawColors.TextPrimary
-                        )
-                        Text(
-                            text = "Add a Gemini API key to generate fresh editorial AI palettes with Google AI Studio.",
-                            style = RawTypography.bodyMedium.copy(fontSize = 13.sp, lineHeight = 18.sp),
-                            color = RawColors.TextMuted
-                        )
-                    }
-                    Box(
-                        modifier = Modifier
-                            .clip(CircleShape)
-                            .background(RawColors.Tan)
-                            .padding(horizontal = 12.dp, vertical = 6.dp)
-                    ) {
-                        Text(
-                            text = "Add key",
-                            fontFamily = BricolageFamily,
-                            fontWeight = FontWeight.Bold,
-                            fontSize = 12.5.sp,
-                            color = RawColors.Ink
-                        )
-                    }
-                }
+                RawPixelMascot(kind = PixelMascotKind.PEEKING_CAT, size = 34.dp)
             }
 
             errorMsg?.let { err ->
@@ -349,16 +267,10 @@ fun PaletteScreen(
                         fontSize = 14.sp,
                         color = RawColors.ErrorCoral
                     )
-                    RawSecondaryButton(
-                        text = "Manage Gemini API Key",
-                        height = 42.dp,
-                        leadingIcon = RawIconType.KEY,
-                        onClick = onOpenGeminiKey
-                    )
                 }
             }
 
-            // #0D0D0D Poster Card matching the user's exact layout spec
+            // #0D0D0D Poster Card
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
