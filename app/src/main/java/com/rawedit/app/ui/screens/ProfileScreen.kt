@@ -616,9 +616,9 @@ fun ProfileScreen(
                     else -> "Balanced Waterfall"
                 }
                 val subtitle = if (hasKey) {
-                    "${userProfile.maskGeminiKey()}  \u2022  1,040 RPD Free Waterfall"
+                    "${userProfile.maskGeminiKey()}  \u2022  Hydrogen 4"
                 } else {
-                    "Google AI Studio  \u2022  1,040 RPD Free"
+                    "Add API key"
                 }
                 val cardShape = RoundedCornerShape(28.dp)
                 Column(
@@ -656,7 +656,7 @@ fun ProfileScreen(
                             }
                             Column {
                                 Text(
-                                    text = "Google Gemini Free AI",
+                                    text = "Gemini AI",
                                     fontFamily = BricolageFamily,
                                     fontWeight = FontWeight.Bold,
                                     fontSize = 18.sp,
@@ -693,73 +693,7 @@ fun ProfileScreen(
                         }
                     }
 
-                    if (hasKey) {
-                        Column(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .clip(RoundedCornerShape(18.dp))
-                                .background(RawColors.RaisedCard)
-                                .padding(14.dp),
-                            verticalArrangement = Arrangement.spacedBy(8.dp)
-                        ) {
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.SpaceBetween,
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                Column(modifier = Modifier.weight(1f)) {
-                                    Text(
-                                        text = "FREE TIER WATERFALL POOL",
-                                        fontFamily = JetBrainsMonoFamily,
-                                        fontWeight = FontWeight.Bold,
-                                        fontSize = 10.5.sp,
-                                        color = RawColors.TextMuted
-                                    )
-                                    Text(
-                                        text = "1,040 RPD Free  \u2022  $routeLabel",
-                                        fontFamily = BricolageFamily,
-                                        fontWeight = FontWeight.Bold,
-                                        fontSize = 16.sp,
-                                        color = RawColors.Tan,
-                                        maxLines = 1,
-                                        overflow = TextOverflow.Ellipsis
-                                    )
-                                }
 
-                                Box(
-                                    modifier = Modifier
-                                        .clip(CircleShape)
-                                        .background(RawColors.CardSurface)
-                                        .clickable(onClick = onSwitchGroqKey)
-                                        .padding(horizontal = 12.dp, vertical = 7.dp)
-                                ) {
-                                    Text(
-                                        text = "Configure",
-                                        fontFamily = BricolageFamily,
-                                        fontWeight = FontWeight.Bold,
-                                        fontSize = 12.5.sp,
-                                        color = RawColors.TextPrimary
-                                    )
-                                }
-                            }
-
-                            Text(
-                                text = "Flash-Lite 3.5 (500 RPD) \u2022 Flash-Lite 3.1 (500 RPD) \u2022 Flash 3.6 (20 RPD) \u2022 Flash 3.8 (20 RPD)",
-                                fontFamily = JetBrainsMonoFamily,
-                                fontSize = 11.sp,
-                                color = RawColors.TextMuted,
-                                maxLines = 2,
-                                overflow = TextOverflow.Ellipsis
-                            )
-
-                            Text(
-                                text = "Auto-failover on 429 quota exhaustion. Resets daily at PT midnight.",
-                                fontFamily = BricolageFamily,
-                                fontSize = 12.sp,
-                                color = RawColors.TextMuted
-                            )
-                        }
-                    }
                 }
             }
 
@@ -822,14 +756,14 @@ fun ProfileScreen(
                     ) {
                         Column(modifier = Modifier.weight(1f)) {
                             Text(
-                                text = "GitHub Access Token & Skills",
+                                text = "GitHub Token",
                                 fontFamily = BricolageFamily,
                                 fontWeight = FontWeight.Bold,
                                 fontSize = 18.5.sp,
                                 color = RawColors.TextPrimary
                             )
                             Text(
-                                text = if (userProfile.hasGithubToken) "Token saved (${userProfile.maskGithubToken()}) • Chatbot & app can fetch GitHub tools" else "Optional PAT so AI Chatbot can fetch private/public skills from GitHub",
+                                text = if (userProfile.hasGithubToken) "${userProfile.maskGithubToken()} • Repo & Edit active" else "Paste PAT for repo & file tools",
                                 fontFamily = JetBrainsMonoFamily,
                                 fontSize = 11.5.sp,
                                 color = if (userProfile.hasGithubToken) RawColors.Tan else RawColors.TextMuted

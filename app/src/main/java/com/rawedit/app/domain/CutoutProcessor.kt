@@ -31,15 +31,20 @@ import android.webkit.WebViewClient
 import android.widget.FrameLayout
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.width
+import com.google.mlkit.vision.common.InputImage
+import com.google.mlkit.vision.segmentation.subject.SubjectSegmentation
+import com.google.mlkit.vision.segmentation.subject.SubjectSegmenterOptions
 import java.io.ByteArrayInputStream
 import java.io.File
 import java.io.FileOutputStream
+import kotlin.coroutines.resume
 import kotlin.math.ceil
 import kotlin.math.max
 import kotlin.math.min
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
@@ -635,4 +640,188 @@ object CutoutProcessor {
             base160.createDisplayContext(display)
         }
     }
+
+    /**
+     * Canva-grade on-device ML subject segmentation with smooth confidence alpha mask
+     * and graceful fallback to smart flood-fill if Play Services ML Kit is unavailable.
+     */
+    suspend fun segmentSubjectWithMlKit(sourceBitmap: Bitmap): CutoutProcessOutput = withContext(Dispatchers.Default) {
+        val mlResult: Bitmap? = runCatching {
+            val options = SubjectSegmenterOptions.Builder()
+                .enableForegroundConfidenceMask()
+                .build()
+            val segmenter = SubjectSegmentation.getClient(options)
+            val inputImage = InputImage.fromBitmap(sourceBitmap, 0)
+            val segResult = suspendCancellableCoroutine<com.google.mlkit.vision.segmentation.subject.SubjectSegmentationResult?> { cont ->
+                segmenter.process(inputImage)
+                    .addOnSuccessListener { res -> if (cont.isActive) cont.resume(res) }
+                    .addOnFailureListener { if (cont.isActive) cont.resume(null) }
+            }
+            val mask = segResult?.foregroundConfidenceMask
+            if (mask != null) {
+                val w = sourceBitmap.width
+                val h = sourceBitmap.height
+                val out = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888)
+                val pixels = IntArray(w * h)
+                sourceBitmap.getPixels(pixels, 0, w, 0, 0, w, h)
+                mask.rewind()
+                for (i in 0 until minOf(pixels.size, mask.remaining())) {
+                    val conf = mask.get()
+                    // Smooth S-curve alpha ramp around 0.25..0.75 for crisp, halo-free edges
+                    val norm = ((conf - 0.22f) / 0.56f).coerceIn(0f, 1f)
+                    val smoothAlpha = (norm * norm * (3f - 2f * norm) * 255f).toInt().coerceIn(0, 255)
+                    val orig = pixels[i]
+                    val origA = (orig ushr 24) and 0xFF
+                    val finalA = minOf(origA, smoothAlpha)
+                    pixels[i] = (finalA shl 24) or (orig and 0x00FFFFFF)
+                }
+                out.setPixels(pixels, 0, w, 0, 0, w, h)
+                out
+            } else {
+                null
+            }
+        }.getOrNull()
+
+        if (mlResult != null) {
+            CutoutProcessOutput(
+                resultBitmap = mlResult,
+                hadExistingTransparency = false,
+                detectedUniformMatte = false,
+                bgRemoved = true,
+                toleranceUsed = 34,
+                padUsed = CutoutPadRatios(0f, 0f, 0f, 0f)
+            )
+        } else {
+            processBitmapToCutout(sourceBitmap, tolerance = 34)
+        }
+    }
+
+    fun applyCutoutToolEraseCircle(
+        currentCutout: Bitmap,
+        cxNorm: Float,
+        cyNorm: Float,
+        radiusNorm: Float,
+        feather: Float = 0.25f
+    ): Bitmap {
+        val w = currentCutout.width
+        val h = currentCutout.height
+        val out = currentCutout.copy(Bitmap.Config.ARGB_8888, true)
+        val pixels = IntArray(w * h)
+        out.getPixels(pixels, 0, w, 0, 0, w, h)
+        val cx = cxNorm.coerceIn(0f, 1f) * w
+        val cy = cyNorm.coerceIn(0f, 1f) * h
+        val r = (radiusNorm.coerceIn(0.02f, 0.7f) * minOf(w, h)).coerceAtLeast(4f)
+        val innerR = r * (1f - feather.coerceIn(0.05f, 0.6f))
+        val rSq = r * r
+        val minX = max(0, (cx - r).toInt())
+        val maxX = min(w - 1, (cx + r).toInt())
+        val minY = max(0, (cy - r).toInt())
+        val maxY = min(h - 1, (cy + r).toInt())
+        for (y in minY..maxY) {
+            val dy = y - cy
+            val rowOff = y * w
+            for (x in minX..maxX) {
+                val dx = x - cx
+                val dSq = dx * dx + dy * dy
+                if (dSq <= rSq) {
+                    val d = kotlin.math.sqrt(dSq)
+                    val keepFactor = if (d <= innerR) 0f else ((d - innerR) / (r - innerR)).coerceIn(0f, 1f)
+                    val p = pixels[rowOff + x]
+                    val a = ((p ushr 24) and 0xFF)
+                    val newA = (a * keepFactor).toInt().coerceIn(0, 255)
+                    pixels[rowOff + x] = (newA shl 24) or (p and 0x00FFFFFF)
+                }
+            }
+        }
+        out.setPixels(pixels, 0, w, 0, 0, w, h)
+        return out
+    }
+
+    fun applyCutoutToolRestoreCircle(
+        currentCutout: Bitmap,
+        sourceBitmap: Bitmap,
+        cxNorm: Float,
+        cyNorm: Float,
+        radiusNorm: Float,
+        feather: Float = 0.25f
+    ): Bitmap {
+        val w = currentCutout.width
+        val h = currentCutout.height
+        val scaledSrc = if (sourceBitmap.width == w && sourceBitmap.height == h) {
+            sourceBitmap
+        } else {
+            Bitmap.createScaledBitmap(sourceBitmap, w, h, true)
+        }
+        val out = currentCutout.copy(Bitmap.Config.ARGB_8888, true)
+        val pixels = IntArray(w * h)
+        val srcPixels = IntArray(w * h)
+        out.getPixels(pixels, 0, w, 0, 0, w, h)
+        scaledSrc.getPixels(srcPixels, 0, w, 0, 0, w, h)
+
+        val cx = cxNorm.coerceIn(0f, 1f) * w
+        val cy = cyNorm.coerceIn(0f, 1f) * h
+        val r = (radiusNorm.coerceIn(0.02f, 0.7f) * minOf(w, h)).coerceAtLeast(4f)
+        val innerR = r * (1f - feather.coerceIn(0.05f, 0.6f))
+        val rSq = r * r
+        val minX = max(0, (cx - r).toInt())
+        val maxX = min(w - 1, (cx + r).toInt())
+        val minY = max(0, (cy - r).toInt())
+        val maxY = min(h - 1, (cy + r).toInt())
+        for (y in minY..maxY) {
+            val dy = y - cy
+            val rowOff = y * w
+            for (x in minX..maxX) {
+                val dx = x - cx
+                val dSq = dx * dx + dy * dy
+                if (dSq <= rSq) {
+                    val d = kotlin.math.sqrt(dSq)
+                    val restoreFactor = if (d <= innerR) 1f else (1f - (d - innerR) / (r - innerR)).coerceIn(0f, 1f)
+                    val idx = rowOff + x
+                    val curP = pixels[idx]
+                    val srcP = srcPixels[idx]
+                    val curA = (curP ushr 24) and 0xFF
+                    val srcA = (srcP ushr 24) and 0xFF
+                    val targetA = max(curA, (srcA * restoreFactor).toInt()).coerceIn(0, 255)
+                    pixels[idx] = (targetA shl 24) or (srcP and 0x00FFFFFF)
+                }
+            }
+        }
+        out.setPixels(pixels, 0, w, 0, 0, w, h)
+        if (scaledSrc !== sourceBitmap) scaledSrc.recycle()
+        return out
+    }
+
+    fun applyCutoutToolSoftenEdges(currentCutout: Bitmap, radiusPx: Int = 2): Bitmap {
+        val w = currentCutout.width
+        val h = currentCutout.height
+        val r = radiusPx.coerceIn(1, 5)
+        val src = IntArray(w * h)
+        val dst = IntArray(w * h)
+        currentCutout.getPixels(src, 0, w, 0, 0, w, h)
+        System.arraycopy(src, 0, dst, 0, src.size)
+        for (y in r until (h - r)) {
+            val rowOff = y * w
+            for (x in r until (w - r)) {
+                val center = src[rowOff + x]
+                val centerA = (center ushr 24) and 0xFF
+                // Only soften boundary pixels
+                if (centerA in 1..254) {
+                    var sum = 0
+                    var count = 0
+                    for (dy in -r..r) {
+                        for (dx in -r..r) {
+                            sum += (src[(y + dy) * w + (x + dx)] ushr 24) and 0xFF
+                            count++
+                        }
+                    }
+                    val avgA = (sum / count).coerceIn(0, 255)
+                    dst[rowOff + x] = (avgA shl 24) or (center and 0x00FFFFFF)
+                }
+            }
+        }
+        val out = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888)
+        out.setPixels(dst, 0, w, 0, 0, w, h)
+        return out
+    }
+
 }

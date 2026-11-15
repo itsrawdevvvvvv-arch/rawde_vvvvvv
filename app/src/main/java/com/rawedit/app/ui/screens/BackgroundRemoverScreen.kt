@@ -21,6 +21,7 @@ import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -32,6 +33,8 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -56,6 +59,7 @@ import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
@@ -83,6 +87,11 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlin.math.hypot
 
+data class BgChatEntry(
+    val isUser: Boolean,
+    val text: String
+)
+
 data class BgRemoverItem(
     val id: Int,
     val name: String,
@@ -90,7 +99,7 @@ data class BgRemoverItem(
     val cutoutBitmap: Bitmap,
     val tolerance: Int = 34,
     val circles: List<IssueCircle> = emptyList(),
-    val aiNote: String = ""
+    val chatLog: List<BgChatEntry> = emptyList()
 )
 
 @Composable
@@ -109,6 +118,7 @@ fun BackgroundRemoverScreen(
     var processingBatch by remember { mutableStateOf(false) }
     var refiningAi by remember { mutableStateOf(false) }
     var circleDrawMode by remember { mutableStateOf(false) }
+    var chatInput by remember { mutableStateOf("") }
     val activeDragPoints = remember { mutableStateListOf<PointNorm>() }
     var nextId by remember { mutableIntStateOf(1) }
     var toastMsg by remember { mutableStateOf<String?>(null) }
@@ -126,40 +136,36 @@ fun BackgroundRemoverScreen(
         if (uris.isEmpty()) return@rememberLauncherForActivityResult
         processingBatch = true
         scope.launch {
-            val created = withContext(Dispatchers.IO) {
-                val list = mutableListOf<BgRemoverItem>()
-                uris.forEachIndexed { idx, uri ->
+            val created = mutableListOf<BgRemoverItem>()
+            for ((idx, uri) in uris.withIndex()) {
+                val bmp = withContext(Dispatchers.IO) {
                     runCatching {
                         context.contentResolver.openInputStream(uri)?.use { stream ->
                             BitmapFactory.decodeStream(stream)
                         }
-                    }.getOrNull()?.let { bmp ->
-                        val out = CutoutProcessor.processBitmapToCutout(bmp, tolerance = 34)
-                        val rawName = uri.lastPathSegment?.substringAfterLast('/')?.substringBeforeLast('.')
-                            ?.replace(Regex("[^A-Za-z0-9_\\-]"), "_")
-                            ?.ifBlank { "cutout_${nextId + idx}" }
-                            ?: "cutout_${nextId + idx}"
-                        list.add(
-                            BgRemoverItem(
-                                id = nextId + idx,
-                                name = "${rawName}_cutout",
-                                sourceBitmap = bmp,
-                                cutoutBitmap = out.resultBitmap,
-                                tolerance = out.toleranceUsed
-                            )
-                        )
-                    }
+                    }.getOrNull()
                 }
-                list
+                if (bmp != null) {
+                    val out = CutoutProcessor.segmentSubjectWithMlKit(bmp)
+                    val rawName = uri.lastPathSegment?.substringAfterLast('/')?.substringBeforeLast('.')
+                        ?.replace(Regex("[^A-Za-z0-9_\\-]"), "_")
+                        ?.ifBlank { "cutout_${nextId + idx}" }
+                        ?: "cutout_${nextId + idx}"
+                    created.add(
+                        BgRemoverItem(
+                            id = nextId + idx,
+                            name = "${rawName}_cutout",
+                            sourceBitmap = bmp,
+                            cutoutBitmap = out.resultBitmap,
+                            tolerance = out.toleranceUsed
+                        )
+                    )
+                }
             }
             nextId += uris.size
             items = items + created
             processingBatch = false
-            if (created.isNotEmpty()) {
-                toastMsg = "Processed ${created.size} image(s)"
-            } else {
-                toastMsg = "Could not load selected image(s)"
-            }
+            toastMsg = if (created.isNotEmpty()) "Processed ${created.size} cutout(s)" else "Could not load images"
         }
     }
 
@@ -168,9 +174,9 @@ fun BackgroundRemoverScreen(
             .fillMaxSize()
             .background(RawColors.BgPrimary)
             .statusBarsPadding()
+            .imePadding()
     ) {
         Column(modifier = Modifier.fillMaxSize()) {
-            // Minimal Top Bar
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -202,7 +208,7 @@ fun BackgroundRemoverScreen(
                         RawPixelMascot(kind = PixelMascotKind.LENS_BOT, size = 64.dp)
                         Spacer(modifier = Modifier.height(14.dp))
                         Text(
-                            text = "BATCH CUTOUT\nWITH AI REFINE",
+                            text = "SMART CUTOUT\nSTUDIO",
                             fontFamily = BricolageFamily,
                             fontWeight = FontWeight.Bold,
                             fontSize = 28.sp,
@@ -212,7 +218,7 @@ fun BackgroundRemoverScreen(
                         )
                         Spacer(modifier = Modifier.height(10.dp))
                         Text(
-                            text = "Upload multiple images, circle any error, and refine with AI.",
+                            text = "Batch upload images, then circle or chat with AI to refine edges.",
                             fontFamily = BricolageFamily,
                             fontSize = 14.5.sp,
                             textAlign = TextAlign.Center,
@@ -237,7 +243,7 @@ fun BackgroundRemoverScreen(
                             .fillMaxSize()
                             .verticalScroll(scrollState)
                             .padding(horizontal = 18.dp)
-                            .padding(top = 6.dp, bottom = 112.dp),
+                            .padding(top = 6.dp, bottom = 104.dp),
                         verticalArrangement = Arrangement.spacedBy(12.dp)
                     ) {
                         if (processingBatch) {
@@ -256,7 +262,7 @@ fun BackgroundRemoverScreen(
                                     modifier = Modifier.size(18.dp)
                                 )
                                 Text(
-                                    text = "Removing backgrounds...",
+                                    text = "Segmenting subject...",
                                     fontFamily = BricolageFamily,
                                     fontWeight = FontWeight.SemiBold,
                                     fontSize = 14.sp,
@@ -266,13 +272,16 @@ fun BackgroundRemoverScreen(
                         }
 
                         if (items.isNotEmpty()) {
+                            val currentItem = items.getOrNull(pagerState.currentPage)
+
+                            // Cutout Preview Card
                             Column(
                                 modifier = Modifier
                                     .fillMaxWidth()
                                     .clip(RoundedCornerShape(26.dp))
                                     .background(RawColors.CardSurface)
                                     .padding(14.dp),
-                                verticalArrangement = Arrangement.spacedBy(12.dp)
+                                verticalArrangement = Arrangement.spacedBy(10.dp)
                             ) {
                                 HorizontalPager(
                                     state = pagerState,
@@ -290,24 +299,59 @@ fun BackgroundRemoverScreen(
                                             verticalAlignment = Alignment.CenterVertically
                                         ) {
                                             Text(
-                                                text = "${pageIdx + 1} / ${items.size}  \u2022  tol ${item.tolerance}",
+                                                text = "${pageIdx + 1} / ${items.size}",
                                                 fontFamily = JetBrainsMonoFamily,
                                                 fontWeight = FontWeight.Bold,
                                                 fontSize = 12.sp,
                                                 color = RawColors.Tan
                                             )
-                                            if (item.aiNote.isNotBlank()) {
-                                                Text(
-                                                    text = item.aiNote,
-                                                    fontFamily = BricolageFamily,
-                                                    fontSize = 12.sp,
-                                                    color = RawColors.TextMuted,
-                                                    maxLines = 1
-                                                )
+                                            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                                RawPressButton(onClick = { circleDrawMode = !circleDrawMode }) {
+                                                    Row(
+                                                        modifier = Modifier
+                                                            .clip(CircleShape)
+                                                            .background(if (circleDrawMode) RawColors.ErrorCoral else RawColors.RaisedCard)
+                                                            .padding(horizontal = 12.dp, vertical = 6.dp),
+                                                        verticalAlignment = Alignment.CenterVertically,
+                                                        horizontalArrangement = Arrangement.spacedBy(5.dp)
+                                                    ) {
+                                                        RawIcon(
+                                                            type = RawIconType.EDIT,
+                                                            size = 12.dp,
+                                                            tint = if (circleDrawMode) Color.Black else RawColors.ErrorCoral
+                                                        )
+                                                        Text(
+                                                            text = if (circleDrawMode) "Done" else "Circle area",
+                                                            fontFamily = BricolageFamily,
+                                                            fontWeight = FontWeight.Bold,
+                                                            fontSize = 12.sp,
+                                                            color = if (circleDrawMode) Color.Black else RawColors.TextPrimary
+                                                        )
+                                                    }
+                                                }
+                                                if (item.circles.isNotEmpty()) {
+                                                    Box(
+                                                        modifier = Modifier
+                                                            .clip(CircleShape)
+                                                            .background(RawColors.RaisedCard)
+                                                            .clickable {
+                                                                items = items.map {
+                                                                    if (it.id == item.id) it.copy(circles = emptyList()) else it
+                                                                }
+                                                            }
+                                                            .padding(horizontal = 10.dp, vertical = 6.dp)
+                                                    ) {
+                                                        Text(
+                                                            text = "Clear",
+                                                            fontFamily = BricolageFamily,
+                                                            fontSize = 12.sp,
+                                                            color = RawColors.TextMuted
+                                                        )
+                                                    }
+                                                }
                                             }
                                         }
 
-                                        // Checkerboard + Cutout Preview + Red Error Circle Drawing
                                         Box(
                                             modifier = Modifier
                                                 .fillMaxWidth()
@@ -353,7 +397,7 @@ fun BackgroundRemoverScreen(
                                                                             val c = IssueCircle(
                                                                                 centerXNorm = (minX + maxX) * 0.5f,
                                                                                 centerYNorm = (minY + maxY) * 0.5f,
-                                                                                radiusNorm = span.coerceIn(0.08f, 0.45f),
+                                                                                radiusNorm = span.coerceIn(0.06f, 0.5f),
                                                                                 pointsNorm = pts
                                                                             )
                                                                             items = items.map {
@@ -380,7 +424,6 @@ fun BackgroundRemoverScreen(
                                                     } else Modifier
                                                 )
                                         ) {
-                                            // Subtle checkerboard
                                             Canvas(modifier = Modifier.fillMaxSize()) {
                                                 val cell = 18.dp.toPx()
                                                 val cols = (size.width / cell).toInt() + 1
@@ -404,10 +447,9 @@ fun BackgroundRemoverScreen(
                                                 contentScale = ContentScale.Fit,
                                                 modifier = Modifier
                                                     .fillMaxSize()
-                                                    .padding(12.dp)
+                                                    .padding(8.dp)
                                             )
 
-                                            // Red circles overlay
                                             Canvas(modifier = Modifier.fillMaxSize()) {
                                                 val w = size.width
                                                 val h = size.height
@@ -449,129 +491,159 @@ fun BackgroundRemoverScreen(
                                                 }
                                             }
                                         }
+                                    }
+                                }
+                            }
 
-                                        // Minimal Circle + AI Refine row
-                                        Row(
-                                            modifier = Modifier.fillMaxWidth(),
-                                            horizontalArrangement = Arrangement.spacedBy(8.dp),
-                                            verticalAlignment = Alignment.CenterVertically
+                            // AI Cutout Chat Box Below Image
+                            if (currentItem != null) {
+                                Column(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .clip(RoundedCornerShape(24.dp))
+                                        .background(RawColors.CardSurface)
+                                        .padding(14.dp),
+                                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                                ) {
+                                    currentItem.chatLog.takeLast(3).forEach { entry ->
+                                        Box(
+                                            modifier = Modifier
+                                                .fillMaxWidth()
+                                                .clip(RoundedCornerShape(14.dp))
+                                                .background(if (entry.isUser) RawColors.AccentSoft else RawColors.RaisedCard)
+                                                .padding(horizontal = 12.dp, vertical = 8.dp)
                                         ) {
-                                            RawPressButton(onClick = { circleDrawMode = !circleDrawMode }) {
-                                                Row(
-                                                    modifier = Modifier
-                                                        .clip(CircleShape)
-                                                        .background(if (circleDrawMode) RawColors.ErrorCoral else RawColors.RaisedCard)
-                                                        .padding(horizontal = 13.dp, vertical = 8.dp),
-                                                    verticalAlignment = Alignment.CenterVertically,
-                                                    horizontalArrangement = Arrangement.spacedBy(6.dp)
-                                                ) {
-                                                    RawIcon(
-                                                        type = RawIconType.EDIT,
-                                                        size = 13.dp,
-                                                        tint = if (circleDrawMode) Color.Black else RawColors.ErrorCoral
-                                                    )
-                                                    Text(
-                                                        text = if (circleDrawMode) "Done" else "Circle error",
-                                                        fontFamily = BricolageFamily,
-                                                        fontWeight = FontWeight.Bold,
-                                                        fontSize = 13.sp,
-                                                        color = if (circleDrawMode) Color.Black else RawColors.TextPrimary
-                                                    )
-                                                }
-                                            }
-
-                                            if (item.circles.isNotEmpty()) {
-                                                Box(
-                                                    modifier = Modifier
-                                                        .clip(CircleShape)
-                                                        .background(RawColors.RaisedCard)
-                                                        .clickable {
-                                                            items = items.map {
-                                                                if (it.id == item.id) it.copy(circles = emptyList()) else it
-                                                            }
-                                                        }
-                                                        .padding(horizontal = 12.dp, vertical = 8.dp)
-                                                ) {
-                                                    Text(
-                                                        text = "Clear",
-                                                        fontFamily = BricolageFamily,
-                                                        fontWeight = FontWeight.SemiBold,
-                                                        fontSize = 13.sp,
-                                                        color = RawColors.TextMuted
-                                                    )
-                                                }
-                                            }
-
-                                            Spacer(modifier = Modifier.weight(1f))
-
-                                            RawPressButton(
-                                                enabled = !refiningAi,
-                                                onClick = {
-                                                    if (apiKey.isBlank()) {
-                                                        onOpenGeminiKey()
-                                                        return@RawPressButton
-                                                    }
-                                                    refiningAi = true
-                                                    circleDrawMode = false
-                                                    scope.launch {
-                                                        val aiRes = geminiRouter.refineCutoutWithCircles(
-                                                            apiKey = apiKey,
-                                                            cutoutBitmap = item.cutoutBitmap,
-                                                            circles = item.circles,
-                                                            currentTolerance = item.tolerance
-                                                        )
-                                                        aiRes.onSuccess { (newTol, note) ->
-                                                            val reprocessed = withContext(Dispatchers.IO) {
-                                                                CutoutProcessor.processBitmapToCutout(
-                                                                    item.sourceBitmap,
-                                                                    tolerance = newTol
-                                                                )
-                                                            }
-                                                            items = items.map {
-                                                                if (it.id == item.id) {
-                                                                    it.copy(
-                                                                        cutoutBitmap = reprocessed.resultBitmap,
-                                                                        tolerance = newTol,
-                                                                        circles = emptyList(),
-                                                                        aiNote = note
-                                                                    )
-                                                                } else it
-                                                            }
-                                                            toastMsg = note
-                                                        }.onFailure { err ->
-                                                            toastMsg = err.message ?: "AI refine failed"
-                                                        }
-                                                        refiningAi = false
-                                                    }
-                                                }
-                                            ) {
-                                                Row(
-                                                    modifier = Modifier
-                                                        .clip(CircleShape)
-                                                        .background(RawColors.Tan)
-                                                        .padding(horizontal = 14.dp, vertical = 8.dp),
-                                                    verticalAlignment = Alignment.CenterVertically,
-                                                    horizontalArrangement = Arrangement.spacedBy(6.dp)
-                                                ) {
-                                                    if (refiningAi) {
-                                                        CircularProgressIndicator(
-                                                            color = RawColors.Ink,
-                                                            strokeWidth = 2.dp,
-                                                            modifier = Modifier.size(13.dp)
-                                                        )
-                                                    } else {
-                                                        RawIcon(RawIconType.SPARK, size = 13.dp, tint = RawColors.Ink)
-                                                    }
-                                                    Text(
-                                                        text = if (refiningAi) "Refining..." else "AI Refine",
-                                                        fontFamily = BricolageFamily,
-                                                        fontWeight = FontWeight.Bold,
-                                                        fontSize = 13.sp,
-                                                        color = RawColors.Ink
-                                                    )
-                                                }
-                                            }
+                                            Text(
+                                                text = entry.text,
+                                                fontFamily = BricolageFamily,
+                                                fontSize = 13.sp,
+                                                color = if (entry.isUser) RawColors.Tan else RawColors.TextPrimary
+                                            )
                                         }
+                                    }
+
+                                    Row(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                    ) {
+                                        OutlinedTextField(
+                                            value = chatInput,
+                                            onValueChange = { chatInput = it },
+                                            placeholder = {
+                                                Text(
+                                                    text = "Describe fix (e.g. remove circled area, soften edges)...",
+                                                    color = RawColors.TextMuted,
+                                                    fontSize = 13.sp
+                                                )
+                                            },
+                                            textStyle = TextStyle(
+                                                fontFamily = BricolageFamily,
+                                                fontSize = 14.sp,
+                                                color = RawColors.TextPrimary
+                                            ),
+                                            maxLines = 2,
+                                            shape = RoundedCornerShape(18.dp),
+                                            colors = OutlinedTextFieldDefaults.colors(
+                                                focusedBorderColor = RawColors.Tan,
+                                                unfocusedBorderColor = Color.Transparent,
+                                                focusedContainerColor = RawColors.RaisedCard,
+                                                unfocusedContainerColor = RawColors.RaisedCard,
+                                                cursorColor = RawColors.Tan
+                                            ),
+                                            modifier = Modifier.weight(1f)
+                                        )
+
+                                        CircleActionButton(
+                                            icon = if (refiningAi) RawIconType.CLOCK else RawIconType.ARROW_RIGHT,
+                                            size = 44.dp,
+                                            backgroundColor = RawColors.Tan,
+                                            iconTint = RawColors.Ink,
+                                            enabled = !refiningAi && (chatInput.isNotBlank() || currentItem.circles.isNotEmpty()),
+                                            onClick = {
+                                                if (apiKey.isBlank()) {
+                                                    onOpenGeminiKey()
+                                                    return@CircleActionButton
+                                                }
+                                                val msg = chatInput.trim().ifBlank { "Fix the circled area cleanly." }
+                                                chatInput = ""
+                                                circleDrawMode = false
+                                                refiningAi = true
+                                                items = items.map {
+                                                    if (it.id == currentItem.id) {
+                                                        it.copy(chatLog = it.chatLog + BgChatEntry(true, msg))
+                                                    } else it
+                                                }
+                                                scope.launch {
+                                                    val agentRes = geminiRouter.runCutoutToolAgent(
+                                                        apiKey = apiKey,
+                                                        cutoutBitmap = currentItem.cutoutBitmap,
+                                                        circles = currentItem.circles,
+                                                        userInstruction = msg,
+                                                        currentTolerance = currentItem.tolerance
+                                                    )
+                                                    agentRes.onSuccess { outcome ->
+                                                        var nextBmp = currentItem.cutoutBitmap
+                                                        var nextTol = currentItem.tolerance
+                                                        for (call in outcome.toolCalls) {
+                                                            when (call.tool) {
+                                                                "erase_circle" -> {
+                                                                    nextBmp = withContext(Dispatchers.Default) {
+                                                                        CutoutProcessor.applyCutoutToolEraseCircle(
+                                                                            nextBmp, call.cx, call.cy, call.radius
+                                                                        )
+                                                                    }
+                                                                }
+                                                                "restore_circle" -> {
+                                                                    nextBmp = withContext(Dispatchers.Default) {
+                                                                        CutoutProcessor.applyCutoutToolRestoreCircle(
+                                                                            nextBmp, currentItem.sourceBitmap, call.cx, call.cy, call.radius
+                                                                        )
+                                                                    }
+                                                                }
+                                                                "soften_edges" -> {
+                                                                    nextBmp = withContext(Dispatchers.Default) {
+                                                                        CutoutProcessor.applyCutoutToolSoftenEdges(nextBmp, call.intParam)
+                                                                    }
+                                                                }
+                                                                "resegment_flood" -> {
+                                                                    nextTol = call.intParam.coerceIn(8, 90)
+                                                                    nextBmp = withContext(Dispatchers.Default) {
+                                                                        CutoutProcessor.processBitmapToCutout(
+                                                                            currentItem.sourceBitmap, tolerance = nextTol
+                                                                        ).resultBitmap
+                                                                    }
+                                                                }
+                                                                "reset_ml_cutout" -> {
+                                                                    nextBmp = CutoutProcessor.segmentSubjectWithMlKit(
+                                                                        currentItem.sourceBitmap
+                                                                    ).resultBitmap
+                                                                }
+                                                            }
+                                                        }
+                                                        items = items.map {
+                                                            if (it.id == currentItem.id) {
+                                                                it.copy(
+                                                                    cutoutBitmap = nextBmp,
+                                                                    tolerance = nextTol,
+                                                                    circles = emptyList(),
+                                                                    chatLog = it.chatLog + BgChatEntry(false, outcome.reply)
+                                                                )
+                                                            } else it
+                                                        }
+                                                    }.onFailure { err ->
+                                                        items = items.map {
+                                                            if (it.id == currentItem.id) {
+                                                                it.copy(
+                                                                    chatLog = it.chatLog + BgChatEntry(false, err.message ?: "Could not run AI tool")
+                                                                )
+                                                            } else it
+                                                        }
+                                                    }
+                                                    refiningAi = false
+                                                }
+                                            }
+                                        )
                                     }
                                 }
                             }
@@ -595,7 +667,7 @@ fun BackgroundRemoverScreen(
                                         items.forEach { it ->
                                             onSaveCutout(it.cutoutBitmap, it.name)
                                         }
-                                        toastMsg = "Saved ${items.size} cutout(s) to Assets"
+                                        toastMsg = "Saved ${items.size} cutout(s)"
                                         onBack()
                                     },
                                     modifier = Modifier.weight(1f)

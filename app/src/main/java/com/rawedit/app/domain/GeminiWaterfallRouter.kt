@@ -57,6 +57,20 @@ data class ModelHealthStatus(
     val dailyLimit: Int
 )
 
+
+data class CutoutToolCall(
+    val tool: String,
+    val cx: Float = 0.5f,
+    val cy: Float = 0.5f,
+    val radius: Float = 0.14f,
+    val intParam: Int = 34
+)
+
+data class CutoutToolAgentResult(
+    val reply: String,
+    val toolCalls: List<CutoutToolCall>
+)
+
 data class GeminiImageInput(
     val base64Data: String,
     val mimeType: String = "image/jpeg"
@@ -934,6 +948,69 @@ class GeminiWaterfallRouter(context: Context) {
             val recTol = obj.optInt("recommendedTolerance", currentTolerance).coerceIn(8, 90)
             val note = obj.optString("note", "AI refined tolerance to $recTol").ifBlank { "AI refined tolerance to $recTol" }
             recTol to note
+        }
+    }
+
+
+    suspend fun runCutoutToolAgent(
+        apiKey: String,
+        cutoutBitmap: Bitmap,
+        circles: List<IssueCircle>,
+        userInstruction: String,
+        currentTolerance: Int
+    ): Result<CutoutToolAgentResult> = withContext(Dispatchers.IO) {
+        runCatching {
+            val circleDesc = if (circles.isEmpty()) {
+                "None drawn."
+            } else {
+                circles.joinToString("; ") { c ->
+                    "circle(cx=%.3f, cy=%.3f, r=%.3f)".format(Locale.US, c.centerXNorm, c.centerYNorm, c.radiusNorm)
+                }
+            }
+            val prompt = buildString {
+                appendLine("You are an AI Cutout Editor controlling image cutout tools.")
+                appendLine("User instruction: "$userInstruction"")
+                appendLine("User-drawn red circles (normalized 0..1): $circleDesc")
+                appendLine("Current flood-fill tolerance: $currentTolerance")
+                appendLine()
+                appendLine("Available tools:")
+                appendLine("1. {"tool": "erase_circle", "cx": <0..1>, "cy": <0..1>, "r": <0.03..0.6>} -> removes unwanted leftover background/object in that circle.")
+                appendLine("2. {"tool": "restore_circle", "cx": <0..1>, "cy": <0..1>, "r": <0.03..0.6>} -> restores accidentally cut-out foreground subject in that circle.")
+                appendLine("3. {"tool": "soften_edges", "value": <1..4>} -> feathers/smooths jagged edges.")
+                appendLine("4. {"tool": "resegment_flood", "value": <8..90>} -> re-runs solid background flood-fill with new tolerance.")
+                appendLine("5. {"tool": "reset_ml_cutout"} -> resets to fresh on-device ML subject segmentation.")
+                appendLine()
+                appendLine("If user drew circle(s) and says 'remove'/'erase'/'clean'/'fix', emit erase_circle at those exact cx, cy, r (or restore_circle if they say 'restore'/'keep'/'bring back').")
+                appendLine("Return ONLY valid JSON:")
+                appendLine("{"reply": "<short 1-sentence confirmation>", "tools": [ ... ]}")
+            }
+            val b64 = bitmapToJpegBase64(cutoutBitmap, maxDim = 768, quality = 85)
+            val res = generateWithWaterfall(
+                apiKey = apiKey,
+                mode = GeminiRouteMode.FAST_CHAT,
+                prompt = prompt,
+                systemInstruction = "Output strict JSON only.",
+                expectJson = true,
+                images = listOf(GeminiImageInput(b64, "image/jpeg"))
+            ).getOrThrow()
+
+            val obj = JSONObject(extractJsonObject(res.text))
+            val reply = obj.optString("reply", "Applied cutout refinement.").ifBlank { "Applied cutout refinement." }
+            val toolsArr = obj.optJSONArray("tools") ?: JSONArray()
+            val calls = mutableListOf<CutoutToolCall>()
+            for (i in 0 until toolsArr.length()) {
+                val t = toolsArr.optJSONObject(i) ?: continue
+                calls.add(
+                    CutoutToolCall(
+                        tool = t.optString("tool", ""),
+                        cx = t.optDouble("cx", 0.5).toFloat().coerceIn(0f, 1f),
+                        cy = t.optDouble("cy", 0.5).toFloat().coerceIn(0f, 1f),
+                        radius = t.optDouble("r", 0.14).toFloat().coerceIn(0.02f, 0.7f),
+                        intParam = t.optInt("value", currentTolerance)
+                    )
+                )
+            }
+            CutoutToolAgentResult(reply = reply, toolCalls = calls)
         }
     }
 

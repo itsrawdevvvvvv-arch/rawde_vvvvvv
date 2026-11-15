@@ -37,6 +37,9 @@ object ChatbotEngine {
     private val PROMPT_UPDATE_REGEX = Regex("""<<<PROMPT_UPDATE\s*\n([\s\S]*?)>>>""", RegexOption.IGNORE_CASE)
     private val STYLE_ZIP_REGEX = Regex("""<<<STYLE_ZIP_FILE\s+path="([^"]+)"\s*>>>\s*\n([\s\S]*?)<<<END_STYLE_ZIP_FILE>>>""", RegexOption.IGNORE_CASE)
     private val GITHUB_FETCH_REGEX = Regex("""<<<GITHUB_FETCH\s+query="([^"]+)"\s*>>>""", RegexOption.IGNORE_CASE)
+    private val GITHUB_CREATE_REPO_REGEX = Regex("""<<<GITHUB_CREATE_REPO\s+name="([^"]+)"(?:\s+description="([^"]*)")?(?:\s+private="(true|false)")?\s*>>>""", RegexOption.IGNORE_CASE)
+    private val GITHUB_WRITE_FILE_REGEX = Regex("""<<<GITHUB_WRITE_FILE\s+repo="([^"]+)"\s+path="([^"]+)"(?:\s+message="([^"]*)")?\s*>>>\s*\n([\s\S]*?)<<<END_GITHUB_WRITE_FILE>>>""", RegexOption.IGNORE_CASE)
+    private val GITHUB_DELETE_FILE_REGEX = Regex("""<<<GITHUB_DELETE_FILE\s+repo="([^"]+)"\s+path="([^"]+)"(?:\s+message="([^"]*)")?\s*>>>""", RegexOption.IGNORE_CASE)
 
     fun loadChatHistory(cacheManager: CacheManager, sessionKey: String = "global"): List<ChatMessageItem> {
         val file = File(cacheManager.chatHistoryDir, "chat_${sessionKey}.json")
@@ -202,8 +205,11 @@ object ChatbotEngine {
                 <<<STYLE_ZIP_FILE path="kinetic-explainer-style/SKILL.md">>>
                 [Full updated file content]
                 <<<END_STYLE_ZIP_FILE>>>
-                3. To fetch a tool/skill/repo from GitHub, include:
-                <<<GITHUB_FETCH query="owner/repo or search term">>>
+                3. GitHub tools (when token is active):
+                - Fetch repo/skill: <<<GITHUB_FETCH query="owner/repo or search term">>>
+                - Create repo: <<<GITHUB_CREATE_REPO name="repo-name" description="..." private="false">>>
+                - Create or edit file: <<<GITHUB_WRITE_FILE repo="owner/repo" path="path/to/file" message="commit msg">>>\n[file content]\n<<<END_GITHUB_WRITE_FILE>>>
+                - Delete file: <<<GITHUB_DELETE_FILE repo="owner/repo" path="path/to/file" message="commit msg">>>
                 4. To patch the active project's HTML reel code, include standard search/replace blocks:
                 <<<SEARCH
                 exact lines in current HTML
@@ -293,6 +299,56 @@ object ChatbotEngine {
                 if (path.isNotBlank() && content.isNotBlank()) {
                     cacheManager.saveStylePackOverride(path, content)
                     appliedBadges.add("Customized Style ZIP: $path")
+                }
+                replyText = replyText.replace(m.value, "").trim()
+            }
+
+            // 3b. GitHub Create Repo / Write File / Delete File
+            GITHUB_CREATE_REPO_REGEX.findAll(replyText).toList().forEach { m ->
+                val repoName = m.groupValues[1].trim()
+                val desc = m.groupValues[2].trim()
+                val priv = m.groupValues[3].equals("true", ignoreCase = true)
+                if (repoName.isNotEmpty()) {
+                    GitHubToolFetcher.createRepo(userProfile.githubAccessToken, repoName, desc, priv)
+                        .onSuccess { full ->
+                            appliedBadges.add("Created GitHub repo: $full")
+                            replyText += "\n\nCreated repo: **$full**"
+                        }.onFailure { err ->
+                            replyText += "\n\n*(GitHub create note: ${err.message})*"
+                        }
+                }
+                replyText = replyText.replace(m.value, "").trim()
+            }
+            GITHUB_WRITE_FILE_REGEX.findAll(replyText).toList().forEach { m ->
+                val repoSlug = m.groupValues[1].trim()
+                val filePath = m.groupValues[2].trim()
+                val msg = m.groupValues[3].trim()
+                val content = m.groupValues[4]
+                val parts = repoSlug.split("/", limit = 2)
+                if (parts.size == 2) {
+                    GitHubToolFetcher.createOrUpdateRepoFile(userProfile.githubAccessToken, parts[0], parts[1], filePath, content, msg)
+                        .onSuccess { target ->
+                            appliedBadges.add("Committed to GitHub: $target")
+                            replyText += "\n\nCommitted: `$target`"
+                        }.onFailure { err ->
+                            replyText += "\n\n*(GitHub write note: ${err.message})*"
+                        }
+                }
+                replyText = replyText.replace(m.value, "").trim()
+            }
+            GITHUB_DELETE_FILE_REGEX.findAll(replyText).toList().forEach { m ->
+                val repoSlug = m.groupValues[1].trim()
+                val filePath = m.groupValues[2].trim()
+                val msg = m.groupValues[3].trim()
+                val parts = repoSlug.split("/", limit = 2)
+                if (parts.size == 2) {
+                    GitHubToolFetcher.deleteRepoFile(userProfile.githubAccessToken, parts[0], parts[1], filePath, msg)
+                        .onSuccess { resMsg ->
+                            appliedBadges.add(resMsg)
+                            replyText += "\n\n$resMsg"
+                        }.onFailure { err ->
+                            replyText += "\n\n*(GitHub delete note: ${err.message})*"
+                        }
                 }
                 replyText = replyText.replace(m.value, "").trim()
             }

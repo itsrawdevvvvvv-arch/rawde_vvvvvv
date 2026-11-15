@@ -231,4 +231,183 @@ object GitHubToolFetcher {
         }
         return null
     }
+
+    suspend fun listUserRepos(githubToken: String, limit: Int = 15): Result<List<String>> = withContext(Dispatchers.IO) {
+        runCatching {
+            val clean = githubToken.trim().removePrefix("Bearer ").removePrefix("token ").trim()
+            if (clean.isEmpty()) throw IllegalArgumentException("GitHub token required.")
+            val conn = openGithubConnection("https://api.github.com/user/repos?sort=updated&per_page=$limit", clean)
+            try {
+                if (conn.responseCode != 200) {
+                    val err = conn.errorStream?.bufferedReader()?.use { it.readText() }.orEmpty()
+                    throw IllegalStateException("GitHub HTTP ${conn.responseCode}: ${err.take(120)}")
+                }
+                val arr = JSONArray(conn.inputStream.bufferedReader().use { it.readText() })
+                (0 until arr.length()).mapNotNull { i ->
+                    val o = arr.optJSONObject(i) ?: return@mapNotNull null
+                    val full = o.optString("full_name")
+                    val priv = if (o.optBoolean("private")) "private" else "public"
+                    "$full ($priv)"
+                }
+            } finally {
+                conn.disconnect()
+            }
+        }
+    }
+
+    suspend fun createRepo(
+        githubToken: String,
+        name: String,
+        description: String = "",
+        isPrivate: Boolean = false
+    ): Result<String> = withContext(Dispatchers.IO) {
+        runCatching {
+            val clean = githubToken.trim().removePrefix("Bearer ").removePrefix("token ").trim()
+            if (clean.isEmpty()) throw IllegalArgumentException("GitHub token required to create a repo.")
+            val conn = (URL("https://api.github.com/user/repos").openConnection() as HttpURLConnection).apply {
+                requestMethod = "POST"
+                doOutput = true
+                connectTimeout = 15_000
+                readTimeout = 25_000
+                setRequestProperty("Accept", "application/vnd.github+json")
+                setRequestProperty("Content-Type", "application/json; charset=UTF-8")
+                setRequestProperty("User-Agent", "RawEdit-Android-App")
+                setRequestProperty("Authorization", "Bearer $clean")
+            }
+            try {
+                val payload = JSONObject().apply {
+                    put("name", name.trim())
+                    if (description.isNotBlank()) put("description", description.trim())
+                    put("private", isPrivate)
+                    put("auto_init", true)
+                }.toString()
+                conn.outputStream.use { it.write(payload.toByteArray(Charsets.UTF_8)) }
+                val code = conn.responseCode
+                if (code in 200..299) {
+                    val obj = JSONObject(conn.inputStream.bufferedReader().use { it.readText() })
+                    obj.optString("full_name", name)
+                } else {
+                    val err = conn.errorStream?.bufferedReader()?.use { it.readText() }.orEmpty()
+                    throw IllegalStateException("Create repo failed (HTTP $code): ${err.take(140)}")
+                }
+            } finally {
+                conn.disconnect()
+            }
+        }
+    }
+
+    suspend fun readRepoFile(
+        githubToken: String,
+        owner: String,
+        repo: String,
+        path: String
+    ): Result<Pair<String, String>> = withContext(Dispatchers.IO) {
+        runCatching {
+            val clean = githubToken.trim().removePrefix("Bearer ").removePrefix("token ").trim()
+            val cleanPath = path.trimStart('/')
+            val conn = openGithubConnection("https://api.github.com/repos/$owner/$repo/contents/$cleanPath", clean)
+            try {
+                if (conn.responseCode != 200) {
+                    val err = conn.errorStream?.bufferedReader()?.use { it.readText() }.orEmpty()
+                    throw IllegalStateException("Read file failed (HTTP ${conn.responseCode}): ${err.take(120)}")
+                }
+                val obj = JSONObject(conn.inputStream.bufferedReader().use { it.readText() })
+                val sha = obj.optString("sha", "")
+                val b64 = obj.optString("content", "")
+                val text = if (b64.isNotBlank()) {
+                    String(Base64.decode(b64.replace("\n", "").replace("\r", ""), Base64.DEFAULT), Charsets.UTF_8)
+                } else ""
+                text to sha
+            } finally {
+                conn.disconnect()
+            }
+        }
+    }
+
+    suspend fun createOrUpdateRepoFile(
+        githubToken: String,
+        owner: String,
+        repo: String,
+        path: String,
+        content: String,
+        commitMessage: String = "Update via RAW EDIT AI"
+    ): Result<String> = withContext(Dispatchers.IO) {
+        runCatching {
+            val clean = githubToken.trim().removePrefix("Bearer ").removePrefix("token ").trim()
+            if (clean.isEmpty()) throw IllegalArgumentException("GitHub token required to edit files.")
+            val cleanPath = path.trimStart('/')
+            val existingSha = readRepoFile(clean, owner, repo, cleanPath).getOrNull()?.second.orEmpty()
+            val conn = (URL("https://api.github.com/repos/$owner/$repo/contents/$cleanPath").openConnection() as HttpURLConnection).apply {
+                requestMethod = "PUT"
+                doOutput = true
+                connectTimeout = 15_000
+                readTimeout = 25_000
+                setRequestProperty("Accept", "application/vnd.github+json")
+                setRequestProperty("Content-Type", "application/json; charset=UTF-8")
+                setRequestProperty("User-Agent", "RawEdit-Android-App")
+                setRequestProperty("Authorization", "Bearer $clean")
+            }
+            try {
+                val b64 = Base64.encodeToString(content.toByteArray(Charsets.UTF_8), Base64.NO_WRAP)
+                val payload = JSONObject().apply {
+                    put("message", commitMessage.ifBlank { "Update $cleanPath" })
+                    put("content", b64)
+                    if (existingSha.isNotBlank()) put("sha", existingSha)
+                }.toString()
+                conn.outputStream.use { it.write(payload.toByteArray(Charsets.UTF_8)) }
+                val code = conn.responseCode
+                if (code in 200..299) {
+                    "$owner/$repo/$cleanPath"
+                } else {
+                    val err = conn.errorStream?.bufferedReader()?.use { it.readText() }.orEmpty()
+                    throw IllegalStateException("GitHub write failed (HTTP $code): ${err.take(140)}")
+                }
+            } finally {
+                conn.disconnect()
+            }
+        }
+    }
+
+    suspend fun deleteRepoFile(
+        githubToken: String,
+        owner: String,
+        repo: String,
+        path: String,
+        commitMessage: String = "Delete via RAW EDIT AI"
+    ): Result<String> = withContext(Dispatchers.IO) {
+        runCatching {
+            val clean = githubToken.trim().removePrefix("Bearer ").removePrefix("token ").trim()
+            if (clean.isEmpty()) throw IllegalArgumentException("GitHub token required.")
+            val cleanPath = path.trimStart('/')
+            val existingSha = readRepoFile(clean, owner, repo, cleanPath).getOrThrow().second
+            if (existingSha.isBlank()) throw IllegalStateException("File SHA not found for $cleanPath")
+            val conn = (URL("https://api.github.com/repos/$owner/$repo/contents/$cleanPath").openConnection() as HttpURLConnection).apply {
+                requestMethod = "DELETE"
+                doOutput = true
+                connectTimeout = 15_000
+                readTimeout = 25_000
+                setRequestProperty("Accept", "application/vnd.github+json")
+                setRequestProperty("Content-Type", "application/json; charset=UTF-8")
+                setRequestProperty("User-Agent", "RawEdit-Android-App")
+                setRequestProperty("Authorization", "Bearer $clean")
+            }
+            try {
+                val payload = JSONObject().apply {
+                    put("message", commitMessage.ifBlank { "Delete $cleanPath" })
+                    put("sha", existingSha)
+                }.toString()
+                conn.outputStream.use { it.write(payload.toByteArray(Charsets.UTF_8)) }
+                val code = conn.responseCode
+                if (code in 200..299) {
+                    "Deleted $owner/$repo/$cleanPath"
+                } else {
+                    val err = conn.errorStream?.bufferedReader()?.use { it.readText() }.orEmpty()
+                    throw IllegalStateException("GitHub delete failed (HTTP $code): ${err.take(140)}")
+                }
+            } finally {
+                conn.disconnect()
+            }
+        }
+    }
+
 }
