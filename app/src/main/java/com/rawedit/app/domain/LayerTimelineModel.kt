@@ -280,6 +280,13 @@ object LayerTimelineCompiler {
             domMap[l.id] = el;
           });
 
+          window.__updateLayerData = function(jsonStr) {
+            try {
+              var next = JSON.parse(jsonStr);
+              if (Array.isArray(next)) LAYERS = next;
+            } catch (_) {}
+          };
+
           window.__applyLayerTimeline = function(t) {
             var promises = [];
             LAYERS.forEach(function(l) {

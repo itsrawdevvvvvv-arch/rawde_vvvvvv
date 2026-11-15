@@ -681,6 +681,7 @@ private fun MainAuthenticatedHost(
                             project = proj,
                             allAssets = allAssets,
                             cacheManager = container.cacheManager,
+                            onOpenChatbot = { pushRoute(AppRoute.Chatbot(proj.id)) },
                             onBack = ::popRoute,
                             onSaveLayers = { layersJson, hasLayers ->
                                 scope.launch {

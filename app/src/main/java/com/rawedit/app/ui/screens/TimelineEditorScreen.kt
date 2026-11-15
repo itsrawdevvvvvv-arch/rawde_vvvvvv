@@ -1,17 +1,16 @@
 package com.rawedit.app.ui.screens
 
-import android.graphics.Color as AndroidColor
-import androidx.compose.foundation.Canvas
+import android.annotation.SuppressLint
+import android.view.ViewGroup
+import android.webkit.WebView
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
@@ -35,78 +34,78 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
+import androidx.compose.material3.Slider
+import androidx.compose.material3.SliderDefaults
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableDoubleStateOf
-import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.clipToBounds
-import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.PathEffect
-import androidx.compose.ui.graphics.drawscope.Stroke
-import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
-import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
-import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
-import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.viewinterop.AndroidView
 import androidx.compose.ui.window.Dialog
-import coil.compose.AsyncImage
-import coil.request.ImageRequest
 import com.rawedit.app.data.CacheManager
 import com.rawedit.app.data.local.LocalAssetEntity
 import com.rawedit.app.data.local.ProjectEntity
 import com.rawedit.app.domain.LayerKeyframe
 import com.rawedit.app.domain.LayerTimelineCodec
+import com.rawedit.app.domain.LayerTimelineCompiler
 import com.rawedit.app.domain.TimelineLayer
 import com.rawedit.app.domain.TimelineLayerType
+import com.rawedit.app.render.LocalAssetServer
 import com.rawedit.app.ui.components.BigPrimaryButton
 import com.rawedit.app.ui.components.CircleActionButton
-import com.rawedit.app.ui.icons.RawIcon
 import com.rawedit.app.ui.icons.RawIconType
 import com.rawedit.app.ui.theme.BricolageFamily
 import com.rawedit.app.ui.theme.JetBrainsMonoFamily
 import com.rawedit.app.ui.theme.RawColors
 import kotlinx.coroutines.delay
-import java.io.File
 import java.util.Locale
 import kotlin.math.abs
 import kotlin.math.roundToInt
 
+@SuppressLint("SetJavaScriptEnabled")
 @Composable
 fun TimelineEditorScreen(
     project: ProjectEntity,
     allAssets: List<LocalAssetEntity>,
     cacheManager: CacheManager,
+    onOpenChatbot: () -> Unit = {},
     onBack: () -> Unit,
     onSaveLayers: (layersJson: String, hasLayers: Boolean) -> Unit
 ) {
     val context = LocalContext.current
     val density = LocalDensity.current
 
+    val baseHtml = remember(project.id, project.code) {
+        cacheManager.resolveHtmlCode(project.code)
+    }
+    val hasBaseHtml = baseHtml.isNotBlank()
+
     val totalDurationSec = remember(project.audioDurationSec, project.codeDurationSec) {
         maxOf(project.audioDurationSec, project.codeDurationSec, 15.0)
     }
 
-    val initialLayers = remember(project.id, project.layersJson) {
+    val initialLayers = remember(project.id, project.layersJson, hasBaseHtml) {
         val decoded = LayerTimelineCodec.decode(project.layersJson)
-        if (decoded.isNotEmpty()) decoded else listOf(
+        if (decoded.isNotEmpty() || hasBaseHtml) decoded else listOf(
             TimelineLayer(
                 type = TimelineLayerType.TEXT,
                 name = "It's Rawdev",
@@ -120,28 +119,68 @@ fun TimelineEditorScreen(
     }
 
     var layers by remember { mutableStateOf(initialLayers) }
-    val undoStack = remember { mutableStateListOf<List<TimelineLayer>>() }
-    val redoStack = remember { mutableStateListOf<List<TimelineLayer>>() }
-    var selectedLayerId by remember { mutableStateOf<String?>(initialLayers.firstOrNull()?.id) }
+    var selectedLayerId by remember { mutableStateOf<String?>(null) }
     var currentTimeSec by remember { mutableDoubleStateOf(0.0) }
     var isPlaying by remember { mutableStateOf(false) }
     var showMediaPicker by remember { mutableStateOf(false) }
     var editingTextLayer by remember { mutableStateOf<TimelineLayer?>(null) }
-    var lightCanvasGrid by remember { mutableStateOf(true) }
+    var previewWebView by remember { mutableStateOf<WebView?>(null) }
+    var webPageReady by remember { mutableStateOf(false) }
 
-    fun pushUndoSnapshot() {
-        undoStack.add(layers)
-        if (undoStack.size > 30) undoStack.removeAt(0)
-        redoStack.clear()
+    val compiledHtml = remember(baseHtml, layers, totalDurationSec) {
+        LayerTimelineCompiler.compileToHtml(
+            baseHtml = baseHtml,
+            layersJson = LayerTimelineCodec.encode(layers),
+            durationSec = totalDurationSec
+        )
+    }
+    val latestCompiledHtml by rememberUpdatedState(compiledHtml)
+
+    val assetServer = remember(cacheManager) {
+        LocalAssetServer(context, cacheManager) {
+            LocalAssetServer(context, cacheManager) { "" }.buildInjectedHtml(latestCompiledHtml)
+        }
     }
 
-    fun mutateLayers(recordUndo: Boolean = true, transform: (List<TimelineLayer>) -> List<TimelineLayer>) {
-        if (recordUndo) pushUndoSnapshot()
-        layers = transform(layers)
+    // Reload WebView when layer list structure changes, and seek smoothly when time or transform changes
+    val structuralKey = remember(layers.map { "${it.id}:${it.visible}:${it.text}:${it.fontSize}:${it.startSec}:${it.endSec}" }, baseHtml) {
+        layers.joinToString("|") { "${it.id}:${it.visible}:${it.text}:${it.fontSize}:${it.startSec}:${it.endSec}" } + baseHtml.length
     }
 
-    fun updateLayer(layerId: String, recordUndo: Boolean = false, updater: (TimelineLayer) -> TimelineLayer) {
-        if (recordUndo) pushUndoSnapshot()
+    LaunchedEffect(structuralKey) {
+        previewWebView?.let { wv ->
+            webPageReady = false
+            wv.loadUrl(LocalAssetServer.ENTRY_URL)
+        }
+    }
+
+    LaunchedEffect(currentTimeSec, layers, webPageReady) {
+        if (!webPageReady) return@LaunchedEffect
+        val wv = previewWebView ?: return@LaunchedEffect
+        val tStr = String.format(Locale.US, "%.3f", currentTimeSec)
+        val jsonArg = LayerTimelineCodec.encode(layers.filter { it.visible })
+            .replace("\\", "\\\\")
+            .replace("'", "\\'")
+        wv.evaluateJavascript(
+            "(function(){ if(window.__updateLayerData){ window.__updateLayerData('$jsonArg'); } var r=(window.__ensureRawContract&&window.__ensureRawContract())||window.RAW; if(r&&typeof r.seek==='function'){ r.seek($tStr); } })()",
+            null
+        )
+    }
+
+    LaunchedEffect(isPlaying) {
+        while (isPlaying) {
+            delay(33L)
+            val next = currentTimeSec + 0.033
+            if (next >= totalDurationSec) {
+                currentTimeSec = 0.0
+                isPlaying = false
+            } else {
+                currentTimeSec = next
+            }
+        }
+    }
+
+    fun updateLayer(layerId: String, updater: (TimelineLayer) -> TimelineLayer) {
         layers = layers.map { if (it.id == layerId) updater(it) else it }
     }
 
@@ -160,7 +199,6 @@ fun TimelineEditorScreen(
             val ns = scale ?: sampled.scale
             val nr = rotation ?: sampled.rotation
             val no = opacity ?: sampled.opacity
-
             if (l.keyframes.isEmpty()) {
                 l.copy(x = nx, y = ny, scale = ns, rotation = nr, opacity = no)
             } else {
@@ -174,39 +212,21 @@ fun TimelineEditorScreen(
     }
 
     fun toggleKeyframeAtPlayhead(layerId: String) {
-        mutateLayers(recordUndo = true) { list ->
-            list.map { l ->
-                if (l.id != layerId) l
-                else {
-                    val nearIdx = l.keyframes.indexOfFirst { abs(it.timeSec - currentTimeSec) < 0.08 }
-                    if (nearIdx >= 0) {
-                        val rem = l.keyframes.toMutableList().also { it.removeAt(nearIdx) }
-                        l.copy(keyframes = rem)
-                    } else {
-                        val s = l.sampleAt(currentTimeSec)
-                        val nextKf = LayerKeyframe(currentTimeSec, s.x, s.y, s.scale, s.rotation, s.opacity)
-                        l.copy(keyframes = (l.keyframes + nextKf).sortedBy { it.timeSec })
-                    }
-                }
-            }
-        }
-    }
-
-    LaunchedEffect(isPlaying) {
-        while (isPlaying) {
-            delay(33L)
-            val next = currentTimeSec + 0.033
-            if (next >= totalDurationSec) {
-                currentTimeSec = 0.0
-                isPlaying = false
+        updateLayer(layerId) { l ->
+            val nearIdx = l.keyframes.indexOfFirst { abs(it.timeSec - currentTimeSec) < 0.08 }
+            if (nearIdx >= 0) {
+                val rem = l.keyframes.toMutableList().also { it.removeAt(nearIdx) }
+                l.copy(keyframes = rem)
             } else {
-                currentTimeSec = next
+                val s = l.sampleAt(currentTimeSec)
+                val nextKf = LayerKeyframe(currentTimeSec, s.x, s.y, s.scale, s.rotation, s.opacity)
+                l.copy(keyframes = (l.keyframes + nextKf).sortedBy { it.timeSec })
             }
         }
     }
 
     val selectedLayer = layers.firstOrNull { it.id == selectedLayerId }
-    val pxPerSec = 56.dp
+    val pxPerSec = 52.dp
     val pxPerSecFloat = with(density) { pxPerSec.toPx() }
     val timelineScroll = rememberScrollState()
 
@@ -217,11 +237,11 @@ fun TimelineEditorScreen(
             .statusBarsPadding()
             .navigationBarsPadding()
     ) {
-        // Top Header Bar
+        // Minimal Top Bar
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .height(54.dp)
+                .height(52.dp)
                 .padding(horizontal = 14.dp),
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically
@@ -231,13 +251,13 @@ fun TimelineEditorScreen(
                 horizontalArrangement = Arrangement.spacedBy(10.dp),
                 modifier = Modifier.weight(1f)
             ) {
-                CircleActionButton(icon = RawIconType.BACK, size = 38.dp, onClick = onBack)
+                CircleActionButton(icon = RawIconType.BACK, size = 36.dp, onClick = onBack)
                 Column {
                     Text(
-                        text = project.title.ifBlank { "Timeline Studio" },
+                        text = project.title.ifBlank { "Timeline" },
                         fontFamily = BricolageFamily,
                         fontWeight = FontWeight.Bold,
-                        fontSize = 15.5.sp,
+                        fontSize = 15.sp,
                         color = RawColors.TextPrimary,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis
@@ -251,26 +271,23 @@ fun TimelineEditorScreen(
                     )
                 }
             }
-
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
                 Surface(
-                    onClick = { lightCanvasGrid = !lightCanvasGrid },
+                    onClick = onOpenChatbot,
                     shape = CircleShape,
-                    color = RawColors.RaisedCard
+                    color = RawColors.AccentSoft
                 ) {
                     Text(
-                        text = if (lightCanvasGrid) "Light" else "Dark",
-                        fontFamily = JetBrainsMonoFamily,
+                        text = "Fix w/ AI",
+                        fontFamily = BricolageFamily,
                         fontWeight = FontWeight.Bold,
-                        fontSize = 11.sp,
-                        color = RawColors.TextPrimary,
-                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 7.dp)
+                        fontSize = 12.sp,
+                        color = RawColors.Tan,
+                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 7.dp)
                     )
                 }
                 Surface(
-                    onClick = {
-                        onSaveLayers(LayerTimelineCodec.encode(layers), layers.isNotEmpty())
-                    },
+                    onClick = { onSaveLayers(LayerTimelineCodec.encode(layers), layers.isNotEmpty()) },
                     shape = CircleShape,
                     color = RawColors.Tan
                 ) {
@@ -278,284 +295,145 @@ fun TimelineEditorScreen(
                         text = "Save",
                         fontFamily = BricolageFamily,
                         fontWeight = FontWeight.Bold,
-                        fontSize = 13.sp,
+                        fontSize = 12.5.sp,
                         color = RawColors.Ink,
-                        modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp)
+                        modifier = Modifier.padding(horizontal = 14.dp, vertical = 7.dp)
                     )
                 }
             }
         }
 
-        // 16:9 Live Preview Stage
-        BoxWithConstraints(
+        // 16:9 Live Preview Stage (renders actual HTML code + timeline layers)
+        Box(
             modifier = Modifier
                 .fillMaxWidth()
                 .padding(horizontal = 14.dp)
                 .aspectRatio(16f / 9f)
-                .clip(RoundedCornerShape(16.dp))
-                .background(if (lightCanvasGrid) Color(0xFFF6F4EE) else Color(0xFF141417))
-                .border(1.dp, RawColors.Divider, RoundedCornerShape(16.dp))
+                .clip(RoundedCornerShape(14.dp))
+                .background(Color(0xFF0D0D0F))
+                .border(1.dp, RawColors.Divider, RoundedCornerShape(14.dp))
                 .clipToBounds()
-                .pointerInput(selectedLayerId, currentTimeSec) {
-                    detectDragGestures(
-                        onDragStart = { if (selectedLayerId != null) pushUndoSnapshot() },
-                        onDrag = { change, dragAmount ->
-                            change.consume()
-                            val sid = selectedLayerId ?: return@detectDragGestures
-                            val scaleXFactor = 1920f / size.width.coerceAtLeast(1)
-                            val scaleYFactor = 1080f / size.height.coerceAtLeast(1)
-                            val layer = layers.firstOrNull { it.id == sid } ?: return@detectDragGestures
-                            val st = layer.sampleAt(currentTimeSec)
-                            applyTransformProp(
-                                layerId = sid,
-                                x = (st.x + dragAmount.x * scaleXFactor).coerceIn(-1200f, 1200f),
-                                y = (st.y + dragAmount.y * scaleYFactor).coerceIn(-800f, 800f)
-                            )
-                        }
-                    )
-                }
         ) {
-            val stageW = constraints.maxWidth.toFloat().coerceAtLeast(1f)
-            val stageRatio = stageW / 1920f
-
-            // Subtle Alight Motion style grid
-            Canvas(modifier = Modifier.fillMaxSize()) {
-                val step = 28.dp.toPx()
-                val gridColor = if (lightCanvasGrid) Color.Black.copy(alpha = 0.055f) else Color.White.copy(alpha = 0.06f)
-                var gx = step
-                while (gx < size.width) {
-                    drawLine(gridColor, Offset(gx, 0f), Offset(gx, size.height), 1f)
-                    gx += step
-                }
-                var gy = step
-                while (gy < size.height) {
-                    drawLine(gridColor, Offset(0f, gy), Offset(size.width, gy), 1f)
-                    gy += step
-                }
-            }
-
-            // Render visible layers at currentTimeSec
-            layers.forEach { layer ->
-                if (layer.visible && currentTimeSec in layer.startSec..layer.endSec) {
-                    val tr = layer.sampleAt(currentTimeSec)
-                    val isSel = layer.id == selectedLayerId
-                    val itemModifier = Modifier
-                        .align(Alignment.Center)
-                        .graphicsLayer {
-                            translationX = tr.x * stageRatio
-                            translationY = tr.y * stageRatio
-                            scaleX = (tr.scale / 100f).coerceAtLeast(0.05f)
-                            scaleY = (tr.scale / 100f).coerceAtLeast(0.05f)
-                            rotationZ = tr.rotation
-                            alpha = (tr.opacity / 100f).coerceIn(0f, 1f)
-                        }
-                        .then(
-                            if (isSel) {
-                                Modifier.border(
-                                    width = 1.5.dp,
-                                    color = RawColors.Tan,
-                                    shape = RoundedCornerShape(6.dp)
-                                )
-                            } else Modifier
+            AndroidView(
+                factory = { ctx ->
+                    WebView(ctx).apply {
+                        layoutParams = ViewGroup.LayoutParams(
+                            ViewGroup.LayoutParams.MATCH_PARENT,
+                            ViewGroup.LayoutParams.MATCH_PARENT
                         )
-                        .pointerInput(layer.id) {
-                            detectTapGestures { selectedLayerId = layer.id }
-                        }
-
-                    when (layer.type) {
-                        TimelineLayerType.TEXT -> {
-                            val txtColor = parseColorSafe(layer.colorHex, if (lightCanvasGrid) Color(0xFF1A1A1E) else RawColors.Cream)
-                            Text(
-                                text = layer.text.ifBlank { "Text" },
-                                fontFamily = BricolageFamily,
-                                fontWeight = FontWeight.Bold,
-                                fontSize = (layer.fontSize * stageRatio).coerceAtLeast(10f).sp,
-                                color = txtColor,
-                                textAlign = TextAlign.Center,
-                                modifier = itemModifier.padding(horizontal = 8.dp, vertical = 4.dp)
+                        assetServer.configureSandboxedWebView(this) {
+                            webPageReady = true
+                            val tStr = String.format(Locale.US, "%.3f", currentTimeSec)
+                            evaluateJavascript(
+                                "(function(){ var r=(window.__ensureRawContract&&window.__ensureRawContract())||window.RAW; if(r&&typeof r.seek==='function'){ r.seek($tStr); } })()",
+                                null
                             )
                         }
-                        TimelineLayerType.IMAGE, TimelineLayerType.VIDEO -> {
-                            val file = when {
-                                layer.assetThumbPath.isNotBlank() && File(layer.assetThumbPath).exists() -> File(layer.assetThumbPath)
-                                layer.assetRelativePath.isNotBlank() -> cacheManager.getAssetFile(layer.assetRelativePath.removePrefix("assets/"))
-                                else -> null
-                            }
-                            Box(
-                                modifier = itemModifier
-                                    .size((640f * stageRatio).dp)
-                                    .clip(RoundedCornerShape(8.dp))
-                                    .background(RawColors.RaisedCard),
-                                contentAlignment = Alignment.Center
-                            ) {
-                                if (file != null && file.exists()) {
-                                    AsyncImage(
-                                        model = ImageRequest.Builder(context).data(file).build(),
-                                        contentDescription = layer.name,
-                                        contentScale = ContentScale.Crop,
-                                        modifier = Modifier.fillMaxSize()
-                                    )
-                                } else {
-                                    Text(
-                                        text = layer.name,
-                                        fontFamily = JetBrainsMonoFamily,
-                                        fontSize = 10.sp,
-                                        color = RawColors.Cream
-                                    )
-                                }
-                            }
-                        }
-                        TimelineLayerType.SOLID -> {
-                            Box(
-                                modifier = itemModifier
-                                    .fillMaxSize()
-                                    .background(parseColorSafe(layer.bgColorHex, Color(0xFF18181B)))
-                            )
-                        }
-                        TimelineLayerType.SHAPE -> {
-                            val shape = when (layer.shapeKind) {
-                                "CIRCLE" -> CircleShape
-                                "PILL" -> RoundedCornerShape(999.dp)
-                                else -> RoundedCornerShape(12.dp)
-                            }
-                            Box(
-                                modifier = itemModifier
-                                    .size((380f * stageRatio).dp)
-                                    .clip(shape)
-                                    .background(parseColorSafe(layer.bgColorHex, RawColors.Tan))
-                            )
-                        }
+                        settings.useWideViewPort = true
+                        settings.loadWithOverviewMode = true
+                        setInitialScale(1)
+                        loadUrl(LocalAssetServer.ENTRY_URL)
+                        previewWebView = this
                     }
-                }
-            }
+                },
+                modifier = Modifier.fillMaxSize()
+            )
         }
 
-        // Transport + Keyframe + Undo/Redo Strip
+        // Minimal Transport + Scrubbing Slider
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(horizontal = 14.dp, vertical = 8.dp),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically
+                .padding(horizontal = 14.dp, vertical = 4.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(10.dp)
         ) {
-            Row(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
-                Surface(
-                    onClick = {
-                        if (undoStack.isNotEmpty()) {
-                            redoStack.add(layers)
-                            layers = undoStack.removeAt(undoStack.lastIndex)
-                        }
-                    },
-                    shape = CircleShape,
-                    color = RawColors.CardSurface
-                ) {
-                    Text(
-                        text = "Undo",
-                        fontFamily = JetBrainsMonoFamily,
-                        fontSize = 11.sp,
-                        color = if (undoStack.isNotEmpty()) RawColors.TextPrimary else RawColors.TextMuted,
-                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp)
-                    )
-                }
-                Surface(
-                    onClick = {
-                        if (redoStack.isNotEmpty()) {
-                            undoStack.add(layers)
-                            layers = redoStack.removeAt(redoStack.lastIndex)
-                        }
-                    },
-                    shape = CircleShape,
-                    color = RawColors.CardSurface
-                ) {
-                    Text(
-                        text = "Redo",
-                        fontFamily = JetBrainsMonoFamily,
-                        fontSize = 11.sp,
-                        color = if (redoStack.isNotEmpty()) RawColors.TextPrimary else RawColors.TextMuted,
-                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp)
-                    )
-                }
-            }
-
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
-                CircleActionButton(
-                    icon = RawIconType.CHEVRON_LEFT,
-                    size = 34.dp,
-                    onClick = { currentTimeSec = (currentTimeSec - 0.1).coerceAtLeast(0.0) }
-                )
-                Surface(
-                    onClick = { isPlaying = !isPlaying },
-                    shape = CircleShape,
-                    color = RawColors.Tan
-                ) {
-                    Text(
-                        text = if (isPlaying) "Pause" else "Play",
-                        fontFamily = BricolageFamily,
-                        fontWeight = FontWeight.Bold,
-                        fontSize = 12.5.sp,
-                        color = RawColors.Ink,
-                        modifier = Modifier.padding(horizontal = 16.dp, vertical = 7.dp)
-                    )
-                }
-                CircleActionButton(
-                    icon = RawIconType.CHEVRON_RIGHT,
-                    size = 34.dp,
-                    onClick = { currentTimeSec = (currentTimeSec + 0.1).coerceAtMost(totalDurationSec) }
+            Surface(
+                onClick = { isPlaying = !isPlaying },
+                shape = CircleShape,
+                color = RawColors.Tan
+            ) {
+                Text(
+                    text = if (isPlaying) "Pause" else "Play",
+                    fontFamily = BricolageFamily,
+                    fontWeight = FontWeight.Bold,
+                    fontSize = 12.sp,
+                    color = RawColors.Ink,
+                    modifier = Modifier.padding(horizontal = 14.dp, vertical = 6.dp)
                 )
             }
-
+            Slider(
+                value = currentTimeSec.toFloat().coerceIn(0f, totalDurationSec.toFloat()),
+                onValueChange = {
+                    isPlaying = false
+                    currentTimeSec = it.toDouble()
+                },
+                valueRange = 0f..totalDurationSec.toFloat(),
+                colors = SliderDefaults.colors(
+                    thumbColor = RawColors.Tan,
+                    activeTrackColor = RawColors.Tan,
+                    inactiveTrackColor = RawColors.RaisedCard
+                ),
+                modifier = Modifier.weight(1f)
+            )
             if (selectedLayer != null) {
-                val hasKfHere = selectedLayer.keyframes.any { abs(it.timeSec - currentTimeSec) < 0.08 }
+                val hasKf = selectedLayer.keyframes.any { abs(it.timeSec - currentTimeSec) < 0.08 }
                 Surface(
                     onClick = { toggleKeyframeAtPlayhead(selectedLayer.id) },
                     shape = CircleShape,
-                    color = if (hasKfHere) RawColors.Tan else RawColors.CardSurface
+                    color = if (hasKf) RawColors.Tan else RawColors.CardSurface
                 ) {
                     Text(
-                        text = if (hasKfHere) "\u25C6 Key" else "\u25C7 Key",
+                        text = if (hasKf) "\u25C6 Key" else "\u25C7 Key",
                         fontFamily = JetBrainsMonoFamily,
                         fontWeight = FontWeight.Bold,
                         fontSize = 11.sp,
-                        color = if (hasKfHere) RawColors.Ink else RawColors.Tan,
-                        modifier = Modifier.padding(horizontal = 11.dp, vertical = 6.dp)
+                        color = if (hasKf) RawColors.Ink else RawColors.Tan,
+                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp)
                     )
                 }
-            } else {
-                Spacer(modifier = Modifier.width(58.dp))
             }
         }
 
-        // Scrollable Time Ruler + Multi-Track Layer Stack
+        // Minimal Multi-Track Layer Timeline
         val timelineWidthDp = (totalDurationSec * pxPerSec.value).toFloat().coerceAtLeast(360f).dp
         Box(
             modifier = Modifier
                 .weight(1f)
                 .fillMaxWidth()
-                .background(Color(0xFF0B0B0D))
+                .background(Color(0xFF0A0A0C))
         ) {
             Row(modifier = Modifier.fillMaxSize()) {
-                // Left Eye Visibility Column
+                // Eye Visibility Column
                 Column(
                     modifier = Modifier
-                        .width(42.dp)
+                        .width(38.dp)
                         .fillMaxHeight()
                         .background(Color(0xFF101013))
-                        .padding(top = 28.dp),
+                        .padding(top = 24.dp),
                     horizontalAlignment = Alignment.CenterHorizontally
                 ) {
+                    if (hasBaseHtml) {
+                        Box(modifier = Modifier.height(38.dp), contentAlignment = Alignment.Center) {
+                            Box(
+                                modifier = Modifier
+                                    .size(12.dp)
+                                    .clip(CircleShape)
+                                    .background(RawColors.Cream.copy(alpha = 0.7f))
+                            )
+                        }
+                    }
                     layers.forEach { layer ->
                         Box(
                             modifier = Modifier
-                                .height(42.dp)
+                                .height(38.dp)
                                 .fillMaxWidth()
-                                .clickable {
-                                    updateLayer(layer.id, recordUndo = true) { it.copy(visible = !it.visible) }
-                                },
+                                .clickable { updateLayer(layer.id) { it.copy(visible = !it.visible) } },
                             contentAlignment = Alignment.Center
                         ) {
                             Box(
                                 modifier = Modifier
-                                    .size(16.dp)
+                                    .size(14.dp)
                                     .clip(CircleShape)
                                     .background(if (layer.visible) RawColors.Tan else RawColors.RaisedCard)
                                     .border(1.dp, RawColors.DividerStrong, CircleShape)
@@ -564,7 +442,7 @@ fun TimelineEditorScreen(
                     }
                 }
 
-                // Horizontally Scrollable Ruler & Layer Bars
+                // Scrollable Time Ruler + Tracks
                 Box(
                     modifier = Modifier
                         .weight(1f)
@@ -572,43 +450,64 @@ fun TimelineEditorScreen(
                         .horizontalScroll(timelineScroll)
                 ) {
                     Column(modifier = Modifier.width(timelineWidthDp).fillMaxHeight()) {
-                        // Time Ruler (drag/tap to scrub playhead)
+                        // Tap-to-jump Time Ruler
                         Box(
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .height(28.dp)
+                                .height(24.dp)
                                 .background(Color(0xFF141418))
                                 .pointerInput(totalDurationSec, pxPerSecFloat) {
                                     detectTapGestures { offset ->
+                                        isPlaying = false
                                         currentTimeSec = (offset.x / pxPerSecFloat).toDouble().coerceIn(0.0, totalDurationSec)
-                                    }
-                                }
-                                .pointerInput(totalDurationSec, pxPerSecFloat) {
-                                    detectHorizontalDragGestures { change, _ ->
-                                        change.consume()
-                                        currentTimeSec = (change.position.x / pxPerSecFloat).toDouble().coerceIn(0.0, totalDurationSec)
                                     }
                                 }
                         ) {
                             val secCount = totalDurationSec.toInt() + 1
                             for (s in 0..secCount) {
-                                val xDp = (s * pxPerSec.value).dp
                                 Text(
                                     text = "${s}s",
                                     fontFamily = JetBrainsMonoFamily,
                                     fontSize = 10.sp,
                                     color = RawColors.TextMuted,
-                                    modifier = Modifier
-                                        .offset(x = xDp + 3.dp, y = 4.dp)
+                                    modifier = Modifier.offset(x = (s * pxPerSec.value).dp + 3.dp, y = 4.dp)
                                 )
                             }
                         }
 
-                        // Layer Track Bars
                         LazyColumn(
                             modifier = Modifier.fillMaxSize(),
                             contentPadding = PaddingValues(vertical = 2.dp)
                         ) {
+                            if (hasBaseHtml) {
+                                item(key = "__base_html_track__") {
+                                    Box(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .height(38.dp)
+                                            .padding(vertical = 3.dp)
+                                    ) {
+                                        Box(
+                                            modifier = Modifier
+                                                .width((totalDurationSec * pxPerSec.value).toFloat().dp)
+                                                .fillMaxHeight()
+                                                .clip(RoundedCornerShape(8.dp))
+                                                .background(Color(0xFF23232A))
+                                                .padding(horizontal = 10.dp),
+                                            contentAlignment = Alignment.CenterStart
+                                        ) {
+                                            Text(
+                                                text = "HTML Reel Code (Base)",
+                                                fontFamily = JetBrainsMonoFamily,
+                                                fontWeight = FontWeight.Bold,
+                                                fontSize = 11.sp,
+                                                color = RawColors.Cream
+                                            )
+                                        }
+                                    }
+                                }
+                            }
+
                             itemsIndexed(layers, key = { _, l -> l.id }) { _, layer ->
                                 val isSel = layer.id == selectedLayerId
                                 val startDp = (layer.startSec * pxPerSec.value).toFloat().dp
@@ -623,7 +522,7 @@ fun TimelineEditorScreen(
                                 Box(
                                     modifier = Modifier
                                         .fillMaxWidth()
-                                        .height(42.dp)
+                                        .height(38.dp)
                                         .padding(vertical = 3.dp)
                                 ) {
                                     Box(
@@ -639,11 +538,13 @@ fun TimelineEditorScreen(
                                                 shape = RoundedCornerShape(8.dp)
                                             )
                                             .pointerInput(layer.id) {
-                                                detectTapGestures { selectedLayerId = layer.id }
+                                                detectTapGestures {
+                                                    selectedLayerId = if (selectedLayerId == layer.id) null else layer.id
+                                                }
                                             }
                                             .pointerInput(layer.id, pxPerSecFloat) {
                                                 detectHorizontalDragGestures(
-                                                    onDragStart = { selectedLayerId = layer.id; pushUndoSnapshot() },
+                                                    onDragStart = { selectedLayerId = layer.id },
                                                     onHorizontalDrag = { change, dragAmount ->
                                                         change.consume()
                                                         val dt = (dragAmount / pxPerSecFloat).toDouble()
@@ -658,41 +559,25 @@ fun TimelineEditorScreen(
                                             .padding(horizontal = 10.dp),
                                         contentAlignment = Alignment.CenterStart
                                     ) {
-                                        Row(
-                                            modifier = Modifier.fillMaxWidth(),
-                                            horizontalArrangement = Arrangement.SpaceBetween,
-                                            verticalAlignment = Alignment.CenterVertically
-                                        ) {
-                                            Text(
-                                                text = layer.name,
-                                                fontFamily = BricolageFamily,
-                                                fontWeight = FontWeight.Bold,
-                                                fontSize = 12.sp,
-                                                color = Color.White,
-                                                maxLines = 1,
-                                                overflow = TextOverflow.Ellipsis,
-                                                modifier = Modifier.weight(1f)
-                                            )
-                                            if (layer.keyframes.isNotEmpty()) {
-                                                Text(
-                                                    text = "${layer.keyframes.size}\u25C6",
-                                                    fontFamily = JetBrainsMonoFamily,
-                                                    fontSize = 10.sp,
-                                                    color = RawColors.Cream
-                                                )
-                                            }
-                                        }
+                                        Text(
+                                            text = layer.name,
+                                            fontFamily = BricolageFamily,
+                                            fontWeight = FontWeight.Bold,
+                                            fontSize = 11.5.sp,
+                                            color = Color.White,
+                                            maxLines = 1,
+                                            overflow = TextOverflow.Ellipsis
+                                        )
                                     }
                                 }
                             }
                         }
                     }
 
-                    // Vertical Playhead Line
-                    val playheadX = (currentTimeSec * pxPerSec.value).toFloat().dp
+                    // Playhead Line
                     Box(
                         modifier = Modifier
-                            .offset(x = playheadX)
+                            .offset(x = (currentTimeSec * pxPerSec.value).toFloat().dp)
                             .width(2.dp)
                             .fillMaxHeight()
                             .background(RawColors.Tan)
@@ -701,28 +586,27 @@ fun TimelineEditorScreen(
             }
         }
 
-        // Bottom Panel: Selected Layer Attributes (Position, Scale, Rotation, Opacity) OR Add Layer Bar
+        // Minimal Bottom Inspector / Add-Layer Bar
         if (selectedLayer != null) {
             val tr = selectedLayer.sampleAt(currentTimeSec)
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
                     .background(RawColors.CardSurface)
-                    .border(1.dp, RawColors.Divider, RoundedCornerShape(topStart = 20.dp, topEnd = 20.dp))
+                    .border(1.dp, RawColors.Divider, RoundedCornerShape(topStart = 18.dp, topEnd = 18.dp))
                     .padding(horizontal = 14.dp, vertical = 10.dp),
-                verticalArrangement = Arrangement.spacedBy(8.dp)
+                verticalArrangement = Arrangement.spacedBy(2.dp)
             ) {
-                // Selected layer quick actions
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     Text(
-                        text = "${selectedLayer.type.label}: ${selectedLayer.name}",
+                        text = selectedLayer.name,
                         fontFamily = BricolageFamily,
                         fontWeight = FontWeight.Bold,
-                        fontSize = 13.5.sp,
+                        fontSize = 13.sp,
                         color = RawColors.Tan,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
@@ -735,157 +619,90 @@ fun TimelineEditorScreen(
                                 shape = CircleShape,
                                 color = RawColors.RaisedCard
                             ) {
-                                Text("Edit Text", fontFamily = JetBrainsMonoFamily, fontSize = 10.5.sp, color = RawColors.Cream, modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp))
+                                Text("Edit", fontFamily = JetBrainsMonoFamily, fontSize = 10.5.sp, color = RawColors.Cream, modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp))
                             }
                         }
                         Surface(
                             onClick = {
-                                mutateLayers { list ->
-                                    val idx = list.indexOfFirst { it.id == selectedLayer.id }
-                                    if (idx > 0) list.toMutableList().apply { add(idx - 1, removeAt(idx)) } else list
-                                }
-                            },
-                            shape = CircleShape,
-                            color = RawColors.RaisedCard
-                        ) {
-                            Text("Up", fontFamily = JetBrainsMonoFamily, fontSize = 10.5.sp, color = RawColors.TextPrimary, modifier = Modifier.padding(horizontal = 9.dp, vertical = 5.dp))
-                        }
-                        Surface(
-                            onClick = {
-                                mutateLayers { list ->
-                                    val idx = list.indexOfFirst { it.id == selectedLayer.id }
-                                    if (idx in 0 until list.lastIndex) list.toMutableList().apply { add(idx + 1, removeAt(idx)) } else list
-                                }
-                            },
-                            shape = CircleShape,
-                            color = RawColors.RaisedCard
-                        ) {
-                            Text("Down", fontFamily = JetBrainsMonoFamily, fontSize = 10.5.sp, color = RawColors.TextPrimary, modifier = Modifier.padding(horizontal = 9.dp, vertical = 5.dp))
-                        }
-                        Surface(
-                            onClick = {
-                                mutateLayers { list -> list.filterNot { it.id == selectedLayer.id } }
+                                layers = layers.filterNot { it.id == selectedLayer.id }
                                 selectedLayerId = null
                             },
                             shape = CircleShape,
                             color = RawColors.ErrorSoft
                         ) {
-                            Text("Del", fontFamily = JetBrainsMonoFamily, fontSize = 10.5.sp, color = RawColors.ErrorCoral, modifier = Modifier.padding(horizontal = 9.dp, vertical = 5.dp))
+                            Text("Del", fontFamily = JetBrainsMonoFamily, fontSize = 10.5.sp, color = RawColors.ErrorCoral, modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp))
                         }
                         Surface(
                             onClick = { selectedLayerId = null },
                             shape = CircleShape,
                             color = RawColors.RaisedCard
                         ) {
-                            Text("Add+", fontFamily = JetBrainsMonoFamily, fontWeight = FontWeight.Bold, fontSize = 10.5.sp, color = RawColors.Tan, modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp))
+                            Text("Done", fontFamily = JetBrainsMonoFamily, fontWeight = FontWeight.Bold, fontSize = 10.5.sp, color = RawColors.Tan, modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp))
                         }
                     }
                 }
 
-                // Alight-Motion Style Scrubbable Transform Rulers
-                RulerAttributeSlider(
-                    label = "Position X",
-                    value = tr.x,
-                    range = -960f..960f,
-                    unit = "",
-                    onReset = { applyTransformProp(selectedLayer.id, x = 0f) },
-                    onChange = { applyTransformProp(selectedLayer.id, x = it) }
-                )
-                RulerAttributeSlider(
-                    label = "Position Y",
-                    value = tr.y,
-                    range = -540f..540f,
-                    unit = "",
-                    onReset = { applyTransformProp(selectedLayer.id, y = 0f) },
-                    onChange = { applyTransformProp(selectedLayer.id, y = it) }
-                )
-                RulerAttributeSlider(
-                    label = "Scale (%)",
-                    value = tr.scale,
-                    range = 10f..400f,
-                    unit = "%",
-                    onReset = { applyTransformProp(selectedLayer.id, scale = 100f) },
-                    onChange = { applyTransformProp(selectedLayer.id, scale = it) }
-                )
-                RulerAttributeSlider(
-                    label = "Rotation",
-                    value = tr.rotation,
-                    range = -360f..360f,
-                    unit = "\u00B0",
-                    onReset = { applyTransformProp(selectedLayer.id, rotation = 0f) },
-                    onChange = { applyTransformProp(selectedLayer.id, rotation = it) }
-                )
-                RulerAttributeSlider(
-                    label = "Opacity",
-                    value = tr.opacity,
-                    range = 0f..100f,
-                    unit = "%",
-                    onReset = { applyTransformProp(selectedLayer.id, opacity = 100f) },
-                    onChange = { applyTransformProp(selectedLayer.id, opacity = it) }
-                )
+                MinimalTransformSlider("Pos X", tr.x, -960f..960f, "", { applyTransformProp(selectedLayer.id, x = 0f) }) {
+                    applyTransformProp(selectedLayer.id, x = it)
+                }
+                MinimalTransformSlider("Pos Y", tr.y, -540f..540f, "", { applyTransformProp(selectedLayer.id, y = 0f) }) {
+                    applyTransformProp(selectedLayer.id, y = it)
+                }
+                MinimalTransformSlider("Scale", tr.scale, 10f..400f, "%", { applyTransformProp(selectedLayer.id, scale = 100f) }) {
+                    applyTransformProp(selectedLayer.id, scale = it)
+                }
+                MinimalTransformSlider("Rotate", tr.rotation, -360f..360f, "\u00B0", { applyTransformProp(selectedLayer.id, rotation = 0f) }) {
+                    applyTransformProp(selectedLayer.id, rotation = it)
+                }
+                MinimalTransformSlider("Opacity", tr.opacity, 0f..100f, "%", { applyTransformProp(selectedLayer.id, opacity = 100f) }) {
+                    applyTransformProp(selectedLayer.id, opacity = it)
+                }
             }
         } else {
-            // Bottom Add-Layer Dock (Media, Text, Solid, Shape)
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
                     .background(RawColors.CardSurface)
-                    .border(1.dp, RawColors.Divider, RoundedCornerShape(topStart = 20.dp, topEnd = 20.dp))
-                    .padding(horizontal = 14.dp, vertical = 12.dp),
+                    .border(1.dp, RawColors.Divider, RoundedCornerShape(topStart = 18.dp, topEnd = 18.dp))
+                    .padding(horizontal = 14.dp, vertical = 10.dp),
                 horizontalArrangement = Arrangement.spacedBy(8.dp)
             ) {
-                AddLayerDockButton(
-                    label = "+ Media",
-                    modifier = Modifier.weight(1f),
-                    onClick = { showMediaPicker = true }
-                )
-                AddLayerDockButton(
-                    label = "+ Text",
-                    modifier = Modifier.weight(1f),
-                    onClick = {
-                        val nl = TimelineLayer(
-                            type = TimelineLayerType.TEXT,
-                            name = "Text ${layers.size + 1}",
-                            startSec = currentTimeSec,
-                            endSec = minOf(currentTimeSec + 4.0, totalDurationSec),
-                            text = "New Text"
-                        )
-                        mutateLayers { it + nl }
-                        selectedLayerId = nl.id
-                        editingTextLayer = nl
-                    }
-                )
-                AddLayerDockButton(
-                    label = "+ Solid",
-                    modifier = Modifier.weight(1f),
-                    onClick = {
-                        val nl = TimelineLayer(
-                            type = TimelineLayerType.SOLID,
-                            name = "Solid ${layers.size + 1}",
-                            startSec = currentTimeSec,
-                            endSec = minOf(currentTimeSec + 4.0, totalDurationSec),
-                            bgColorHex = "#1A1A1E"
-                        )
-                        mutateLayers { listOf(nl) + it }
-                        selectedLayerId = nl.id
-                    }
-                )
-                AddLayerDockButton(
-                    label = "+ Shape",
-                    modifier = Modifier.weight(1f),
-                    onClick = {
-                        val nl = TimelineLayer(
-                            type = TimelineLayerType.SHAPE,
-                            name = "Shape ${layers.size + 1}",
-                            startSec = currentTimeSec,
-                            endSec = minOf(currentTimeSec + 4.0, totalDurationSec),
-                            bgColorHex = "#C89F72",
-                            shapeKind = "RECT"
-                        )
-                        mutateLayers { it + nl }
-                        selectedLayerId = nl.id
-                    }
-                )
+                AddLayerButton("+ Media", Modifier.weight(1f)) { showMediaPicker = true }
+                AddLayerButton("+ Text", Modifier.weight(1f)) {
+                    val nl = TimelineLayer(
+                        type = TimelineLayerType.TEXT,
+                        name = "Text ${layers.size + 1}",
+                        startSec = currentTimeSec,
+                        endSec = minOf(currentTimeSec + 4.0, totalDurationSec),
+                        text = "New Text"
+                    )
+                    layers = layers + nl
+                    selectedLayerId = nl.id
+                    editingTextLayer = nl
+                }
+                AddLayerButton("+ Solid", Modifier.weight(1f)) {
+                    val nl = TimelineLayer(
+                        type = TimelineLayerType.SOLID,
+                        name = "Solid ${layers.size + 1}",
+                        startSec = currentTimeSec,
+                        endSec = minOf(currentTimeSec + 4.0, totalDurationSec),
+                        bgColorHex = "#1A1A1E"
+                    )
+                    layers = listOf(nl) + layers
+                    selectedLayerId = nl.id
+                }
+                AddLayerButton("+ Shape", Modifier.weight(1f)) {
+                    val nl = TimelineLayer(
+                        type = TimelineLayerType.SHAPE,
+                        name = "Shape ${layers.size + 1}",
+                        startSec = currentTimeSec,
+                        endSec = minOf(currentTimeSec + 4.0, totalDurationSec),
+                        bgColorHex = "#C89F72",
+                        shapeKind = "RECT"
+                    )
+                    layers = layers + nl
+                    selectedLayerId = nl.id
+                }
             }
         }
     }
@@ -895,31 +712,31 @@ fun TimelineEditorScreen(
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .clip(RoundedCornerShape(24.dp))
+                    .clip(RoundedCornerShape(22.dp))
                     .background(RawColors.CardSurface)
-                    .border(1.dp, RawColors.Divider, RoundedCornerShape(24.dp))
-                    .padding(18.dp),
+                    .border(1.dp, RawColors.Divider, RoundedCornerShape(22.dp))
+                    .padding(16.dp),
                 verticalArrangement = Arrangement.spacedBy(10.dp)
             ) {
                 Text(
                     text = "Add Media from Asset Locker",
                     fontFamily = BricolageFamily,
                     fontWeight = FontWeight.Bold,
-                    fontSize = 17.sp,
+                    fontSize = 16.sp,
                     color = RawColors.TextPrimary
                 )
                 if (allAssets.isEmpty()) {
                     Text(
                         text = "No images or videos in Asset Locker yet. Add media in Step 2 first.",
                         fontFamily = BricolageFamily,
-                        fontSize = 13.5.sp,
+                        fontSize = 13.sp,
                         color = RawColors.TextMuted
                     )
                 } else {
                     Column(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .height(260.dp)
+                            .height(240.dp)
                             .verticalScroll(rememberScrollState()),
                         verticalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
@@ -935,11 +752,11 @@ fun TimelineEditorScreen(
                                         assetRelativePath = asset.relativePath,
                                         assetThumbPath = asset.thumbPath
                                     )
-                                    mutateLayers { it + nl }
+                                    layers = layers + nl
                                     selectedLayerId = nl.id
                                     showMediaPicker = false
                                 },
-                                shape = RoundedCornerShape(14.dp),
+                                shape = RoundedCornerShape(12.dp),
                                 color = RawColors.RaisedCard,
                                 modifier = Modifier.fillMaxWidth()
                             ) {
@@ -952,7 +769,7 @@ fun TimelineEditorScreen(
                                         text = asset.fileName,
                                         fontFamily = JetBrainsMonoFamily,
                                         fontWeight = FontWeight.Bold,
-                                        fontSize = 12.5.sp,
+                                        fontSize = 12.sp,
                                         color = RawColors.TextPrimary,
                                         modifier = Modifier.weight(1f)
                                     )
@@ -960,7 +777,7 @@ fun TimelineEditorScreen(
                                         text = if (isVid) "VIDEO" else "IMAGE",
                                         fontFamily = JetBrainsMonoFamily,
                                         fontWeight = FontWeight.Bold,
-                                        fontSize = 10.5.sp,
+                                        fontSize = 10.sp,
                                         color = RawColors.Tan
                                     )
                                 }
@@ -979,17 +796,17 @@ fun TimelineEditorScreen(
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .clip(RoundedCornerShape(24.dp))
+                    .clip(RoundedCornerShape(22.dp))
                     .background(RawColors.CardSurface)
-                    .border(1.dp, RawColors.Divider, RoundedCornerShape(24.dp))
-                    .padding(18.dp),
+                    .border(1.dp, RawColors.Divider, RoundedCornerShape(22.dp))
+                    .padding(16.dp),
                 verticalArrangement = Arrangement.spacedBy(12.dp)
             ) {
                 Text(
-                    text = "Edit Text Layer",
+                    text = "Edit Text",
                     fontFamily = BricolageFamily,
                     fontWeight = FontWeight.Bold,
-                    fontSize = 18.sp,
+                    fontSize = 17.sp,
                     color = RawColors.TextPrimary
                 )
                 OutlinedTextField(
@@ -1016,10 +833,10 @@ fun TimelineEditorScreen(
                 )
                 BigPrimaryButton(
                     text = "Apply",
-                    height = 46.dp,
+                    height = 44.dp,
                     onClick = {
                         val fs = draftSize.toFloatOrNull()?.coerceIn(18f, 240f) ?: target.fontSize
-                        updateLayer(target.id, recordUndo = true) {
+                        updateLayer(target.id) {
                             it.copy(text = draftText, name = draftText.take(22).ifBlank { "Text" }, fontSize = fs)
                         }
                         editingTextLayer = null
@@ -1031,26 +848,23 @@ fun TimelineEditorScreen(
 }
 
 @Composable
-private fun AddLayerDockButton(
+private fun AddLayerButton(
     label: String,
     modifier: Modifier = Modifier,
     onClick: () -> Unit
 ) {
     Surface(
         onClick = onClick,
-        shape = RoundedCornerShape(14.dp),
+        shape = RoundedCornerShape(12.dp),
         color = RawColors.RaisedCard,
         modifier = modifier
     ) {
-        Box(
-            modifier = Modifier.padding(vertical = 12.dp),
-            contentAlignment = Alignment.Center
-        ) {
+        Box(modifier = Modifier.padding(vertical = 11.dp), contentAlignment = Alignment.Center) {
             Text(
                 text = label,
                 fontFamily = BricolageFamily,
                 fontWeight = FontWeight.Bold,
-                fontSize = 13.sp,
+                fontSize = 12.5.sp,
                 color = RawColors.Cream
             )
         }
@@ -1058,7 +872,7 @@ private fun AddLayerDockButton(
 }
 
 @Composable
-private fun RulerAttributeSlider(
+private fun MinimalTransformSlider(
     label: String,
     value: Float,
     range: ClosedFloatingPointRange<Float>,
@@ -1067,72 +881,46 @@ private fun RulerAttributeSlider(
     onChange: (Float) -> Unit
 ) {
     Row(
-        modifier = Modifier.fillMaxWidth(),
+        modifier = Modifier
+            .fillMaxWidth()
+            .height(30.dp),
         verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(10.dp)
+        horizontalArrangement = Arrangement.spacedBy(8.dp)
     ) {
         Text(
             text = label,
             fontFamily = BricolageFamily,
             fontWeight = FontWeight.SemiBold,
-            fontSize = 12.5.sp,
+            fontSize = 12.sp,
             color = RawColors.TextPrimary,
-            modifier = Modifier.width(76.dp)
+            modifier = Modifier.width(54.dp)
         )
-        Box(
-            modifier = Modifier
-                .weight(1f)
-                .height(28.dp)
-                .clip(RoundedCornerShape(8.dp))
-                .background(Color(0xFF141418))
-                .pointerInput(range) {
-                    detectHorizontalDragGestures { change, dragAmount ->
-                        change.consume()
-                        val span = range.endInclusive - range.start
-                        val delta = (dragAmount / size.width.coerceAtLeast(1)) * span * 0.65f
-                        onChange((value + delta).coerceIn(range.start, range.endInclusive))
-                    }
-                }
-        ) {
-            // Tick marks
-            Canvas(modifier = Modifier.fillMaxSize()) {
-                val ticks = 24
-                val step = size.width / ticks
-                for (i in 0..ticks) {
-                    val x = i * step
-                    val h = if (i % 4 == 0) size.height * 0.5f else size.height * 0.28f
-                    drawLine(
-                        color = Color.White.copy(alpha = if (i % 4 == 0) 0.36f else 0.16f),
-                        start = Offset(x, size.height - h),
-                        end = Offset(x, size.height),
-                        strokeWidth = 1.5f
-                    )
-                }
-                val norm = ((value - range.start) / (range.endInclusive - range.start)).coerceIn(0f, 1f)
-                val markerX = norm * size.width
-                drawLine(
-                    color = Color(0xFF3182CE),
-                    start = Offset(markerX, 0f),
-                    end = Offset(markerX, size.height),
-                    strokeWidth = 3f
-                )
-            }
-        }
+        Slider(
+            value = value.coerceIn(range.start, range.endInclusive),
+            onValueChange = onChange,
+            valueRange = range,
+            colors = SliderDefaults.colors(
+                thumbColor = RawColors.Tan,
+                activeTrackColor = RawColors.Tan,
+                inactiveTrackColor = RawColors.RaisedCard
+            ),
+            modifier = Modifier.weight(1f)
+        )
         Surface(
             onClick = onReset,
             shape = RoundedCornerShape(8.dp),
-            color = Color(0xFF1F3A5F)
+            color = RawColors.RaisedCard
         ) {
             Text(
                 text = "${value.roundToInt()}$unit",
                 fontFamily = JetBrainsMonoFamily,
                 fontWeight = FontWeight.Bold,
-                fontSize = 11.5.sp,
-                color = Color.White,
+                fontSize = 11.sp,
+                color = RawColors.Tan,
                 textAlign = TextAlign.Center,
                 modifier = Modifier
-                    .width(58.dp)
-                    .padding(vertical = 5.dp)
+                    .width(52.dp)
+                    .padding(vertical = 4.dp)
             )
         }
     }
@@ -1144,8 +932,4 @@ private fun formatTimecode(sec: Double): String {
     val secs = (totalMs % 60000) / 1000
     val frames = ((totalMs % 1000) * 30 / 1000).coerceIn(0, 29)
     return String.format(Locale.US, "%02d:%02d:%02d", mins, secs, frames)
-}
-
-private fun parseColorSafe(hex: String, fallback: Color): Color {
-    return runCatching { Color(AndroidColor.parseColor(hex)) }.getOrDefault(fallback)
 }
