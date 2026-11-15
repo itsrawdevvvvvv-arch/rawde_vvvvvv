@@ -391,6 +391,55 @@ def fix_unescaped_appendline_quotes():
             print(f"  inner quotes escaped in {p.name}")
 
 
+def fix_router_stray_brace():
+    """A duplicated closing brace ends GeminiWaterfallRouter early."""
+    p = root / "app/src/main/java/com/rawedit/app/domain/GeminiWaterfallRouter.kt"
+    s = read(p)
+    if s is None:
+        return
+    bad = "        }\n    }\n\n    }\n\n    /**\n     * Full 100% Audio-to-SRT"
+    good = "        }\n    }\n\n    /**\n     * Full 100% Audio-to-SRT"
+    if bad in s:
+        p.write_text(s.replace(bad, good, 1))
+        print("  router stray closing brace removed")
+
+
+def fix_assetlocker_card_call():
+    """The asset card call keeps arriving with an orphaned .onFailure tail."""
+    p = root / "app/src/main/java/com/rawedit/app/ui/screens/AssetLockerScreen.kt"
+    s = read(p)
+    if s is None:
+        return
+    changed = False
+    bad = '''                                    onEditNote = { editingNoteTarget = asset }.onFailure { err ->
+                                                toastMsg = err.message ?: "Could not load image for cutout"
+                                            }
+                                        }
+                                    }
+                                )'''
+    good = '''                                    onEditNote = { editingNoteTarget = asset }
+                                )'''
+    if bad in s:
+        s = s.replace(bad, good, 1)
+        changed = True
+    cutout_btn = '''        if (!isClip) {
+            RawSecondaryButton(
+                text = if (isCutout) "Refine PNG Cutout (AI)" else "Make PNG Cutout (AI)",
+                height = 42.dp,
+                leadingIcon = RawIconType.CUTOUT,
+                enabled = !describing,
+                onClick = onMakeCutout
+            )
+        }
+'''
+    if cutout_btn in s:
+        s = s.replace(cutout_btn, "", 1)
+        changed = True
+    if changed:
+        p.write_text(s)
+        print("  asset card call repaired")
+
+
 STEPS = [
     fix_version,
     fix_navigation,
@@ -406,6 +455,8 @@ STEPS = [
     fix_unescaped_json_prompt,
     fix_router_vision_helpers,
     fix_unescaped_appendline_quotes,
+    fix_router_stray_brace,
+    fix_assetlocker_card_call,
 ]
 
 for step in STEPS:

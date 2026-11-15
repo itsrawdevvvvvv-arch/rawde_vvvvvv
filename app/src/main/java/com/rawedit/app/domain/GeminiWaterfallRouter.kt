@@ -623,8 +623,6 @@ class GeminiWaterfallRouter(context: Context) {
         }
     }
 
-    }
-
     /**
      * Full 100% Audio-to-SRT Transcription with duration verification, automatic multi-pass
      * continuation if a model stops early (at 25% or 50%), and full script alignment.

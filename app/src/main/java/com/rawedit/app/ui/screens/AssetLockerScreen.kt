@@ -475,11 +475,7 @@ fun AssetLockerScreen(
                                             }
                                         }
                                     },
-                                    onEditNote = { editingNoteTarget = asset }.onFailure { err ->
-                                                toastMsg = err.message ?: "Could not load image for cutout"
-                                            }
-                                        }
-                                    }
+                                    onEditNote = { editingNoteTarget = asset }
                                 )
                             }
                         }
@@ -863,15 +859,6 @@ private fun AssetLockerCard(
                 enabled = !describing,
                 onClick = onEditNote,
                 modifier = Modifier.weight(1f)
-            )
-        }
-        if (!isClip) {
-            RawSecondaryButton(
-                text = if (isCutout) "Refine PNG Cutout (AI)" else "Make PNG Cutout (AI)",
-                height = 42.dp,
-                leadingIcon = RawIconType.CUTOUT,
-                enabled = !describing,
-                onClick = onMakeCutout
             )
         }
     }
