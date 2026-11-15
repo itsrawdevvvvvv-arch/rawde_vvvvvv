@@ -99,6 +99,7 @@ fun CreateHubScreen(
     onOpenCopyPrompt: () -> Unit,
     onOpenCodePaste: () -> Unit,
     onOpenKeyframeSheet: () -> Unit,
+    onOpenTimelineEditor: () -> Unit = {},
     onOpenChatbot: () -> Unit = {},
     onSwipeCreate: (Offset) -> Unit
 ) {
@@ -106,7 +107,8 @@ fun CreateHubScreen(
     val listState = rememberLazyListState()
     val hasAudio = project.audioUri.isNotBlank() && project.audioDurationSec > 0.0
     val hasCode = project.code.isNotBlank()
-    val canCreate = hasAudio && hasCode
+    val hasLayers = project.hasEditableLayers && project.layersJson.isNotBlank()
+    val canCreate = hasAudio && (hasCode || hasLayers)
     var showDeleteConfirm by remember { mutableStateOf(false) }
     var toastMsg by remember { mutableStateOf<String?>(null) }
 
@@ -166,10 +168,24 @@ fun CreateHubScreen(
             } else {
                 "Paste unlimited HTML code returned by Cloud AI"
             },
-            statusText = if (hasCode) "Ready" else "Needed",
+            statusText = if (hasCode) "Ready" else "Optional",
             statusDone = hasCode,
             enabled = true,
             onClick = onOpenCodePaste
+        ),
+        StepRowModel(
+            number = 5,
+            icon = RawIconType.FILM,
+            title = "Layer Timeline Editor",
+            subtitle = if (hasLayers) {
+                "Custom layer stack active (Position, Scale, Rotation, Opacity)"
+            } else {
+                "Multi-track layers, keyframes, Position, Scale, Rotation, Opacity"
+            },
+            statusText = if (hasLayers) "Active" else "Edit",
+            statusDone = hasLayers,
+            enabled = true,
+            onClick = onOpenTimelineEditor
         )
     )
 

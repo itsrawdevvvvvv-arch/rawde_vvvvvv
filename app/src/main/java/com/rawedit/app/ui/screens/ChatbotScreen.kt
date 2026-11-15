@@ -85,6 +85,7 @@ import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.buildAnnotatedString
+import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
@@ -1217,24 +1218,34 @@ private fun ChatBubbleRow(
                     }
                     Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                         if (!msg.generatedFileName.endsWith(".pdf", true)) {
-                            Box(
-                                modifier = Modifier
-                                    .clip(CircleShape)
-                                    .background(RawColors.CardSurface)
-                                    .clickable { onViewFile(msg.generatedFilePath) }
-                                    .padding(horizontal = 10.dp, vertical = 4.dp)
+                            Surface(
+                                onClick = { onViewFile(msg.generatedFilePath) },
+                                shape = CircleShape,
+                                color = RawColors.CardSurface
                             ) {
-                                Text("View", fontFamily = JetBrainsMonoFamily, fontWeight = FontWeight.Bold, fontSize = 10.5.sp, color = RawColors.Tan)
+                                Text(
+                                    "View",
+                                    fontFamily = JetBrainsMonoFamily,
+                                    fontWeight = FontWeight.Bold,
+                                    fontSize = 11.sp,
+                                    color = RawColors.Tan,
+                                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp)
+                                )
                             }
                         }
-                        Box(
-                            modifier = Modifier
-                                .clip(CircleShape)
-                                .background(RawColors.AccentSoft)
-                                .clickable { onSaveFile(msg.generatedFilePath, msg.generatedFileName) }
-                                .padding(horizontal = 10.dp, vertical = 4.dp)
+                        Surface(
+                            onClick = { onSaveFile(msg.generatedFilePath, msg.generatedFileName) },
+                            shape = CircleShape,
+                            color = RawColors.AccentSoft
                         ) {
-                            Text("Save", fontFamily = JetBrainsMonoFamily, fontWeight = FontWeight.Bold, fontSize = 10.5.sp, color = RawColors.Tan)
+                            Text(
+                                "Save",
+                                fontFamily = JetBrainsMonoFamily,
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 11.sp,
+                                color = RawColors.Tan,
+                                modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp)
+                            )
                         }
                     }
                 }
@@ -1293,25 +1304,59 @@ private fun ChatBubbleRow(
 
 @Composable
 private fun RichFormattedMessage(text: String) {
+    val numberedRegex = remember { Regex("^(\\d+\\.)\\s+(.*)$") }
     val styled = remember(text) {
         buildAnnotatedString {
             val lines = text.replace("\r\n", "\n").lines()
+            var inCodeBlock = false
             lines.forEachIndexed { idx, rawLine ->
                 val trimmed = rawLine.trim()
+                if (trimmed.startsWith("```")) {
+                    inCodeBlock = !inCodeBlock
+                    if (inCodeBlock) {
+                        val lang = trimmed.removePrefix("```").trim()
+                        if (lang.isNotEmpty()) {
+                            withStyle(SpanStyle(fontFamily = JetBrainsMonoFamily, fontWeight = FontWeight.Bold, fontSize = 10.5.sp, color = RawColors.Tan)) {
+                                append(lang.uppercase(Locale.US))
+                            }
+                            append("\n")
+                        }
+                    }
+                    return@forEachIndexed
+                }
+                if (inCodeBlock) {
+                    withStyle(
+                        SpanStyle(
+                            fontFamily = JetBrainsMonoFamily,
+                            fontSize = 12.5.sp,
+                            color = RawColors.Cream,
+                            background = RawColors.RaisedCard
+                        )
+                    ) {
+                        append(rawLine)
+                    }
+                    if (idx < lines.lastIndex) append("\n")
+                    return@forEachIndexed
+                }
                 when {
                     trimmed.isEmpty() -> {}
+                    trimmed == "---" || trimmed == "***" -> {
+                        withStyle(SpanStyle(color = RawColors.DividerStrong)) {
+                            append("──────────────")
+                        }
+                    }
                     trimmed.startsWith("### ") -> {
                         withStyle(SpanStyle(fontWeight = FontWeight.Bold, fontSize = 15.5.sp, color = RawColors.Tan)) {
                             append(parseInlineMarkdown(trimmed.removePrefix("### ").trim()))
                         }
                     }
                     trimmed.startsWith("## ") -> {
-                        withStyle(SpanStyle(fontWeight = FontWeight.Bold, fontSize = 17.sp, color = RawColors.Cream)) {
+                        withStyle(SpanStyle(fontWeight = FontWeight.Bold, fontSize = 17.5.sp, color = RawColors.Cream)) {
                             append(parseInlineMarkdown(trimmed.removePrefix("## ").trim()))
                         }
                     }
                     trimmed.startsWith("# ") -> {
-                        withStyle(SpanStyle(fontWeight = FontWeight.Bold, fontSize = 18.5.sp, color = RawColors.Tan)) {
+                        withStyle(SpanStyle(fontWeight = FontWeight.Bold, fontSize = 19.sp, color = RawColors.Tan)) {
                             append(parseInlineMarkdown(trimmed.removePrefix("# ").trim()))
                         }
                     }
@@ -1321,9 +1366,18 @@ private fun RichFormattedMessage(text: String) {
                         }
                         append(parseInlineMarkdown(trimmed.drop(2).trim()))
                     }
+                    numberedRegex.matches(trimmed) -> {
+                        val m = numberedRegex.find(trimmed)!!
+                        withStyle(SpanStyle(fontFamily = JetBrainsMonoFamily, fontWeight = FontWeight.Bold, color = RawColors.Tan)) {
+                            append("${m.groupValues[1]} ")
+                        }
+                        append(parseInlineMarkdown(m.groupValues[2]))
+                    }
                     trimmed.startsWith("> ") -> {
-                        withStyle(SpanStyle(color = RawColors.TextMuted)) {
-                            append("\u2502  ")
+                        withStyle(SpanStyle(fontWeight = FontWeight.Bold, color = RawColors.Tan)) {
+                            append("\u2503 ")
+                        }
+                        withStyle(SpanStyle(fontStyle = FontStyle.Italic, color = RawColors.Cream)) {
                             append(parseInlineMarkdown(trimmed.removePrefix("> ").trim()))
                         }
                     }
@@ -1339,7 +1393,7 @@ private fun RichFormattedMessage(text: String) {
         text = styled,
         fontFamily = BricolageFamily,
         fontSize = 14.5.sp,
-        lineHeight = 21.sp,
+        lineHeight = 22.sp,
         color = RawColors.TextPrimary
     )
 }
@@ -1348,6 +1402,22 @@ private fun parseInlineMarkdown(input: String): AnnotatedString {
     return buildAnnotatedString {
         var i = 0
         while (i < input.length) {
+            if (i + 1 < input.length && input[i] == '=' && input[i + 1] == '=') {
+                val end = input.indexOf("==", i + 2)
+                if (end != -1) {
+                    withStyle(
+                        SpanStyle(
+                            fontWeight = FontWeight.Bold,
+                            color = RawColors.Cream,
+                            background = RawColors.Tan.copy(alpha = 0.28f)
+                        )
+                    ) {
+                        append(" ${input.substring(i + 2, end)} ")
+                    }
+                    i = end + 2
+                    continue
+                }
+            }
             if (i + 1 < input.length && input[i] == '*' && input[i + 1] == '*') {
                 val end = input.indexOf("**", i + 2)
                 if (end != -1) {
@@ -1355,6 +1425,16 @@ private fun parseInlineMarkdown(input: String): AnnotatedString {
                         append(input.substring(i + 2, end))
                     }
                     i = end + 2
+                    continue
+                }
+            }
+            if (input[i] == '*' && (i + 1 >= input.length || input[i + 1] != '*')) {
+                val end = input.indexOf('*', i + 1)
+                if (end != -1 && end > i + 1) {
+                    withStyle(SpanStyle(fontStyle = FontStyle.Italic, color = RawColors.Cream)) {
+                        append(input.substring(i + 1, end))
+                    }
+                    i = end + 1
                     continue
                 }
             }
@@ -1373,6 +1453,20 @@ private fun parseInlineMarkdown(input: String): AnnotatedString {
                     }
                     i = end + 1
                     continue
+                }
+            }
+            if (input[i] == '[') {
+                val closeBracket = input.indexOf("](", i + 1)
+                if (closeBracket != -1) {
+                    val closeParen = input.indexOf(')', closeBracket + 2)
+                    if (closeParen != -1) {
+                        val label = input.substring(i + 1, closeBracket)
+                        withStyle(SpanStyle(fontWeight = FontWeight.SemiBold, color = RawColors.Tan)) {
+                            append(label)
+                        }
+                        i = closeParen + 1
+                        continue
+                    }
                 }
             }
             append(input[i])

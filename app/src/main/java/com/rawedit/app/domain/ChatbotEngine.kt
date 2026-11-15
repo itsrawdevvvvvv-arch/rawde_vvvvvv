@@ -53,10 +53,11 @@ object ChatbotEngine {
     private val WEB_SEARCH_REGEX = Regex("<<<WEB_SEARCH\\s+([^>]+?)>>>", RegexOption.IGNORE_CASE)
     private val WEB_FETCH_REGEX = Regex("<<<WEB_FETCH\\s+([^>]+?)>>>", RegexOption.IGNORE_CASE)
     private val WEB_DOWNLOAD_REGEX = Regex("<<<WEB_DOWNLOAD\\s+([^>]+?)>>>", RegexOption.IGNORE_CASE)
-    private val CREATE_PDF_REGEX = Regex("<<<CREATE_PDF([^>]*)>>>\\s*([\\s\\S]*?)<<<END_CREATE_PDF>>>", RegexOption.IGNORE_CASE)
-    private val CREATE_FILE_REGEX = Regex("<<<CREATE_FILE([^>]*)>>>\\s*([\\s\\S]*?)<<<END_CREATE_FILE>>>", RegexOption.IGNORE_CASE)
-    private val WEBSITE_PREVIEW_REGEX = Regex("<<<WEBSITE_PREVIEW([^>]*)>>>\\s*([\\s\\S]*?)<<<END_WEBSITE_PREVIEW>>>", RegexOption.IGNORE_CASE)
-    private val HTML_FENCE_REGEX = Regex("```(?:html|htm)?\\s*\\n(<!DOCTYPE html[\\s\\S]*?</html>|<html[\\s\\S]*?</html>)\\s*```", RegexOption.IGNORE_CASE)
+    private val CREATE_PDF_REGEX = Regex("<<<CREATE_PDF([^>]*)>>>\\s*([\\s\\S]*?)(?:<<<END_CREATE_PDF>>>|$)", RegexOption.IGNORE_CASE)
+    private val CREATE_FILE_REGEX = Regex("<<<CREATE_FILE([^>]*)>>>\\s*([\\s\\S]*?)(?:<<<END_CREATE_FILE>>>|$)", RegexOption.IGNORE_CASE)
+    private val WEBSITE_PREVIEW_REGEX = Regex("<<<WEBSITE_PREVIEW([^>]*)>>>\\s*([\\s\\S]*?)(?:<<<END_WEBSITE_PREVIEW>>>|$)", RegexOption.IGNORE_CASE)
+    private val HTML_FENCE_REGEX = Regex("```(?:html|htm)?\\s*\\n([\\s\\S]*?(?:<!DOCTYPE html|<html)[\\s\\S]*?</html>)\\s*```", RegexOption.IGNORE_CASE)
+    private val ANY_FENCE_REGEX = Regex("```([a-zA-Z0-9_.-]*)\\s*\\n([\\s\\S]*?)```", RegexOption.IGNORE_CASE)
 
 
 
@@ -332,10 +333,12 @@ object ChatbotEngine {
                 - Create repo: <<<GITHUB_CREATE_REPO name="repo-name" description="..." private="false">>>
                 - Create or edit file: <<<GITHUB_WRITE_FILE repo="owner/repo" path="path/to/file" message="commit msg">>>\n[file content]\n<<<END_GITHUB_WRITE_FILE>>>
                 - Delete file: <<<GITHUB_DELETE_FILE repo="owner/repo" path="path/to/file" message="commit msg">>>
-                4. File, PDF & Website Creation Tools:
-                - Create PDF: <<<CREATE_PDF title="Title" filename="doc.pdf">>>\n[Markdown/text content]\n<<<END_CREATE_PDF>>>
-                - Create text/code/skill file (.txt, .md, .skill, .json, etc.): <<<CREATE_FILE filename="notes.md">>>\n[content]\n<<<END_CREATE_FILE>>>
-                - Build HTML/CSS/JS website with in-app live preview: <<<WEBSITE_PREVIEW title="My Site">>>\n[Complete self-contained HTML with <style> and <script>]\n<<<END_WEBSITE_PREVIEW>>>
+                4. File, PDF & Website Creation Tools (MANDATORY WHEN USER ASKS FOR A FILE):
+                Whenever the user asks to create, export, download, or give any `.html`, `.txt`, `.pdf`, `.md`, `.skill`, `.json`, `.css`, `.js`, or code/document file, you MUST emit the corresponding tool block below (do NOT just paste raw file text in chat):
+                - Create PDF (`.pdf`): <<<CREATE_PDF title="Title" filename="doc.pdf">>>\n[Clean Markdown/text content]\n<<<END_CREATE_PDF>>>
+                - Create any text/code/markdown/skill file (`.txt`, `.md`, `.skill`, `.html`, `.json`, `.css`, `.js`): <<<CREATE_FILE filename="output.ext">>>\n[Complete file content]\n<<<END_CREATE_FILE>>>
+                - Build HTML/CSS/JS website with in-app live preview (`.html`): <<<WEBSITE_PREVIEW title="My Site">>>\n[Complete self-contained HTML with <style> and <script>]\n<<<END_WEBSITE_PREVIEW>>>
+                Keep your chat message outside the tool block to a short 1-3 line summary.
                 5. Live Web & Dependency Tools:
                 - Search web: <<<WEB_SEARCH query="search terms">>>
                 - Read webpage: <<<WEB_FETCH url="https://...">>>
@@ -346,7 +349,7 @@ object ChatbotEngine {
                 ===REPLACE
                 updated lines
                 >>>
-                FORMATTING STYLE: Use clean Markdown headings (## Heading, ### Subheading), crisp bullet points (- item), and `highlights` for key terms. Avoid wrapping every phrase in **asterisks**—use bold sparingly only for key labels.
+                FORMATTING & TYPOGRAPHY STYLE: Structure every reply cleanly with `## Section Headings`, `### Subheadings`, numbered steps (`1. `), crisp bullets (`- `), `==highlighted key phrases==`, `> Pro Tip` callout blocks, and `inline code` for filenames/values. Keep paragraphs short and scannable; use **bold** only for key labels.
             """.trimIndent()
 
             val rawdevSkillText = runCatching {
@@ -370,9 +373,20 @@ object ChatbotEngine {
                     }
                 }
             }
+            val requestedExt = when {
+                Regex("\\.(html|htm)\\b|html file|website|landing page", RegexOption.IGNORE_CASE).containsMatchIn(lowerMsg) -> "html"
+                Regex("\\.pdf\\b|as pdf|pdf file|make pdf|create pdf", RegexOption.IGNORE_CASE).containsMatchIn(lowerMsg) -> "pdf"
+                Regex("\\.skill\\b|skill file", RegexOption.IGNORE_CASE).containsMatchIn(lowerMsg) -> "skill"
+                Regex("\\.md\\b|markdown file", RegexOption.IGNORE_CASE).containsMatchIn(lowerMsg) -> "md"
+                Regex("\\.txt\\b|text file", RegexOption.IGNORE_CASE).containsMatchIn(lowerMsg) -> "txt"
+                Regex("\\.json\\b", RegexOption.IGNORE_CASE).containsMatchIn(lowerMsg) -> "json"
+                Regex("\\.css\\b", RegexOption.IGNORE_CASE).containsMatchIn(lowerMsg) -> "css"
+                Regex("\\.js\\b", RegexOption.IGNORE_CASE).containsMatchIn(lowerMsg) -> "js"
+                else -> ""
+            }
             val isHeavyTask = uploadedFile != null || !browserPageContext.isNullOrBlank() || isScriptRequest || wantsLiveWeb ||
-                userText.length > 140 ||
-                listOf("srt", "script", "idea", "reel", "prompt", "zip", "style", "skill", "html", "code", "fix", "patch", "github", "font", "pdf", "website", "preview", "css", "js", "file", "md", "txt", "create", "make").any { lowerMsg.contains(it) }
+                requestedExt.isNotEmpty() || userText.length > 140 ||
+                listOf("srt", "script", "idea", "reel", "prompt", "zip", "style", "skill", "html", "code", "fix", "patch", "github", "font", "pdf", "website", "preview", "css", "js", "file", "md", "txt", "create", "make", "export", "download", "doc").any { lowerMsg.contains(it) }
 
             val fullPrompt = if (!isHeavyTask) {
                 buildString {
@@ -431,11 +445,11 @@ object ChatbotEngine {
             val genRes = geminiRouter.generate(
                 apiKey = userProfile.geminiApiKey,
                 prompt = fullPrompt,
-                systemInstruction = if (isHeavyTask) systemInstruction else "You are the friendly, fast RAW EDIT Studio AI Assistant. Format answers cleanly with ## headings, ### subheadings, bullet points (- ), and `code` highlights. Do not overuse **asterisks**.",
+                systemInstruction = if (isHeavyTask) systemInstruction else "You are the friendly, fast RAW EDIT Studio AI Assistant. Format answers cleanly with ## headings, ### subheadings, numbered lists, bullet points (- ), ==highlighted key points==, > callout tips, and `code` highlights. Do not overuse **asterisks**.",
                 routeMode = GeminiRouteMode.FAST_CHAT,
                 expectJson = false,
                 images = visionInputs,
-                maxOutputTokens = if (isHeavyTask) 4096 else 1024
+                maxOutputTokens = if (isHeavyTask) 16384 else 2048
             ).getOrThrow()
 
             var replyText = genRes.text
@@ -499,7 +513,7 @@ object ChatbotEngine {
                 replyText = replyText.replace(m.value, "").trim()
             }
 
-            // Fallback: if AI returned a fenced HTML website without <<<WEBSITE_PREVIEW>>>, still enable live preview!
+            // Fallback 1: if AI returned fenced HTML without <<<WEBSITE_PREVIEW>>>, save & enable live preview
             if (webPreviewPath.isBlank()) {
                 HTML_FENCE_REGEX.find(replyText)?.let { m ->
                     val html = m.groupValues[1].trim()
@@ -511,6 +525,49 @@ object ChatbotEngine {
                             genFileName = out.name
                         }
                         appliedBadges.add("Website ready to preview")
+                    }
+                }
+            }
+
+            // Fallback 2: if user explicitly requested .pdf / .html / .txt / .md / .skill / .json / .css / .js and AI did not emit a tool block
+            if (genFilePath.isBlank() && requestedExt.isNotEmpty() && replyText.isNotBlank()) {
+                val ts = System.currentTimeMillis()
+                when (requestedExt) {
+                    "pdf" -> {
+                        val out = File(cacheManager.sharedPacksDir, "rawedit_${ts}.pdf")
+                        runCatching {
+                            ChatbotFileTools.createStyledPdf(out, "RAW EDIT Document", replyText)
+                            genFilePath = out.absolutePath
+                            genFileName = out.name
+                            appliedBadges.add("Created PDF: ${out.name}")
+                        }
+                    }
+                    "html" -> {
+                        val fence = ANY_FENCE_REGEX.find(replyText)?.groupValues?.getOrNull(2)?.trim()
+                        val htmlBody = when {
+                            !fence.isNullOrBlank() && (fence.contains("<html", true) || fence.contains("<!doctype", true) || fence.contains("<body", true)) -> fence
+                            replyText.contains("<!doctype", true) || replyText.contains("<html", true) -> replyText
+                            else -> "<!DOCTYPE html><html><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\"><style>body{font-family:system-ui,sans-serif;padding:24px;line-height:1.6;max-width:800px;margin:auto;background:#111;color:#f5f2eb;}</style></head><body><pre style=\"white-space:pre-wrap\">${replyText.replace("<", "&lt;").replace(">", "&gt;")}</pre></body></html>"
+                        }
+                        runCatching {
+                            val out = ChatbotFileTools.saveWebsiteHtml(cacheManager, "rawedit_${ts}", htmlBody)
+                            genFilePath = out.absolutePath
+                            genFileName = out.name
+                            webPreviewPath = out.absolutePath
+                            appliedBadges.add("Created HTML: ${out.name}")
+                        }
+                    }
+                    else -> {
+                        val fence = ANY_FENCE_REGEX.find(replyText)?.groupValues?.getOrNull(2)?.trim()
+                        val fileBody = if (!fence.isNullOrBlank() && requestedExt in setOf("json", "css", "js", "skill", "md", "txt")) fence else replyText
+                        val out = File(cacheManager.sharedPacksDir, "rawedit_${ts}.${requestedExt}")
+                        runCatching {
+                            out.parentFile?.mkdirs()
+                            out.writeText(fileBody, Charsets.UTF_8)
+                            genFilePath = out.absolutePath
+                            genFileName = out.name
+                            appliedBadges.add("Created file: ${out.name}")
+                        }
                     }
                 }
             }

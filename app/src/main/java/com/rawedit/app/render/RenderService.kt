@@ -97,15 +97,24 @@ class RenderService : Service() {
                     ?: throw IllegalStateException("Project not found.")
 
                 val resolvedHtml = cache.resolveHtmlCode(project.code)
-                if (project.audioUri.isBlank() || resolvedHtml.isBlank()) {
-                    throw IllegalStateException("Audio file or HTML code is missing.")
+                val durationSec = maxOf(project.audioDurationSec, 1.0)
+                val effectiveHtml = if (project.hasEditableLayers && project.layersJson.isNotBlank()) {
+                    LayerTimelineCompiler.compileToHtml(
+                        baseHtml = resolvedHtml,
+                        layersJson = project.layersJson,
+                        durationSec = durationSec
+                    )
+                } else {
+                    resolvedHtml
+                }
+                if (project.audioUri.isBlank() || effectiveHtml.isBlank()) {
+                    throw IllegalStateException("Audio file or timeline/HTML content is missing.")
                 }
                 val audioFile = File(project.audioUri)
                 if (!audioFile.exists()) {
                     throw IllegalStateException("Voiceover audio file could not be read.")
                 }
 
-                val durationSec = maxOf(project.audioDurationSec, 1.0)
                 val targetDurationUs = (durationSec * 1_000_000.0).toLong()
 
                 val renderer = FrameRenderer(this@RenderService, cache)
@@ -116,7 +125,7 @@ class RenderService : Service() {
 
                 var lastNotifMs = 0L
                 renderer.renderVideoOnly(
-                    rawHtml = resolvedHtml,
+                    rawHtml = effectiveHtml,
                     durationSec = durationSec,
                     outputVideoOnlyMp4 = tempVideo,
                     onProgress = { framePct, _, _ ->

@@ -58,6 +58,7 @@ import com.rawedit.app.ui.screens.ProfileSetupScreen
 import com.rawedit.app.ui.screens.RawChatbotScreen
 import com.rawedit.app.ui.screens.RenderingScreen
 import com.rawedit.app.ui.screens.ResultScreen
+import com.rawedit.app.ui.screens.TimelineEditorScreen
 import com.rawedit.app.ui.theme.RawColors
 import com.rawedit.app.ui.theme.RawEditTheme
 import kotlinx.coroutines.Dispatchers
@@ -80,6 +81,7 @@ private sealed interface AppRoute {
     data class CopyPrompt(val projectId: Long) : AppRoute
     data class CodePaste(val projectId: Long) : AppRoute
     data class KeyframeSheet(val projectId: Long) : AppRoute
+    data class TimelineEditor(val projectId: Long) : AppRoute
     data class Chatbot(val projectId: Long? = null) : AppRoute
     data class Rendering(val projectId: Long) : AppRoute
     data class Result(val videoId: Long, val celebrate: Boolean) : AppRoute
@@ -458,6 +460,7 @@ private fun MainAuthenticatedHost(
                             onOpenCopyPrompt = { pushRoute(AppRoute.CopyPrompt(proj.id)) },
                             onOpenCodePaste = { pushRoute(AppRoute.CodePaste(proj.id)) },
                             onOpenKeyframeSheet = { pushRoute(AppRoute.KeyframeSheet(proj.id)) },
+                            onOpenTimelineEditor = { pushRoute(AppRoute.TimelineEditor(proj.id)) },
                             onOpenChatbot = { pushRoute(AppRoute.Chatbot(proj.id)) },
                             onSwipeCreate = { _ ->
                                 pushRoute(AppRoute.Rendering(proj.id))
@@ -664,6 +667,32 @@ private fun MainAuthenticatedHost(
                             onRenderNow = {
                                 isForward = true
                                 backStack = backStack.dropLast(1) + AppRoute.Rendering(proj.id)
+                            }
+                        )
+                    }
+                }
+
+
+                is AppRoute.TimelineEditor -> {
+                    val project by container.repository.observeProject(route.projectId)
+                        .collectAsState(initial = null)
+                    project?.let { proj ->
+                        TimelineEditorScreen(
+                            project = proj,
+                            allAssets = allAssets,
+                            cacheManager = container.cacheManager,
+                            onBack = ::popRoute,
+                            onSaveLayers = { layersJson, hasLayers ->
+                                scope.launch {
+                                    container.repository.saveProject(
+                                        proj.copy(
+                                            layersJson = layersJson,
+                                            hasEditableLayers = hasLayers
+                                        )
+                                    )
+                                    hostToastMsg = "Timeline layers saved"
+                                    popRoute()
+                                }
                             }
                         )
                     }
