@@ -17,6 +17,7 @@ import com.rawedit.app.R
 import com.rawedit.app.RawEditApplication
 import com.rawedit.app.data.local.ProjectEntity
 import com.rawedit.app.data.local.VideoEntity
+import com.rawedit.app.domain.AspectPresetStore
 import com.rawedit.app.domain.LayerTimelineCompiler
 import java.io.File
 import java.util.UUID
