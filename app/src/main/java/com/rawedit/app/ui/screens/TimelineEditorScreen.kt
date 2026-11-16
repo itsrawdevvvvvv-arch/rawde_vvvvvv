@@ -464,6 +464,9 @@ fun TimelineEditorScreen(
                 .weight(1f)
                 .fillMaxWidth()
                 .background(Color(0xFF0A0A0C))
+                .pointerInput(Unit) {
+                    detectTapGestures { selectedLayerId = null }
+                }
         ) {
             Row(modifier = Modifier.fillMaxSize()) {
                 // Eye Visibility Column
@@ -589,7 +592,7 @@ fun TimelineEditorScreen(
                                                             updateLayer(layer.id) { cur ->
                                                                 val dur = cur.endSec - cur.startSec
                                                                 val ns = (cur.startSec + dt).coerceIn(0.0, (totalDurationSec - dur).coerceAtLeast(0.0))
-                                                                cur.copy(startSec = ns, endSec = ns + dur)
+                                                                cur.copy(startSec = ns, endSec = ns + dur, timingEdited = true)
                                                             }
                                                         }
                                                     )

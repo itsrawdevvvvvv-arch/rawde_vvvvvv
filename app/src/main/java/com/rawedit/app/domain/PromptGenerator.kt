@@ -19,7 +19,7 @@ enum class ReelEditingStyle(
         badge = "Bouncy & Fluid",
         zipName = "kinetic-explainer-style.zip",
         previewAssetPath = "style_previews/style_kinetic_16_9.png",
-        description = "Punchy display headlines, step-by-step builds, subtle ambient float, animated progress bars, card brackets, and Apple/ZIP bouncy spring motion."
+        description = "Punchy display headlines, step-by-step builds, subtle ambient float, card brackets, and Apple/ZIP bouncy spring motion."
     );
 
     companion object {
@@ -147,20 +147,13 @@ Silently read the entire script/SRT and work out the topic, audience, core idea,
 
 ## 2. CONTINUOUS SMOOTH MOTION & ANIMATION FEEL (no static frames)
 - **Zero static frames:** every single frame from `t = 0` to `t = duration` MUST have visible continuous movement. Never let any scene freeze flat while holding for narration.
-- Keep smooth continuous life across the whole stage: gentle ambient background parallax/gradient drift, subtle slow float/scale breathing on cards or illustrations, animated progress strokes/connectors, and overlapping smooth entrances/exits between scenes so motion flows unbroken from start to finish.
+- Keep smooth continuous life across the whole stage: gentle ambient background parallax/gradient drift, subtle slow float/scale breathing on cards or illustrations, animated vector connectors, and overlapping smooth entrances/exits between scenes so motion flows unbroken from start to finish.
 - **Everything smooth:** derive all motion from clamped `u` in `0..1` using silky ease curves (`easeOutCubic`, `easeInOutQuart`, smooth sine drift) — never harsh linear cuts or frame-to-frame jitter.
 - **Text animation implementation:**
   - If **Option A (Simple ZIP Style)** is chosen: clean overflow mask wipes, smooth vertical/horizontal glides, and crisp opacity/tracking settles matching `kinetic-explainer-style.zip`.
   - If **Option B (Apple-Style Bouncy)** is chosen: deterministic damped-spring overshoot computed purely from `t` (e.g., smooth spring curve blended cleanly to settle at exact `1.0` with zero overshoot wobble on exit) driving scale, translateY, and opacity per word/line so typography pops with glossy Apple-keynote smoothness.
 
-## 3. OPEN SOURCE ASSET TOOLS & INTEGRATIONS (Installed in RawEdit)
-The RawEdit application integrates open-source creative asset studios. You may leverage and reference these capabilities in your reel:
-- **SVG-Edit Vector Engine (`SVG-Edit/svgedit`):** You can generate full inline vector SVGs (`<svg viewBox="0 0 ...">`) with custom bezier paths (`d="M... C... Q... Z"`), shapes (`<rect>`, `<circle>`, `<polygon>`), and node-based animations.
-- **Emoji Kitchen Fusion Engine (`xsalazar/emoji-kitchen`):** You can use transparent sticker mashups from the 100k+ combinations library (e.g. `https://www.gstatic.com/android/keyboard/emojikitchen/...` or local sticker assets) for expressive reaction stickers, character cutouts, and floating badges.
-- **Lottie & Keyframe Vector Animator (`marciogranzotto/lottie-tools`):** You can animate vector properties, transforms, stroke dashes, and scale pulses deterministically over time `t`.
-- **Filerobot & tldraw Canvas Studio (`scaleflex/filerobot-image-editor` / `tldraw`):** You can construct multi-layered cards with photo tiles, stickers, pill badges, and vector annotation callouts.
-
-## 4. INPUTS
+## 3. INPUTS
 DURATION: $durationFormatted seconds (30 fps, 1920x1080)
 FILE NAME: $cleanFile
 PALETTE: $paletteBlock
@@ -170,7 +163,7 @@ LOCAL ASSETS (MANDATORY — YOU MUST EMBED EVERY ATTACHED VIDEO & IMAGE IN THE S
 $customTweaksSection
 STYLE KIT: if `kinetic-explainer-style.zip` is attached, read `SKILL.md` and `docs/STYLE_BIBLE.md` first and reuse its tokens and components (`engine/raw-helpers.js` is bundled in the ZIP). Its `engine.js` only implements these element types: `ghost`, `kicker`, `sub`, `pill`, `headline`, `chips`, `card`, `row`, `phone`, `buttons`, `comment`, `round`. For ANY other type (`image`, `video`, `ui`, `diagram`, etc.), extend `build` yourself or write your own renderer. Always call `(build[o.t] || build.fallback)(o, s)`, never a bare `build[o.t]`. Do NOT copy `@font-face` blocks from `tokens.css`. If no zip is attached, write a minimal engine inline.
 
-## 5. RENDERER RULES (violations break the render)
+## 4. RENDERER RULES (violations break the render)
 Frames are captured one at a time, out of order, so the page must be a pure function of `t`.
 - Define `<div id="stage">` (1920x1080, `position:relative`, `overflow:hidden`) and `window.RAW = { duration: $durationFormatted, width: 1920, height: 1080, fps: 30, seek(t) {...} }`.
 - Build all DOM ONCE at load. `seek(t)` may only set `style`, `transform`, `opacity`, attributes or `textContent` computed from `t`. Never append, remove, or set `innerHTML` inside `seek`. Never keep counters or state between calls. Calling `seek(t)` twice must leave `stage.innerHTML` identical.
@@ -178,26 +171,26 @@ Frames are captured one at a time, out of order, so the page must be a pure func
 - FORBIDDEN: CSS `@keyframes`, `transition`, `animation`; `requestAnimationFrame`; `setTimeout`; `setInterval`; `Date.now`; `performance.now`; `video.play()`; `<script src>`; `<link>`; `@import`; `fetch`; `XMLHttpRequest`; `WebSocket`; `import()`; `window.open()`; any `http://` or `https://` URL (the only exception is the SVG namespace `http://www.w3.org/2000/svg`).
 - Fonts: use only these names, with no `@font-face`: $fontList. Always add a `sans-serif` fallback.${if (customFonts.isNotEmpty()) " MANDATORY: Use the user's imported font(s) (${customFonts.joinToString(", ")}) as the primary headline font." else ""}
 - JS strings: escape quotes and backslashes, no raw newlines inside quotes, never write the closing `</script>` tag inside a JS string.
-- Time: `seek` clamps `t` to `[0, duration]`. Scenes are contiguous from `0` to `duration`. Use `t >= start && t < end` for every scene except the last, which uses `t <= end`, so `t === duration` is never blank. No scene is empty for more than `0.3 s`. Eases must clamp progress to `0..1`.
+- Time: `seek` clamps `t` to `[0, duration]`. Scenes are contiguous from `0` to `duration`. Use `t >= start && t < end` for every scene except the last, which uses `t <= end`, so `t === duration` is never blank. Scenes must have ZERO blank/empty gaps between transitions (never let all scenes fade to opacity 0 at any `t`). Eases must clamp progress to `0..1`.
 
-## 6. LAYOUT MATH (no overflow, no collisions)
-- Safe area: `x 120..1800`, `y 70..930`. The progress bar occupies `y 972..1080`, so nothing may extend below `y 930`.
+## 5. LAYOUT MATH (no overflow, no collisions)
+- Safe area: `x 120..1800`, `y 70..1010`. Do NOT add any bottom progress bar or chapter bar (01 HOOK / 02 DEMO / 03 GET LINK); keep the bottom edge clean.
 - Columns: left `x 140..1040` (`W 900`), right `x 1160..1760` (`W 600`), full width `x 140..1780` (`W 1640`).
 - If an element has brackets, outlines or shadows extending `N px` outside its box, shrink its usable box by `N` per side. Keep at least `40 px` between neighbouring boxes after expansion. Example: a `34 px` bracket on a card at `x 1190..1750` really occupies `1156..1784`.
 - Every text element needs an explicit `width` or `max-width`, and center-aligned text needs one too. Never rely on `white-space:nowrap` for long strings.
 - NEVER stretch or distort fonts (`scaleX` must ALWAYS equal `scaleY`; never use condensed/elongated transforms or `line-height` below `1.08` on multi-line headlines).
 - NEVER let any headline or word overflow past `x = 1800` or overlap an icon/card.
-- Font size: `fs = floor(min(maxFs, W / (chars * k)))`, where `k` is `0.45` for Bebas Neue, Anton and Oswald; `0.62` for Poppins, Montserrat, Inter and Space Grotesk (use `0.66` at weight 800 or 900); `0.58` for Playfair Display; `0.60` for JetBrains Mono. If `fs` would drop below `56`, wrap to lines: `lines = ceil(chars * fs * k / W)`, `height = lines * fs * 1.1`. Check that `height` fits the space above `y 930`.
+- Font size: `fs = floor(min(maxFs, W / (chars * k)))`, where `k` is `0.45` for Bebas Neue, Anton and Oswald; `0.62` for Poppins, Montserrat, Inter and Space Grotesk (use `0.66` at weight 800 or 900); `0.58` for Playfair Display; `0.60` for JetBrains Mono. If `fs` would drop below `56`, wrap to lines: `lines = ceil(chars * fs * k / W)`, `height = lines * fs * 1.1`. Check that `height` fits the space above `y 1010`.
 - Contrast: text against its background is at least 4.5:1. Never use light text or icons on cream or light surfaces. Set SVG `stroke` and `fill` explicitly, never inherit.
 
-## 7. ASSETS
-- Images and cutouts: `<img src="assets/...">` built once, with explicit `width` and `height`. Use `object-fit:contain` for cutouts. Respect each asset's `Safe text zone` note.
+## 6. ASSETS
+- Images: `<img src="assets/...">` built once, with explicit `width` and `height` and `object-fit:contain`. Respect each asset's `Safe text zone` note.
 - Video: `<video muted playsinline preload="auto" src="assets/...">` built once. Use `RAW.syncVideo(videoEl, t, start, end, speed)` from `engine/raw-helpers.js` if present. Otherwise write a helper that clamps global `t` to `[start, end]`, sets `localT = max(0, (clampedGlobal - start) * speed)` capped at `duration - 0.033`, and only updates `currentTime` when it differs by more than `0.015 s`. Hide the video outside its scene. Never call `play()`.
 - Website UI screenshots: coordinates `[x, y, w x h]` are in source-image pixels. With display scale `s = displayW / naturalW`, the screen position is `imgLeft + x * s`, `imgTop + y * s`. Build the cursor as an SVG that moves between waypoints with eased interpolation. A click ripple is scale/opacity as a function of `t`. A highlight box is the element rect padded `8 px` with a `6 px` stroke. A zoom callout scales the image around the element centre, up to `2.2x`, and stays inside the stage.
 - Never reference an asset that is not listed. If one is missing, draw the visual with SVG instead.
 
-## 8. SILENT PRE-FLIGHT (check before emitting, do not print)
-Column and size math done for every text element; nothing below `y 930`; continuous smooth motion across every frame (no static frames); selected palette, font pairing & text animation style applied cleanly; the last scene reaches `duration`; no forbidden API or URL anywhere; `seek` is idempotent; every scene type exists in the renderer; contrast passes; JS strings valid; only bundled fonts; every narrated beat has a visual.
+## 7. SILENT PRE-FLIGHT (check before emitting, do not print)
+Column and size math done for every text element; nothing below `y 1010`; continuous smooth motion across every frame (no static frames); selected palette, font pairing & text animation style applied cleanly; the last scene reaches `duration`; no forbidden API or URL anywhere; `seek` is idempotent; every scene type exists in the renderer; contrast passes; JS strings valid; only bundled fonts; every narrated beat has a visual.
 
 OUTPUT: after my 3-choice answer, provide ONLY a single downloadable `.html` file containing the complete `<!DOCTYPE html>` document (not raw text in chat), nothing truncated.
         """.trimIndent()
@@ -209,7 +202,6 @@ OUTPUT: after my 3-choice answer, provide ONLY a single downloadable `.html` fil
                 assets.forEach { a ->
                     val kindTag = when (a.kind) {
                         LocalAssetEntity.KIND_CLIP -> "VIDEO CLIP (${String.format(Locale.US, "%.1f", a.durationSec)}s)"
-                        LocalAssetEntity.KIND_CUTOUT -> "TRANSPARENT PNG CUTOUT"
                         else -> "IMAGE"
                     }
                     val desc = a.description.ifBlank { "Local user media" }

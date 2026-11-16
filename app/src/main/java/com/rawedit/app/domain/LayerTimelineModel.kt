@@ -59,6 +59,7 @@ data class TimelineLayer(
     val colorEdited: Boolean = false,
     val bgColorEdited: Boolean = false,
     val fontSizeEdited: Boolean = false,
+    val timingEdited: Boolean = false,
     val keyframes: List<LayerKeyframe> = emptyList()
 ) {
     fun sampleAt(tSec: Double): SampledTransform {
@@ -121,6 +122,7 @@ object LayerTimelineCodec {
                 put("colorEdited", l.colorEdited)
                 put("bgColorEdited", l.bgColorEdited)
                 put("fontSizeEdited", l.fontSizeEdited)
+                put("timingEdited", l.timingEdited)
                 put("keyframes", JSONArray().apply {
                     l.keyframes.sortedBy { it.timeSec }.forEach { k ->
                         put(JSONObject().apply {
@@ -180,6 +182,7 @@ object LayerTimelineCodec {
                     colorEdited = o.optBoolean("colorEdited", false),
                     bgColorEdited = o.optBoolean("bgColorEdited", false),
                     fontSizeEdited = o.optBoolean("fontSizeEdited", false),
+                    timingEdited = o.optBoolean("timingEdited", false),
                     keyframes = kfs
                 )
             }
@@ -439,11 +442,11 @@ object LayerTimelineCompiler {
               if (l.domEid) {
                 var domEl = document.querySelector('[data-raw-eid="' + l.domEid + '"]');
                 if (!domEl) return;
-                if (!l.visible || t < l.startSec || t > l.endSec) {
+                if (!l.visible || (l.timingEdited && (t < l.startSec || t > l.endSec))) {
                   domEl.style.visibility = 'hidden';
                   return;
                 }
-                domEl.style.visibility = 'visible';
+                if (l.timingEdited) domEl.style.visibility = 'visible';
                 domEl.style.translate = (st.x || 0) + 'px ' + (st.y || 0) + 'px';
                 domEl.style.rotate = (st.rotation || 0) + 'deg';
                 domEl.style.scale = String(sc);
