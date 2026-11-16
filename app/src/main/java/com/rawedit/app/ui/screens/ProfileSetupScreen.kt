@@ -3,10 +3,10 @@ package com.rawedit.app.ui.screens
 import android.graphics.Bitmap
 import android.net.Uri
 import androidx.activity.compose.rememberLauncherForActivityResult
-import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -16,16 +16,15 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.imePadding
-import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -36,29 +35,31 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import androidx.core.content.FileProvider
+import coil.compose.AsyncImage
 import com.rawedit.app.data.CacheManager
-import com.rawedit.app.ui.components.BigPrimaryButton
 import com.rawedit.app.ui.components.CircleAvatarCropperDialog
-import com.rawedit.app.ui.components.RawSecondaryButton
-import com.rawedit.app.ui.components.UserAvatarView
-import com.rawedit.app.ui.icons.PixelMascotKind
-import com.rawedit.app.ui.icons.PixelRawEditLogo
+import com.rawedit.app.ui.components.DomeButtonKind
+import com.rawedit.app.ui.components.DomeCard
+import com.rawedit.app.ui.components.DomeEyebrow
+import com.rawedit.app.ui.components.DomeHeadPart
+import com.rawedit.app.ui.components.DomeHeadline
+import com.rawedit.app.ui.components.DomeMono
+import com.rawedit.app.ui.components.DomeMuted
+import com.rawedit.app.ui.components.DomePillButton
+import com.rawedit.app.ui.components.StaggerIn
+import com.rawedit.app.ui.icons.RawIcon
 import com.rawedit.app.ui.icons.RawIconType
-import com.rawedit.app.ui.icons.RawPixelMascot
-import com.rawedit.app.ui.motion.FeatheredScrollEdges
-import com.rawedit.app.ui.motion.KineticHeading
 import com.rawedit.app.ui.theme.BricolageFamily
 import com.rawedit.app.ui.theme.JetBrainsMonoFamily
 import com.rawedit.app.ui.theme.RawColors
-import com.rawedit.app.ui.theme.RawTypography
 import kotlinx.coroutines.launch
 
 @Composable
@@ -66,252 +67,133 @@ fun ProfileSetupScreen(
     cacheManager: CacheManager,
     onComplete: (name: String, photoPath: String?) -> Unit
 ) {
-    val context = LocalContext.current
     val scope = rememberCoroutineScope()
-    val scrollState = rememberScrollState()
-
     var name by remember { mutableStateOf("") }
     var savedPhotoPath by remember { mutableStateOf<String?>(null) }
     var pendingCropBitmap by remember { mutableStateOf<Bitmap?>(null) }
-    var cameraTempUri by remember { mutableStateOf<Uri?>(null) }
 
     val galleryPicker = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.PickVisualMedia()
-    ) { uri ->
+    ) { uri: Uri? ->
         if (uri != null) {
-            scope.launch {
-                pendingCropBitmap = cacheManager.loadBitmapWithExif(uri)
-            }
+            scope.launch { pendingCropBitmap = cacheManager.loadBitmapWithExif(uri) }
         }
     }
 
-    val cameraLauncher = rememberLauncherForActivityResult(
-        contract = ActivityResultContracts.TakePicture()
-    ) { success ->
-        val uri = cameraTempUri
-        if (success && uri != null) {
-            scope.launch {
-                pendingCropBitmap = cacheManager.loadBitmapWithExif(uri)
-            }
-        }
-    }
-
-    Box(
+    Column(
         modifier = Modifier
             .fillMaxSize()
             .background(RawColors.BgPrimary)
             .statusBarsPadding()
             .imePadding()
+            .verticalScroll(rememberScrollState())
+            .padding(horizontal = 20.dp)
+            .padding(top = 18.dp, bottom = 28.dp)
     ) {
-        Column(
-            modifier = Modifier
-                .fillMaxSize()
-                .verticalScroll(scrollState)
-                .padding(start = 18.dp, end = 18.dp, bottom = 120.dp)
-        ) {
-            // Top bar
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(58.dp),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                PixelRawEditLogo(width = 42.dp, height = 33.dp)
-                RawPixelMascot(kind = PixelMascotKind.PHANTOM_BUDDY, size = 38.dp)
-            }
+        StaggerIn(0) { DomeEyebrow("02 · Profile Setup") }
 
-            Spacer(modifier = Modifier.height(6.dp))
-            KineticHeading(
-                words = listOf("Set", "up", "profile"),
-                style = RawTypography.headlineLarge,
-                highlightLastWord = true
+        StaggerIn(1) {
+            DomeHeadline(
+                parts = listOf(DomeHeadPart.Plain("Who's\ncreating?")),
+                size = 44.dp,
+                lineHeightFactor = 0.95f
             )
-            Spacer(modifier = Modifier.height(10.dp))
-            Text(
-                text = "Everything stays locally on your phone",
-                style = RawTypography.bodyLarge.copy(fontSize = 16.sp),
-                color = RawColors.TextMuted
-            )
+        }
 
-            Spacer(modifier = Modifier.height(22.dp))
-
-            // Avatar card (28dp borderless with subtle Tan halo)
-            Column(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .clip(RoundedCornerShape(28.dp))
-                    .background(RawColors.CardSurface)
-                    .padding(18.dp),
-                horizontalAlignment = Alignment.CenterHorizontally
-            ) {
-                Box(
-                    modifier = Modifier
-                        .size(126.dp)
-                        .border(1.5.dp, RawColors.Tan.copy(alpha = 0.35f), CircleShape),
-                    contentAlignment = Alignment.Center
-                ) {
-                    UserAvatarView(
-                        name = name.ifBlank { "R" },
-                        photoPath = savedPhotoPath,
-                        size = 112.dp,
-                        onClick = {
-                            galleryPicker.launch(
-                                PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)
+        StaggerIn(2) {
+            DomeCard(tan = true, onClick = { galleryPicker.launch(null) }) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Box(
+                        modifier = Modifier
+                            .size(54.dp)
+                            .clip(CircleShape)
+                            .background(RawColors.Tan),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        val path = savedPhotoPath
+                        if (path != null) {
+                            AsyncImage(
+                                model = path,
+                                contentDescription = "Profile photo",
+                                contentScale = ContentScale.Crop,
+                                modifier = Modifier
+                                    .size(54.dp)
+                                    .clip(CircleShape)
+                            )
+                        } else {
+                            Text(
+                                text = initialsOf(name.ifBlank { "Creator" }),
+                                fontFamily = BricolageFamily,
+                                fontSize = 17.sp,
+                                fontWeight = FontWeight.ExtraBold,
+                                color = RawColors.Ink
                             )
                         }
-                    )
+                    }
+                    Spacer(Modifier.width(14.dp))
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            text = "Creator Profile",
+                            fontFamily = BricolageFamily,
+                            fontSize = 15.sp,
+                            fontWeight = FontWeight.ExtraBold,
+                            color = RawColors.Cream
+                        )
+                        DomeMono(text = "Local studio · tap to add photo", size = 10)
+                    }
+                    RawIcon(type = RawIconType.CAMERA, size = 18.dp, tint = RawColors.Tan)
                 }
-
-                Spacer(modifier = Modifier.height(12.dp))
-                Text(
-                    text = "Profile photo (optional)",
-                    style = RawTypography.titleMedium
-                )
-                Spacer(modifier = Modifier.height(14.dp))
-
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(10.dp)
-                ) {
-                    RawSecondaryButton(
-                        text = "Gallery",
-                        height = 50.dp,
-                        leadingIcon = RawIconType.IMAGE,
-                        onClick = {
-                            galleryPicker.launch(
-                                PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)
-                            )
-                        },
-                        modifier = Modifier.weight(1f)
-                    )
-                    RawSecondaryButton(
-                        text = "Camera",
-                        height = 50.dp,
-                        leadingIcon = RawIconType.CAMERA,
-                        onClick = {
-                            val tempFile = cacheManager.createCameraTempFile()
-                            val uri = FileProvider.getUriForFile(
-                                context,
-                                "${context.packageName}.fileprovider",
-                                tempFile
-                            )
-                            cameraTempUri = uri
-                            cameraLauncher.launch(uri)
-                        },
-                        modifier = Modifier.weight(1f)
-                    )
-                }
-
-                if (savedPhotoPath != null) {
-                    Spacer(modifier = Modifier.height(10.dp))
-                    RawSecondaryButton(
-                        text = "Remove photo",
-                        height = 50.dp,
-                        isDanger = true,
-                        onClick = { savedPhotoPath = null }
-                    )
-                }
-            }
-
-            Spacer(modifier = Modifier.height(24.dp))
-
-            // Your name + live N/32 mono counter
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 2.dp),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Text(
-                    text = "Your name",
-                    fontFamily = BricolageFamily,
-                    fontWeight = FontWeight.Bold,
-                    fontSize = 15.sp,
-                    color = RawColors.TextPrimary
-                )
-                Text(
-                    text = "${name.length}/32",
-                    fontFamily = JetBrainsMonoFamily,
-                    fontWeight = FontWeight.Medium,
-                    fontSize = 13.sp,
-                    style = TextStyle(fontFeatureSettings = "tnum"),
-                    color = RawColors.TextMuted
-                )
-            }
-            Spacer(modifier = Modifier.height(10.dp))
-            OutlinedTextField(
-                value = name,
-                onValueChange = { if (it.length <= 32) name = it },
-                placeholder = {
-                    Text(
-                        "What should we call you?",
-                        fontFamily = BricolageFamily,
-                        fontWeight = FontWeight.Medium,
-                        fontSize = 18.sp,
-                        color = RawColors.TextMuted
-                    )
-                },
-                textStyle = TextStyle(
-                    fontFamily = BricolageFamily,
-                    fontWeight = FontWeight.SemiBold,
-                    fontSize = 20.sp,
-                    color = RawColors.TextPrimary
-                ),
-                singleLine = true,
-                shape = RoundedCornerShape(20.dp),
-                colors = OutlinedTextFieldDefaults.colors(
-                    focusedBorderColor = RawColors.AccentFocus,
-                    unfocusedBorderColor = Color.Transparent,
-                    focusedContainerColor = RawColors.RaisedCard,
-                    unfocusedContainerColor = RawColors.RaisedCard,
-                    focusedTextColor = RawColors.TextPrimary,
-                    unfocusedTextColor = RawColors.TextPrimary,
-                    cursorColor = RawColors.Tan
-                ),
-                modifier = Modifier.fillMaxWidth()
-            )
-
-            Spacer(modifier = Modifier.height(28.dp))
-            Box(
-                modifier = Modifier.fillMaxWidth(),
-                contentAlignment = Alignment.Center
-            ) {
-                RawPixelMascot(
-                    kind = PixelMascotKind.PEEKING_CAT,
-                    size = 78.dp,
-                    awakeOverride = true
-                )
             }
         }
 
-        FeatheredScrollEdges(
-            scrollState = scrollState,
-            topHeight = 40.dp,
-            bottomHeight = 114.dp,
-            alwaysShowBottom = true
-        )
+        StaggerIn(3) {
+            BasicTextField(
+                value = name,
+                onValueChange = { name = it },
+                singleLine = true,
+                textStyle = TextStyle(
+                    fontFamily = JetBrainsMonoFamily,
+                    fontSize = 13.sp,
+                    color = RawColors.Cream
+                ),
+                cursorBrush = SolidColor(RawColors.Tan),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(18.dp))
+                    .background(RawColors.CardSurface)
+                    .border(1.dp, RawColors.Divider, RoundedCornerShape(18.dp))
+                    .padding(horizontal = 14.dp, vertical = 14.dp)
+                    .padding(bottom = 0.dp),
+                decorationBox = { inner ->
+                    Box {
+                        if (name.isBlank()) {
+                            Text(
+                                text = "Your name",
+                                fontFamily = JetBrainsMonoFamily,
+                                fontSize = 13.sp,
+                                color = RawColors.TextMuted
+                            )
+                        }
+                        inner()
+                    }
+                }
+            )
+            Spacer(Modifier.height(14.dp))
+        }
 
-        // Sticky gradient CTA footer
-        Box(
-            modifier = Modifier
-                .align(Alignment.BottomCenter)
-                .fillMaxWidth()
-                .background(
-                    Brush.verticalGradient(
-                        listOf(Color.Transparent, RawColors.BgPrimary.copy(alpha = 0.94f), RawColors.BgPrimary)
-                    )
-                )
-                .navigationBarsPadding()
-                .padding(start = 18.dp, end = 18.dp, top = 20.dp, bottom = 18.dp)
-        ) {
-            BigPrimaryButton(
-                text = "Continue to raw_edit",
-                height = 60.dp,
-                enabled = name.trim().isNotEmpty(),
+        StaggerIn(4) {
+            DomePillButton(
+                text = "Continue",
+                kind = DomeButtonKind.Light,
+                trailingArrow = true,
+                enabled = name.isNotBlank(),
                 onClick = { onComplete(name.trim(), savedPhotoPath) }
             )
+        }
+
+        StaggerIn(5) {
+            Spacer(Modifier.height(10.dp))
+            DomeMuted("Your name and photo stay on this phone — nothing is uploaded.")
         }
     }
 
@@ -321,10 +203,16 @@ fun ProfileSetupScreen(
             onCancel = { pendingCropBitmap = null },
             onConfirmCrop = { cropped ->
                 pendingCropBitmap = null
-                scope.launch {
-                    savedPhotoPath = cacheManager.saveProfileAvatar(cropped)
-                }
+                scope.launch { savedPhotoPath = cacheManager.saveProfileAvatar(cropped) }
             }
         )
     }
 }
+
+private fun initialsOf(name: String): String =
+    name.trim()
+        .split(" ")
+        .filter { it.isNotBlank() }
+        .take(2)
+        .joinToString("") { it.first().uppercase() }
+        .ifBlank { "R" }
