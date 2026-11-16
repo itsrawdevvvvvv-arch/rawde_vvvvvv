@@ -39,14 +39,16 @@ class FrameRenderer(
     private class OffscreenStagePresentation(
         outerContext: Context,
         display: Display,
-        val webView: WebView
+        val webView: WebView,
+        val stageW: Int,
+        val stageH: Int
     ) : Presentation(outerContext, display) {
         override fun onCreate(savedInstanceState: Bundle?) {
             super.onCreate(savedInstanceState)
             val root = FrameLayout(context).apply {
-                layoutParams = ViewGroup.LayoutParams(WIDTH, HEIGHT)
+                layoutParams = ViewGroup.LayoutParams(stageW, stageH)
             }
-            webView.layoutParams = FrameLayout.LayoutParams(WIDTH, HEIGHT)
+            webView.layoutParams = FrameLayout.LayoutParams(stageW, stageH)
             root.addView(webView)
             setContentView(root)
         }
@@ -58,14 +60,16 @@ class FrameRenderer(
         outputVideoOnlyMp4: File,
         onProgress: (percent: Int, currentFrame: Int, totalFrames: Int) -> Unit,
         onPreviewFrame: (Bitmap) -> Unit,
-        cancelled: () -> Boolean
+        cancelled: () -> Boolean,
+        stageWidth: Int = WIDTH,
+        stageHeight: Int = HEIGHT
     ) {
         val totalFrames = ceil(durationSec * FPS).toInt().coerceAtLeast(1)
         val encoderDispatcher = Executors.newSingleThreadExecutor { runnable ->
             Thread(runnable, "raw-gl-encoder")
         }.asCoroutineDispatcher()
 
-        val captureBmp = Bitmap.createBitmap(WIDTH, HEIGHT, Bitmap.Config.ARGB_8888)
+        val captureBmp = Bitmap.createBitmap(stageWidth, stageHeight, Bitmap.Config.ARGB_8888)
         val captureCanvas = Canvas(captureBmp)
 
         var virtualDisplay: VirtualDisplay? = null
@@ -78,15 +82,15 @@ class FrameRenderer(
             encoder = withContext(encoderDispatcher) {
                 SurfaceEncoder(
                     outputVideoFile = outputVideoOnlyMp4,
-                    width = WIDTH,
-                    height = HEIGHT,
+                    width = stageWidth,
+                    height = stageHeight,
                     fps = FPS,
                     durationSec = durationSec
                 )
             }
 
             var servedHtml = ""
-            val assetServer = LocalAssetServer(context, cacheManager) { servedHtml }
+            val assetServer = LocalAssetServer(context, cacheManager, stageWidth, stageHeight) { servedHtml }
             servedHtml = assetServer.buildInjectedHtml(rawHtml)
 
             val pageLoaded = CompletableDeferred<Unit>()
@@ -94,7 +98,7 @@ class FrameRenderer(
                 val baseDisplayContext = create160DpiContext(context)
                 val dm = context.getSystemService(Context.DISPLAY_SERVICE) as DisplayManager
                 val mainHandler = Handler(Looper.getMainLooper())
-                val reader = ImageReader.newInstance(WIDTH, HEIGHT, PixelFormat.RGBA_8888, 2).apply {
+                val reader = ImageReader.newInstance(stageWidth, stageHeight, PixelFormat.RGBA_8888, 2).apply {
                     setOnImageAvailableListener({ r ->
                         runCatching { r.acquireLatestImage()?.close() }
                     }, mainHandler)
@@ -103,8 +107,8 @@ class FrameRenderer(
 
                 val vd = dm.createVirtualDisplay(
                     "RawEditRenderStage",
-                    WIDTH,
-                    HEIGHT,
+                    stageWidth,
+                    stageHeight,
                     DisplayMetrics.DENSITY_DEFAULT,
                     reader.surface,
                     DisplayManager.VIRTUAL_DISPLAY_FLAG_OWN_CONTENT_ONLY or
@@ -120,15 +124,15 @@ class FrameRenderer(
                 }
 
                 runCatching {
-                    val pres = OffscreenStagePresentation(hostContext, vd.display, wv)
+                    val pres = OffscreenStagePresentation(hostContext, vd.display, wv, stageWidth, stageHeight)
                     presentation = pres
                     pres.show()
                 }
                 wv.measure(
-                    View.MeasureSpec.makeMeasureSpec(WIDTH, View.MeasureSpec.EXACTLY),
-                    View.MeasureSpec.makeMeasureSpec(HEIGHT, View.MeasureSpec.EXACTLY)
+                    View.MeasureSpec.makeMeasureSpec(stageWidth, View.MeasureSpec.EXACTLY),
+                    View.MeasureSpec.makeMeasureSpec(stageHeight, View.MeasureSpec.EXACTLY)
                 )
-                wv.layout(0, 0, WIDTH, HEIGHT)
+                wv.layout(0, 0, stageWidth, stageHeight)
 
                 wv.resumeTimers()
                 wv.onResume()

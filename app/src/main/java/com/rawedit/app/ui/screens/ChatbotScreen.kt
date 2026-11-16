@@ -462,6 +462,7 @@ fun RawChatbotScreen(
                                             "pdf" -> "application/pdf"
                                             "html" -> "text/html"
                                             "json" -> "application/json"
+                                            "apk" -> "application/vnd.android.package-archive"
                                             else -> "text/plain"
                                         }
                                         scope.launch {

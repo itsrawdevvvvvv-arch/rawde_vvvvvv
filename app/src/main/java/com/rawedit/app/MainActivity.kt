@@ -448,6 +448,10 @@ private fun MainAuthenticatedHost(
                         CreateHubScreen(
                             project = proj,
                             attachedAssetCount = attachedCount,
+                            cacheManager = container.cacheManager,
+                            userProfile = userProfile,
+                            userPreferences = container.userPreferences,
+                            geminiRouter = geminiRouter,
                             onBack = ::popRoute,
                             onDeleteProject = {
                                 scope.launch {

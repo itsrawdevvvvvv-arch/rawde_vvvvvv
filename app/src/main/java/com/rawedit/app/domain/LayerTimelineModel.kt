@@ -311,7 +311,9 @@ object LayerTimelineCompiler {
     fun compileToHtml(
         baseHtml: String,
         layersJson: String,
-        durationSec: Double
+        durationSec: Double,
+        stageWidth: Int = 1920,
+        stageHeight: Int = 1080
     ): String {
         val layers = LayerTimelineCodec.decode(layersJson)
         // Always inject runtime hook so live timeline edits work even before first save
@@ -325,8 +327,8 @@ object LayerTimelineCompiler {
           #raw-layer-overlay {
             position: fixed;
             inset: 0;
-            width: 1920px;
-            height: 1080px;
+            width: ${stageWidth}px;
+            height: ${stageHeight}px;
             pointer-events: none;
             overflow: hidden;
             z-index: 9999;
@@ -420,8 +422,8 @@ object LayerTimelineCompiler {
                 el.style.borderRadius = '24px';
               } else if (l.type === 'solid') {
                 el = document.createElement('div');
-                el.style.width = '1920px';
-                el.style.height = '1080px';
+                el.style.width = '${stageWidth}px';
+                el.style.height = '${stageHeight}px';
                 el.style.background = l.bgColorHex || '#161618';
               } else if (l.type === 'shape') {
                 el = document.createElement('div');
@@ -521,8 +523,8 @@ object LayerTimelineCompiler {
           } else {
             window.RAW = {
               duration: $safeDur,
-              width: 1920,
-              height: 1080,
+              width: $stageWidth,
+              height: $stageHeight,
               fps: 30,
               seek: function(t) { return window.__applyLayerTimeline(t); }
             };
@@ -538,8 +540,8 @@ object LayerTimelineCompiler {
             <head>
               <meta charset="utf-8" />
               <style>
-                html, body { margin: 0; padding: 0; width: 1920px; height: 1080px; overflow: hidden; background: #0D0D0F; }
-                #stage { position: relative; width: 1920px; height: 1080px; overflow: hidden; }
+                html, body { margin: 0; padding: 0; width: ${stageWidth}px; height: ${stageHeight}px; overflow: hidden; background: #0D0D0F; }
+                #stage { position: relative; width: ${stageWidth}px; height: ${stageHeight}px; overflow: hidden; }
               </style>
             </head>
             <body>

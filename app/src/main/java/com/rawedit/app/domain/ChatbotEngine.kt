@@ -317,7 +317,7 @@ object ChatbotEngine {
                 - Installed custom fonts (${if (customFonts.isEmpty()) "none yet" else customFonts.joinToString(", ")}).
                 - The Style Pack ZIP (`kinetic-explainer-style.zip`, containing `SKILL.md`, `docs/STYLE_BIBLE.md`, `style/tokens.css`, `style/components.css`, `engine/engine.js`, `engine/raw-helpers.js`).
                 - The Cloud AI Prompt generator & Custom Prompt Directives.
-                - GitHub integration (${if (userProfile.hasGithubToken) "GitHub token active" else "Public GitHub access active — user can also paste a token in Settings"}).
+                - GitHub integration & Cloud APK Builder (${if (userProfile.hasGithubToken) "GitHub token active — can push ZIPs to GitHub Actions, auto-fix errors, and return compiled .apk files" else "User can paste a GitHub token in Settings to enable cloud APK builds"}).
 
                 HOW TO APPLY LIVE CHANGES WHEN THE USER ASKS TO TWEAK THE PROMPT, STYLE ZIP, GITHUB SKILLS, OR HTML CODE:
                 1. To tweak/customize the Prompt that gets copied for AI tools, include a block in your reply:
@@ -333,6 +333,7 @@ object ChatbotEngine {
                 - Create repo: <<<GITHUB_CREATE_REPO name="repo-name" description="..." private="false">>>
                 - Create or edit file: <<<GITHUB_WRITE_FILE repo="owner/repo" path="path/to/file" message="commit msg">>>\n[file content]\n<<<END_GITHUB_WRITE_FILE>>>
                 - Delete file: <<<GITHUB_DELETE_FILE repo="owner/repo" path="path/to/file" message="commit msg">>>
+                - Build Android APK from uploaded .zip: Handled automatically via GitHub Actions (`GitHubApkBuilder`). NEVER tell the user you cannot compile APKs.
                 4. File, PDF & Website Creation Tools (MANDATORY WHEN USER ASKS FOR A FILE):
                 Whenever the user asks to create, export, download, or give any `.html`, `.txt`, `.pdf`, `.md`, `.skill`, `.json`, `.css`, `.js`, or code/document file, you MUST emit the corresponding tool block below (do NOT just paste raw file text in chat):
                 - Create PDF (`.pdf`): <<<CREATE_PDF title="Title" filename="doc.pdf">>>\n[Clean Markdown/text content]\n<<<END_CREATE_PDF>>>
@@ -357,6 +358,29 @@ object ChatbotEngine {
             }.getOrDefault("")
 
             val lowerMsg = userText.lowercase(Locale.US)
+            // Direct Cloud APK Build via GitHub Actions when user uploads a .zip and asks to compile/build APK
+            val wantsApkBuild = uploadedFile != null &&
+                uploadedFile.fileName.endsWith(".zip", ignoreCase = true) &&
+                listOf("apk", "compile", "build").any { lowerMsg.contains(it) }
+            if (wantsApkBuild && uploadedFile != null) {
+                val apkOutcome = GitHubApkBuilder.buildApkFromZip(
+                    zipFile = File(uploadedFile.localPath),
+                    githubToken = userProfile.githubAccessToken,
+                    geminiRouter = geminiRouter,
+                    geminiApiKey = userProfile.geminiApiKey,
+                    cacheManager = cacheManager
+                ).getOrThrow()
+                appliedBadges.add("Compiled APK via GitHub Actions")
+                val msg = ChatMessageItem(
+                    role = "assistant",
+                    text = "## APK Build Complete\n\n${apkOutcome.notes}\n- **Repo:** `${apkOutcome.repoFullName}`\n- **Workflow:** ${apkOutcome.runUrl}\n\nTap **Save** below to save `${apkOutcome.apkFile.name}` to your Downloads.",
+                    appliedActions = appliedBadges,
+                    generatedFilePath = apkOutcome.apkFile.absolutePath,
+                    generatedFileName = apkOutcome.apkFile.name
+                )
+                return@runCatching ChatbotTurnOutcome(assistantMessage = msg)
+            }
+
             val isScriptRequest = listOf("script", "hook", "reel", "tts", "hinglish", "caption", "viral").any { lowerMsg.contains(it) }
             val wantsLiveWeb = listOf("latest", "current", "today", "2026", "trending", "new ", "search", "web", "fetch", "news", "best ", "write a script", "reel script").any { lowerMsg.contains(it) }
 

@@ -54,6 +54,7 @@ import com.rawedit.app.data.CacheManager
 import com.rawedit.app.data.local.UserProfile
 import com.rawedit.app.domain.GeminiWaterfallRouter
 import com.rawedit.app.domain.PaletteColorMath
+import com.rawedit.app.domain.InstantPaletteEngine
 import com.rawedit.app.domain.PaletteExporter
 import com.rawedit.app.domain.PaletteJsonCodec
 import com.rawedit.app.domain.PaletteState
@@ -133,34 +134,19 @@ fun PaletteScreen(
     val hasGeminiKey = userProfile.hasGeminiKey
 
     fun regeneratePalette() {
-        if (!hasGeminiKey) {
-            onOpenGeminiKey()
-            return
-        }
-        if (generating) return
-        generating = true
         errorMsg = null
         val targetNumber = if (userProfile.paletteJson.isBlank()) {
             userProfile.paletteCounter.coerceAtLeast(1)
         } else {
             maxOf(userProfile.paletteCounter, currentPalette.number + 1)
         }
-        val router = geminiRouter ?: GeminiWaterfallRouter(context)
-        scope.launch {
-            val res = router.generatePalette(
-                apiKey = userProfile.geminiApiKey,
-                nextNumber = targetNumber,
-                previousMood = currentPalette.mood
-            )
-            generating = false
-            res.onSuccess { palette ->
-                onSavePaletteState(targetNumber + 1, PaletteJsonCodec.encode(palette))
-                haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-                toastMsg = "Palette #${palette.numFormatted} ready"
-            }.onFailure { err ->
-                errorMsg = err.message ?: "Gemini AI palette request failed"
-            }
-        }
+        val palette = InstantPaletteEngine.generate(
+            nextNumber = targetNumber,
+            previousMood = currentPalette.mood
+        )
+        onSavePaletteState(targetNumber + 1, PaletteJsonCodec.encode(palette))
+        haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+        toastMsg = "Palette #${palette.numFormatted} ready"
     }
 
     LaunchedEffect(userProfile.geminiApiKey, userProfile.paletteJson) {

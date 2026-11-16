@@ -39,7 +39,9 @@ object PromptGenerator {
         customFonts: List<String> = emptyList(),
         style: ReelEditingStyle = ReelEditingStyle.KINETIC_EXPLAINER,
         customPromptNotes: String = "",
-        githubSkills: List<String> = emptyList()
+        githubSkills: List<String> = emptyList(),
+        stageWidth: Int = 1920,
+        stageHeight: Int = 1080
     ): String {
         return buildKineticExplainerPrompt(
             fileName = fileName,

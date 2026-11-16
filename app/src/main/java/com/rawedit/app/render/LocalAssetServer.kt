@@ -19,6 +19,8 @@ import java.util.Locale
 class LocalAssetServer(
     private val context: Context,
     private val cacheManager: CacheManager,
+    private val stageWidth: Int = 1920,
+    private val stageHeight: Int = 1080,
     private val htmlProvider: () -> String
 ) {
 
@@ -477,8 +479,8 @@ class LocalAssetServer(
             if (dur > 0) {
               window.RAW = __attachRawHelpers({
                 duration: dur,
-                width: 1920,
-                height: 1080,
+                width: $stageWidth,
+                height: $stageHeight,
                 fps: 30,
                 seek: function(t) { return window.seek(t); }
               });
@@ -495,8 +497,8 @@ class LocalAssetServer(
             window.__rawLastDiagnostics = empty;
             return empty;
           }
-          stage.style.width = '1920px';
-          stage.style.height = '1080px';
+          stage.style.width = '${stageWidth}px';
+          stage.style.height = '${stageHeight}px';
           stage.style.overflow = 'hidden';
 
           var activeContainer = stage;

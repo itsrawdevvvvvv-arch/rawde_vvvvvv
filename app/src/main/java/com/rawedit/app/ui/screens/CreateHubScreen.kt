@@ -20,6 +20,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -29,13 +30,21 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.OutlinedTextFieldDefaults
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -52,7 +61,17 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.rawedit.app.data.CacheManager
 import com.rawedit.app.data.local.ProjectEntity
+import com.rawedit.app.data.local.UserPreferences
+import com.rawedit.app.data.local.UserProfile
+import com.rawedit.app.domain.AspectPreset
+import com.rawedit.app.domain.AspectPresetStore
+import com.rawedit.app.domain.CaptionGenerator
+import com.rawedit.app.domain.CaptionPackResult
+import com.rawedit.app.domain.GeminiWaterfallRouter
+import com.rawedit.app.domain.StylePreset
+import com.rawedit.app.domain.StylePresetStore
 import com.rawedit.app.ui.components.CircleActionButton
 import com.rawedit.app.ui.components.FormatHelpers
 import com.rawedit.app.ui.components.RawConfirmDialog
@@ -92,6 +111,10 @@ private data class StepRowModel(
 fun CreateHubScreen(
     project: ProjectEntity,
     attachedAssetCount: Int,
+    cacheManager: CacheManager? = null,
+    userProfile: UserProfile? = null,
+    userPreferences: UserPreferences? = null,
+    geminiRouter: GeminiWaterfallRouter? = null,
     onBack: () -> Unit,
     onDeleteProject: () -> Unit,
     onOpenAddVoice: () -> Unit,
@@ -109,8 +132,19 @@ fun CreateHubScreen(
     val hasCode = project.code.isNotBlank()
     val hasLayers = project.hasEditableLayers && project.layersJson.isNotBlank()
     val canCreate = hasAudio && (hasCode || hasLayers)
+    val context = LocalContext.current
+    val clipboard = LocalClipboardManager.current
+    val scope = rememberCoroutineScope()
     var showDeleteConfirm by remember { mutableStateOf(false) }
     var toastMsg by remember { mutableStateOf<String?>(null) }
+    var activeAspect by remember(project.id) {
+        mutableStateOf(cacheManager?.let { AspectPresetStore.get(it, project.id) } ?: AspectPreset.ALL_PRESETS.first())
+    }
+    var showCustomAspectDialog by remember { mutableStateOf(false) }
+    var showPresetsDialog by remember { mutableStateOf(false) }
+    var showCaptionsDialog by remember { mutableStateOf(false) }
+    var captionResult by remember { mutableStateOf<CaptionPackResult?>(null) }
+    var captionLoading by remember { mutableStateOf(false) }
 
     LaunchedEffect(toastMsg) {
         if (toastMsg != null) {
@@ -324,9 +358,93 @@ fun CreateHubScreen(
                     )
                     HubStatPill(
                         icon = RawIconType.FILE,
-                        text = if (hasAudio) FormatHelpers.formatFileSize(project.audioSizeBytes) else "1080p MP4",
+                        text = "${activeAspect.label} (${activeAspect.width}x${activeAspect.height})",
                         modifier = Modifier.weight(1f)
                     )
+                }
+            }
+
+            // All Aspect Ratios Selector + Style Presets + SRT Captions
+            item {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .horizontalScroll(rememberScrollState()),
+                        horizontalArrangement = Arrangement.spacedBy(7.dp)
+                    ) {
+                        AspectPreset.ALL_PRESETS.forEach { preset ->
+                            val isSel = activeAspect.id == preset.id
+                            Surface(
+                                onClick = {
+                                    activeAspect = preset
+                                    cacheManager?.let { AspectPresetStore.set(it, project.id, preset) }
+                                    toastMsg = "Ratio set to ${preset.label} (${preset.width}x${preset.height})"
+                                },
+                                shape = CircleShape,
+                                color = if (isSel) RawColors.Tan else RawColors.RaisedCard
+                            ) {
+                                Text(
+                                    text = preset.label,
+                                    fontFamily = JetBrainsMonoFamily,
+                                    fontWeight = FontWeight.Bold,
+                                    fontSize = 11.5.sp,
+                                    color = if (isSel) RawColors.Ink else RawColors.TextPrimary,
+                                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 7.dp)
+                                )
+                            }
+                        }
+                        Surface(
+                            onClick = { showCustomAspectDialog = true },
+                            shape = CircleShape,
+                            color = if (activeAspect.id == "custom") RawColors.Tan else RawColors.RaisedCard
+                        ) {
+                            Text(
+                                text = "Custom",
+                                fontFamily = JetBrainsMonoFamily,
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 11.5.sp,
+                                color = if (activeAspect.id == "custom") RawColors.Ink else RawColors.Tan,
+                                modifier = Modifier.padding(horizontal = 12.dp, vertical = 7.dp)
+                            )
+                        }
+                    }
+
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        Surface(
+                            onClick = { showPresetsDialog = true },
+                            shape = RoundedCornerShape(14.dp),
+                            color = RawColors.CardSurface,
+                            modifier = Modifier.weight(1f)
+                        ) {
+                            Text(
+                                text = "Style Presets",
+                                fontFamily = BricolageFamily,
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 13.sp,
+                                color = RawColors.Cream,
+                                modifier = Modifier.padding(horizontal = 14.dp, vertical = 11.dp)
+                            )
+                        }
+                        Surface(
+                            onClick = { showCaptionsDialog = true },
+                            shape = RoundedCornerShape(14.dp),
+                            color = RawColors.AccentSoft,
+                            modifier = Modifier.weight(1f)
+                        ) {
+                            Text(
+                                text = "SRT Captions & Pin",
+                                fontFamily = BricolageFamily,
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 13.sp,
+                                color = RawColors.Tan,
+                                modifier = Modifier.padding(horizontal = 14.dp, vertical = 11.dp)
+                            )
+                        }
+                    }
                 }
             }
 
@@ -470,6 +588,218 @@ fun CreateHubScreen(
             },
             onDismiss = { showDeleteConfirm = false }
         )
+    }
+
+    if (showCustomAspectDialog) {
+        var wDraft by remember { mutableStateOf(activeAspect.width.toString()) }
+        var hDraft by remember { mutableStateOf(activeAspect.height.toString()) }
+        Dialog(onDismissRequest = { showCustomAspectDialog = false }) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(24.dp))
+                    .background(RawColors.CardSurface)
+                    .border(1.dp, RawColors.Divider, RoundedCornerShape(24.dp))
+                    .padding(18.dp),
+                verticalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
+                Text("Custom Aspect Ratio", fontFamily = BricolageFamily, fontWeight = FontWeight.Bold, fontSize = 17.sp, color = RawColors.TextPrimary)
+                OutlinedTextField(value = wDraft, onValueChange = { wDraft = it }, label = { Text("Width (px)") }, singleLine = true, modifier = Modifier.fillMaxWidth())
+                OutlinedTextField(value = hDraft, onValueChange = { hDraft = it }, label = { Text("Height (px)") }, singleLine = true, modifier = Modifier.fillMaxWidth())
+                BigPrimaryButton(
+                    text = "Apply",
+                    height = 44.dp,
+                    onClick = {
+                        val w = wDraft.toIntOrNull() ?: 1080
+                        val h = hDraft.toIntOrNull() ?: 1920
+                        val custom = AspectPreset.custom(w, h)
+                        activeAspect = custom
+                        cacheManager?.let { AspectPresetStore.set(it, project.id, custom) }
+                        showCustomAspectDialog = false
+                        toastMsg = "Ratio set to ${custom.width}x${custom.height}"
+                    }
+                )
+            }
+        }
+    }
+
+    if (showPresetsDialog && cacheManager != null) {
+        var presets by remember { mutableStateOf(StylePresetStore.list(cacheManager)) }
+        var presetName by remember { mutableStateOf("") }
+        Dialog(onDismissRequest = { showPresetsDialog = false }) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(24.dp))
+                    .background(RawColors.CardSurface)
+                    .border(1.dp, RawColors.Divider, RoundedCornerShape(24.dp))
+                    .padding(18.dp),
+                verticalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
+                Text("Reusable Style Presets", fontFamily = BricolageFamily, fontWeight = FontWeight.Bold, fontSize = 17.sp, color = RawColors.TextPrimary)
+                OutlinedTextField(
+                    value = presetName,
+                    onValueChange = { presetName = it },
+                    label = { Text("New preset name") },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth()
+                )
+                BigPrimaryButton(
+                    text = "Save Current Setup",
+                    height = 44.dp,
+                    onClick = {
+                        val p = StylePreset(
+                            name = presetName.trim().ifBlank { "${activeAspect.label} Studio Preset" },
+                            aspectId = activeAspect.id,
+                            stageWidth = activeAspect.width,
+                            stageHeight = activeAspect.height,
+                            paletteJson = userProfile?.paletteJson.orEmpty(),
+                            customPromptNotes = userProfile?.customPromptNotes.orEmpty()
+                        )
+                        StylePresetStore.save(cacheManager, p)
+                        presets = StylePresetStore.list(cacheManager)
+                        presetName = ""
+                        toastMsg = "Saved preset: ${p.name}"
+                    }
+                )
+                if (presets.isNotEmpty()) {
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .heightIn(max = 220.dp)
+                            .verticalScroll(rememberScrollState()),
+                        verticalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        presets.forEach { sp ->
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clip(RoundedCornerShape(14.dp))
+                                    .background(RawColors.RaisedCard)
+                                    .padding(10.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.SpaceBetween
+                            ) {
+                                Column(modifier = Modifier.weight(1f)) {
+                                    Text(sp.name, fontFamily = BricolageFamily, fontWeight = FontWeight.Bold, fontSize = 13.5.sp, color = RawColors.Cream)
+                                    Text("${sp.stageWidth}x${sp.stageHeight}", fontFamily = JetBrainsMonoFamily, fontSize = 10.5.sp, color = RawColors.Tan)
+                                }
+                                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                    Surface(
+                                        onClick = {
+                                            val targetAspect = AspectPreset.ALL_PRESETS.firstOrNull { it.id == sp.aspectId }
+                                                ?: AspectPreset.custom(sp.stageWidth, sp.stageHeight)
+                                            activeAspect = targetAspect
+                                            AspectPresetStore.set(cacheManager, project.id, targetAspect)
+                                            scope.launch {
+                                                if (sp.paletteJson.isNotBlank()) {
+                                                    userPreferences?.savePaletteState(1, sp.paletteJson)
+                                                }
+                                                if (sp.customPromptNotes.isNotBlank()) {
+                                                    userPreferences?.saveCustomPromptNotes(sp.customPromptNotes)
+                                                }
+                                            }
+                                            showPresetsDialog = false
+                                            toastMsg = "Applied: ${sp.name}"
+                                        },
+                                        shape = CircleShape,
+                                        color = RawColors.Tan
+                                    ) {
+                                        Text("Apply", fontFamily = JetBrainsMonoFamily, fontWeight = FontWeight.Bold, fontSize = 10.5.sp, color = RawColors.Ink, modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp))
+                                    }
+                                    Surface(
+                                        onClick = {
+                                            StylePresetStore.delete(cacheManager, sp.id)
+                                            presets = StylePresetStore.list(cacheManager)
+                                        },
+                                        shape = CircleShape,
+                                        color = RawColors.ErrorSoft
+                                    ) {
+                                        Text("Del", fontFamily = JetBrainsMonoFamily, fontWeight = FontWeight.Bold, fontSize = 10.5.sp, color = RawColors.ErrorCoral, modifier = Modifier.padding(horizontal = 9.dp, vertical = 5.dp))
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    if (showCaptionsDialog) {
+        Dialog(onDismissRequest = { showCaptionsDialog = false }) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(24.dp))
+                    .background(RawColors.CardSurface)
+                    .border(1.dp, RawColors.Divider, RoundedCornerShape(24.dp))
+                    .padding(18.dp),
+                verticalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
+                Text("SRT Captions & Pinned Comment", fontFamily = BricolageFamily, fontWeight = FontWeight.Bold, fontSize = 17.sp, color = RawColors.TextPrimary)
+                BigPrimaryButton(
+                    text = if (captionLoading) "Generating..." else "Generate from SRT",
+                    height = 44.dp,
+                    enabled = !captionLoading && geminiRouter != null && userProfile != null && cacheManager != null,
+                    onClick = {
+                        val router = geminiRouter ?: return@BigPrimaryButton
+                        val prof = userProfile ?: return@BigPrimaryButton
+                        val cm = cacheManager ?: return@BigPrimaryButton
+                        captionLoading = true
+                        scope.launch {
+                            val srt = cm.resolveSrtText(project.srtText)
+                            val topic = cm.resolveTopicText(project.topic)
+                            CaptionGenerator.generateFromSrt(router, prof.geminiApiKey, project.title, topic, srt)
+                                .onSuccess { captionResult = it }
+                                .onFailure { toastMsg = it.message ?: "Generation failed" }
+                            captionLoading = false
+                        }
+                    }
+                )
+                if (captionLoading) {
+                    CircularProgressIndicator(color = RawColors.Tan, modifier = Modifier.size(24.dp).align(Alignment.CenterHorizontally))
+                }
+                captionResult?.let { res ->
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .heightIn(max = 280.dp)
+                            .verticalScroll(rememberScrollState()),
+                        verticalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        Text("CAPTIONS", fontFamily = JetBrainsMonoFamily, fontWeight = FontWeight.Bold, fontSize = 11.sp, color = RawColors.Tan)
+                        res.captions.forEach { cap ->
+                            Surface(
+                                onClick = {
+                                    clipboard.setText(AnnotatedString(cap))
+                                    toastMsg = "Caption copied"
+                                },
+                                shape = RoundedCornerShape(12.dp),
+                                color = RawColors.RaisedCard,
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
+                                Text(cap, fontFamily = BricolageFamily, fontSize = 12.5.sp, color = RawColors.Cream, modifier = Modifier.padding(10.dp))
+                            }
+                        }
+                        Text("PINNED COMMENTS", fontFamily = JetBrainsMonoFamily, fontWeight = FontWeight.Bold, fontSize = 11.sp, color = RawColors.Tan)
+                        res.pinnedComments.forEach { pin ->
+                            Surface(
+                                onClick = {
+                                    clipboard.setText(AnnotatedString(pin))
+                                    toastMsg = "Pinned comment copied"
+                                },
+                                shape = RoundedCornerShape(12.dp),
+                                color = RawColors.AccentSoft,
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
+                                Text(pin, fontFamily = BricolageFamily, fontSize = 12.5.sp, color = RawColors.Cream, modifier = Modifier.padding(10.dp))
+                            }
+                        }
+                    }
+                }
+            }
+        }
     }
 }
 

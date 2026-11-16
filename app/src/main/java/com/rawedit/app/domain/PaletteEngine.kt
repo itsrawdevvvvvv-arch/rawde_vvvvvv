@@ -255,3 +255,42 @@ object PaletteExporter {
         file
     }
 }
+
+
+object InstantPaletteEngine {
+    private val CURATED = listOf(
+        Triple("Obsidian Warmth", "#F3EFE6", "#C89F72") to "#111114",
+        Triple("Terracotta Sage", "#DCC9A9", "#B83A2D") to "#4E6851",
+        Triple("Midnight Electric", "#F7F8FC", "#3B82F6") to "#0B1020",
+        Triple("Espresso Cream", "#F6EDE2", "#D97742") to "#241914",
+        Triple("Matcha Editorial", "#F4F1EA", "#6B8E5E") to "#1A2218",
+        Triple("Crimson Studio", "#F5F2EB", "#E11D48") to "#161114",
+        Triple("Cobalt Minimal", "#F8FAFC", "#2563EB") to "#0F172A",
+        Triple("Amber Noir", "#FAF3E0", "#F59E0B") to "#12110E",
+        Triple("Lavender Dusk", "#F5F3FF", "#8B5CF6") to "#161224",
+        Triple("Copper Slate", "#F1EFEA", "#C26D4A") to "#1F2428",
+        Triple("Teal Cinema", "#ECFEFF", "#14B8A6") to "#0B1B1E",
+        Triple("Bordeaux Gold", "#FBF5EE", "#D4AF37") to "#2B1018",
+        Triple("Sandstone Ink", "#181615", "#B45309") to "#EFE7DA",
+        Triple("Swiss Mono Red", "#111111", "#DC2626") to "#F4F1EA",
+        Triple("Nordic Pine", "#F2F5F3", "#2F855A") to "#132019",
+        Triple("Sunset Ochre", "#FFFBEB", "#EA580C") to "#1C1410"
+    )
+
+    fun generate(nextNumber: Int, previousMood: String): PaletteState {
+        val pool = CURATED.filterNot { it.first.first.equals(previousMood, ignoreCase = true) }
+        val pick = pool[(nextNumber + (System.nanoTime() % pool.size).toInt().coerceAtLeast(0)) % pool.size]
+        val (triple, bgHex) = pick
+        val (mood, c1, c2) = triple
+        return PaletteState(
+            number = nextNumber.coerceAtLeast(1),
+            mood = mood,
+            pairing = "Use 01 for main kinetic headlines on 03 background, with 02 for pills and accent highlights.",
+            colors = listOf(
+                PaletteSwatch(hex = c1, name = "primary"),
+                PaletteSwatch(hex = c2, name = "accent"),
+                PaletteSwatch(hex = bgHex, name = "surface")
+            )
+        )
+    }
+}

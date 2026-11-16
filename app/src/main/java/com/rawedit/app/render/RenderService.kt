@@ -98,12 +98,15 @@ class RenderService : Service() {
                     ?: throw IllegalStateException("Project not found.")
 
                 val resolvedHtml = cache.resolveHtmlCode(project.code)
+                val aspect = AspectPresetStore.get(cache, projectId)
                 val durationSec = maxOf(project.audioDurationSec, 1.0)
                 val effectiveHtml = if (project.hasEditableLayers && project.layersJson.isNotBlank()) {
                     LayerTimelineCompiler.compileToHtml(
                         baseHtml = resolvedHtml,
                         layersJson = project.layersJson,
-                        durationSec = durationSec
+                        durationSec = durationSec,
+                        stageWidth = aspect.width,
+                        stageHeight = aspect.height
                     )
                 } else {
                     resolvedHtml

@@ -22,6 +22,7 @@ import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
@@ -43,6 +44,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableDoubleStateOf
+import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -69,6 +71,7 @@ import androidx.compose.ui.window.Dialog
 import com.rawedit.app.data.CacheManager
 import com.rawedit.app.data.local.LocalAssetEntity
 import com.rawedit.app.data.local.ProjectEntity
+import com.rawedit.app.domain.AspectPresetStore
 import com.rawedit.app.domain.LayerKeyframe
 import com.rawedit.app.domain.LayerTimelineCodec
 import com.rawedit.app.domain.LayerTimelineCompiler
@@ -118,8 +121,17 @@ fun TimelineEditorScreen(
         LayerTimelineCodec.decode(project.layersJson)
     }
 
+    val aspectPreset = remember(project.id) { AspectPresetStore.get(cacheManager, project.id) }
     var layers by remember { mutableStateOf(initialLayers) }
+    val undoStack = remember { mutableStateListOf<List<TimelineLayer>>() }
+    val redoStack = remember { mutableStateListOf<List<TimelineLayer>>() }
     var selectedLayerId by remember { mutableStateOf<String?>(null) }
+
+    fun pushUndo() {
+        undoStack.add(layers)
+        if (undoStack.size > 30) undoStack.removeAt(0)
+        redoStack.clear()
+    }
     var currentTimeSec by remember { mutableDoubleStateOf(0.0) }
     var isPlaying by remember { mutableStateOf(false) }
     var showMediaPicker by remember { mutableStateOf(false) }
@@ -132,14 +144,16 @@ fun TimelineEditorScreen(
         LayerTimelineCompiler.compileToHtml(
             baseHtml = baseHtml,
             layersJson = LayerTimelineCodec.encode(layers),
-            durationSec = totalDurationSec
+            durationSec = totalDurationSec,
+            stageWidth = aspectPreset.width,
+            stageHeight = aspectPreset.height
         )
     }
     val latestCompiledHtml by rememberUpdatedState(compiledHtml)
 
-    val assetServer = remember(cacheManager) {
-        LocalAssetServer(context, cacheManager) {
-            LocalAssetServer(context, cacheManager) { "" }.buildInjectedHtml(latestCompiledHtml)
+    val assetServer = remember(cacheManager, aspectPreset) {
+        LocalAssetServer(context, cacheManager, aspectPreset.width, aspectPreset.height) {
+            LocalAssetServer(context, cacheManager, aspectPreset.width, aspectPreset.height) { "" }.buildInjectedHtml(latestCompiledHtml)
         }
     }
 
@@ -238,6 +252,7 @@ fun TimelineEditorScreen(
     }
 
     fun toggleKeyframeAtPlayhead(layerId: String) {
+        pushUndo()
         updateLayer(layerId) { l ->
             val nearIdx = l.keyframes.indexOfFirst { abs(it.timeSec - currentTimeSec) < 0.08 }
             if (nearIdx >= 0) {
@@ -380,8 +395,13 @@ fun TimelineEditorScreen(
         Box(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(horizontal = 14.dp)
-                .aspectRatio(16f / 9f)
+                .heightIn(max = 230.dp)
+                .padding(horizontal = 14.dp),
+            contentAlignment = Alignment.Center
+        ) {
+        Box(
+            modifier = Modifier
+                .aspectRatio(aspectPreset.ratioFloat)
                 .clip(RoundedCornerShape(14.dp))
                 .background(Color(0xFF0D0D0F))
                 .border(1.dp, RawColors.Divider, RoundedCornerShape(14.dp))
@@ -413,15 +433,54 @@ fun TimelineEditorScreen(
                 modifier = Modifier.fillMaxSize()
             )
         }
+        }
 
-        // Sleek Transport + Custom Scrub Track
+        // Sleek Transport + Undo/Redo + Custom Scrub Track
         Row(
             modifier = Modifier
                 .fillMaxWidth()
                 .padding(horizontal = 14.dp, vertical = 8.dp),
             verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(10.dp)
+            horizontalArrangement = Arrangement.spacedBy(6.dp)
         ) {
+            Surface(
+                onClick = {
+                    if (undoStack.isNotEmpty()) {
+                        redoStack.add(layers)
+                        layers = undoStack.removeAt(undoStack.lastIndex)
+                    }
+                },
+                shape = CircleShape,
+                color = RawColors.CardSurface
+            ) {
+                Text(
+                    text = "↶",
+                    fontFamily = JetBrainsMonoFamily,
+                    fontWeight = FontWeight.Bold,
+                    fontSize = 14.sp,
+                    color = if (undoStack.isNotEmpty()) RawColors.Cream else RawColors.TextMuted,
+                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp)
+                )
+            }
+            Surface(
+                onClick = {
+                    if (redoStack.isNotEmpty()) {
+                        undoStack.add(layers)
+                        layers = redoStack.removeAt(redoStack.lastIndex)
+                    }
+                },
+                shape = CircleShape,
+                color = RawColors.CardSurface
+            ) {
+                Text(
+                    text = "↷",
+                    fontFamily = JetBrainsMonoFamily,
+                    fontWeight = FontWeight.Bold,
+                    fontSize = 14.sp,
+                    color = if (redoStack.isNotEmpty()) RawColors.Cream else RawColors.TextMuted,
+                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp)
+                )
+            }
             Surface(
                 onClick = { isPlaying = !isPlaying },
                 shape = CircleShape,
@@ -599,7 +658,7 @@ fun TimelineEditorScreen(
                                                 }
                                                 .pointerInput(layer.id, pxPerSecFloat) {
                                                     detectHorizontalDragGestures(
-                                                        onDragStart = { selectedLayerId = layer.id },
+                                                        onDragStart = { selectedLayerId = layer.id; pushUndo() },
                                                         onHorizontalDrag = { change, dragAmount ->
                                                             change.consume()
                                                             val dt = (dragAmount / pxPerSecFloat).toDouble()
@@ -683,6 +742,7 @@ fun TimelineEditorScreen(
                         }
                         Surface(
                             onClick = {
+                                pushUndo()
                                 if (selectedLayer.domEid.isNotBlank()) {
                                     updateLayer(selectedLayer.id) { it.copy(visible = false) }
                                 } else {
@@ -735,6 +795,7 @@ fun TimelineEditorScreen(
                                         shape = CircleShape
                                     )
                                     .clickable {
+                                        pushUndo()
                                         updateLayer(selectedLayer.id) {
                                             if (isText) it.copy(colorHex = hex, colorEdited = true)
                                             else it.copy(bgColorHex = hex, bgColorEdited = true)
@@ -792,6 +853,7 @@ fun TimelineEditorScreen(
                         endSec = minOf(currentTimeSec + 4.0, totalDurationSec),
                         text = "New Text"
                     )
+                    pushUndo()
                     layers = layers + nl
                     selectedLayerId = nl.id
                     editingTextLayer = nl
@@ -804,6 +866,7 @@ fun TimelineEditorScreen(
                         endSec = minOf(currentTimeSec + 4.0, totalDurationSec),
                         bgColorHex = "#1A1A1E"
                     )
+                    pushUndo()
                     layers = listOf(nl) + layers
                     selectedLayerId = nl.id
                 }
@@ -816,6 +879,7 @@ fun TimelineEditorScreen(
                         bgColorHex = "#C89F72",
                         shapeKind = "RECT"
                     )
+                    pushUndo()
                     layers = layers + nl
                     selectedLayerId = nl.id
                 }
@@ -868,7 +932,8 @@ fun TimelineEditorScreen(
                                         assetRelativePath = asset.relativePath,
                                         assetThumbPath = asset.thumbPath
                                     )
-                                    layers = layers + nl
+                                    pushUndo()
+                    layers = layers + nl
                                     selectedLayerId = nl.id
                                     showMediaPicker = false
                                 },
@@ -940,6 +1005,7 @@ fun TimelineEditorScreen(
                     height = 44.dp,
                     onClick = {
                         val fs = draftSize.toFloatOrNull()?.coerceIn(14f, 260f) ?: target.fontSize
+                        pushUndo()
                         updateLayer(target.id) {
                             it.copy(
                                 text = draftText,

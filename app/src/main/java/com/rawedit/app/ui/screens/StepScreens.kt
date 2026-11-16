@@ -90,6 +90,7 @@ import com.rawedit.app.domain.CodeValidator
 import com.rawedit.app.domain.GeminiWaterfallRouter
 import com.rawedit.app.domain.PaletteColorMath
 import com.rawedit.app.domain.PaletteState
+import com.rawedit.app.domain.AspectPresetStore
 import com.rawedit.app.domain.PromptGenerator
 import com.rawedit.app.domain.ReelEditingStyle
 import com.rawedit.app.domain.SrtParser
@@ -969,7 +970,9 @@ fun CopyPromptScreen(
             customFonts = customFontNames,
             style = selectedStyle,
             customPromptNotes = customPromptNotes,
-            githubSkills = githubSkillNames
+            githubSkills = githubSkillNames,
+            stageWidth = AspectPresetStore.get(cacheManager, project.id).width,
+            stageHeight = AspectPresetStore.get(cacheManager, project.id).height
         )
     }
     val displayPrompt = remember(promptText) {
