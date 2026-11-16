@@ -387,3 +387,31 @@ private fun RenameReelDialog(
         }
     }
 }
+
+/** Shared action row used by the profile and reels bottom sheets. */
+@Composable
+fun SheetActionRow(
+    icon: RawIconType,
+    label: String,
+    tint: Color = RawColors.TextPrimary,
+    onClick: () -> Unit
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(16.dp))
+            .clickable { onClick() }
+            .padding(horizontal = 14.dp, vertical = 14.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        RawIcon(type = icon, size = 17.dp, tint = tint, strokeWidth = 1.9.dp)
+        Spacer(Modifier.width(12.dp))
+        Text(
+            text = label,
+            fontFamily = BricolageFamily,
+            fontSize = 14.sp,
+            fontWeight = FontWeight.Bold,
+            color = tint
+        )
+    }
+}
