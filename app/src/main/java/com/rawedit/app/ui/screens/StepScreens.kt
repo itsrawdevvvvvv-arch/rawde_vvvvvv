@@ -943,9 +943,7 @@ fun CopyPromptScreen(
     val customFontNames = remember(customFontsFiles) {
         customFontsFiles.map { it.nameWithoutExtension }
     }
-    val githubSkillNames = remember {
-        cacheManager.listGithubSkillFiles().map { it.nameWithoutExtension }
-    }
+
 
     val selectedStyle = ReelEditingStyle.KINETIC_EXPLAINER
 
@@ -957,8 +955,7 @@ fun CopyPromptScreen(
         attachedAssets,
         palette,
         customFontNames,
-        customPromptNotes,
-        githubSkillNames
+        customPromptNotes
     ) {
         PromptGenerator.buildPrompt(
             fileName = project.audioName,
@@ -970,7 +967,6 @@ fun CopyPromptScreen(
             customFonts = customFontNames,
             style = selectedStyle,
             customPromptNotes = customPromptNotes,
-            githubSkills = githubSkillNames,
             stageWidth = AspectPresetStore.get(cacheManager, project.id).width,
             stageHeight = AspectPresetStore.get(cacheManager, project.id).height
         )

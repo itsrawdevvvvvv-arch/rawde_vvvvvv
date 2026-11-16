@@ -78,7 +78,6 @@ import com.rawedit.app.data.BackupManager
 import com.rawedit.app.data.CacheManager
 import com.rawedit.app.data.local.UserPreferences
 import com.rawedit.app.data.repository.RawEditRepository
-import com.rawedit.app.domain.GitHubToolFetcher
 import java.io.File
 import com.rawedit.app.data.local.UserProfile
 import com.rawedit.app.data.local.VideoEntity
@@ -178,12 +177,7 @@ fun ProfileScreen(
         }
     }
 
-    var githubTokenDraft by remember(userProfile.githubAccessToken) { mutableStateOf(userProfile.githubAccessToken) }
-    var githubVerifying by remember { mutableStateOf(false) }
-    var githubStatusMsg by remember { mutableStateOf<String?>(null) }
-    var githubRepoQuery by remember { mutableStateOf("") }
-    var githubFetching by remember { mutableStateOf(false) }
-    var githubSkillsList by remember { mutableStateOf(cacheManager.listGithubSkillFiles()) }
+
     var customFontsList by remember { mutableStateOf(cacheManager.listCustomFonts()) }
     var backupBusy by remember { mutableStateOf(false) }
     var pendingBackupFile by remember { mutableStateOf<File?>(null) }
@@ -234,7 +228,6 @@ fun ProfileScreen(
                 backupBusy = false
                 res.onSuccess { sum ->
                     customFontsList = cacheManager.listCustomFonts()
-                    githubSkillsList = cacheManager.listGithubSkillFiles()
                     toastMsg = "Restored ${sum.projectsCount} projects, ${sum.fontsCount} fonts, ${sum.skillsCount} skills"
                 }.onFailure { err ->
                     toastMsg = err.message ?: "Could not restore backup ZIP"
@@ -734,209 +727,6 @@ fun ProfileScreen(
                         fillWidth = false,
                         onClick = { showAboutSheet = true }
                     )
-                }
-            }
-
-            // GitHub Access Token & Skills Fetcher Card
-            item {
-                Spacer(modifier = Modifier.height(12.dp))
-                Column(
-                    modifier = Modifier
-                        .padding(horizontal = 18.dp)
-                        .fillMaxWidth()
-                        .clip(RoundedCornerShape(28.dp))
-                        .background(RawColors.CardSurface)
-                        .padding(18.dp),
-                    verticalArrangement = Arrangement.spacedBy(10.dp)
-                ) {
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Column(modifier = Modifier.weight(1f)) {
-                            Text(
-                                text = "GitHub Token",
-                                fontFamily = BricolageFamily,
-                                fontWeight = FontWeight.Bold,
-                                fontSize = 18.5.sp,
-                                color = RawColors.TextPrimary
-                            )
-                            Text(
-                                text = if (userProfile.hasGithubToken) "${userProfile.maskGithubToken()} • Repo & Edit active" else "Paste PAT for repo & file tools",
-                                fontFamily = JetBrainsMonoFamily,
-                                fontSize = 11.5.sp,
-                                color = if (userProfile.hasGithubToken) RawColors.Tan else RawColors.TextMuted
-                            )
-                        }
-                        RawSecondaryButton(
-                            text = "AI Chat",
-                            height = 38.dp,
-                            leadingIcon = RawIconType.SPARK,
-                            fillWidth = false,
-                            onClick = onOpenChatbot
-                        )
-                    }
-
-                    OutlinedTextField(
-                        value = githubTokenDraft,
-                        onValueChange = { githubTokenDraft = it },
-                        singleLine = true,
-                        label = { Text("GitHub Personal Access Token (ghp_...)", fontSize = 11.5.sp) },
-                        placeholder = { Text("ghp_... or github_pat_...", fontSize = 13.sp, color = RawColors.TextMuted) },
-                        textStyle = TextStyle(fontFamily = JetBrainsMonoFamily, fontSize = 12.5.sp, color = RawColors.TextPrimary),
-                        shape = RoundedCornerShape(16.dp),
-                        colors = OutlinedTextFieldDefaults.colors(
-                            focusedBorderColor = RawColors.Tan,
-                            unfocusedBorderColor = RawColors.Divider,
-                            focusedContainerColor = RawColors.RaisedCard,
-                            unfocusedContainerColor = RawColors.RaisedCard,
-                            cursorColor = RawColors.Tan
-                        ),
-                        modifier = Modifier.fillMaxWidth()
-                    )
-
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(8.dp)
-                    ) {
-                        BigPrimaryButton(
-                            text = if (githubVerifying) "Verifying..." else "Save & Verify Token",
-                            height = 44.dp,
-                            enabled = !githubVerifying,
-                            onClick = {
-                                val clean = githubTokenDraft.trim()
-                                if (clean.isEmpty()) {
-                                    scope.launch { userPreferences.clearGithubAccessToken() }
-                                    githubStatusMsg = "Token cleared."
-                                    return@BigPrimaryButton
-                                }
-                                githubVerifying = true
-                                scope.launch {
-                                    userPreferences.saveGithubAccessToken(clean)
-                                    val res = GitHubToolFetcher.verifyGithubToken(clean)
-                                    githubVerifying = false
-                                    res.onSuccess { msg ->
-                                        githubStatusMsg = msg
-                                        toastMsg = "GitHub token saved ($msg)"
-                                    }.onFailure { err ->
-                                        githubStatusMsg = "Saved locally (verify note: ${err.message})"
-                                    }
-                                }
-                            },
-                            modifier = Modifier.weight(1f)
-                        )
-                        if (userProfile.hasGithubToken) {
-                            RawSecondaryButton(
-                                text = "Clear",
-                                height = 44.dp,
-                                isDanger = true,
-                                fillWidth = false,
-                                onClick = {
-                                    githubTokenDraft = ""
-                                    githubStatusMsg = null
-                                    scope.launch { userPreferences.clearGithubAccessToken() }
-                                    toastMsg = "GitHub token removed"
-                                }
-                            )
-                        }
-                    }
-
-                    githubStatusMsg?.let { msg ->
-                        Text(
-                            text = msg,
-                            fontFamily = JetBrainsMonoFamily,
-                            fontSize = 11.sp,
-                            color = RawColors.Tan
-                        )
-                    }
-
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(8.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        OutlinedTextField(
-                            value = githubRepoQuery,
-                            onValueChange = { githubRepoQuery = it },
-                            singleLine = true,
-                            placeholder = { Text("owner/repo or GitHub URL to download skill...", fontSize = 12.sp, color = RawColors.TextMuted) },
-                            textStyle = TextStyle(fontFamily = JetBrainsMonoFamily, fontSize = 12.sp, color = RawColors.TextPrimary),
-                            shape = RoundedCornerShape(16.dp),
-                            colors = OutlinedTextFieldDefaults.colors(
-                                focusedBorderColor = RawColors.Tan,
-                                unfocusedBorderColor = RawColors.Divider,
-                                focusedContainerColor = RawColors.RaisedCard,
-                                unfocusedContainerColor = RawColors.RaisedCard,
-                                cursorColor = RawColors.Tan
-                            ),
-                            modifier = Modifier.weight(1f)
-                        )
-                        RawSecondaryButton(
-                            text = if (githubFetching) "..." else "Fetch",
-                            height = 48.dp,
-                            fillWidth = false,
-                            enabled = !githubFetching && githubRepoQuery.isNotBlank(),
-                            onClick = {
-                                githubFetching = true
-                                scope.launch {
-                                    val res = GitHubToolFetcher.fetchAndSaveFromGithub(
-                                        queryOrUrl = githubRepoQuery,
-                                        githubToken = userProfile.githubAccessToken.ifBlank { githubTokenDraft },
-                                        cacheManager = cacheManager
-                                    )
-                                    githubFetching = false
-                                    res.onSuccess { items ->
-                                        githubSkillsList = cacheManager.listGithubSkillFiles()
-                                        githubRepoQuery = ""
-                                        toastMsg = "Downloaded ${items.size} skill(s) from GitHub"
-                                    }.onFailure { err ->
-                                        toastMsg = err.message ?: "GitHub fetch failed"
-                                    }
-                                }
-                            }
-                        )
-                    }
-
-                    if (githubSkillsList.isNotEmpty()) {
-                        Text(
-                            text = "DOWNLOADED GITHUB SKILLS (${githubSkillsList.size})",
-                            fontFamily = JetBrainsMonoFamily,
-                            fontWeight = FontWeight.Bold,
-                            fontSize = 10.5.sp,
-                            color = RawColors.Tan
-                        )
-                        githubSkillsList.forEach { sf ->
-                            Row(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .clip(RoundedCornerShape(14.dp))
-                                    .background(RawColors.RaisedCard)
-                                    .padding(horizontal = 12.dp, vertical = 8.dp),
-                                horizontalArrangement = Arrangement.SpaceBetween,
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                Text(
-                                    text = sf.name,
-                                    fontFamily = JetBrainsMonoFamily,
-                                    fontSize = 11.5.sp,
-                                    color = RawColors.TextPrimary,
-                                    maxLines = 1,
-                                    overflow = TextOverflow.Ellipsis,
-                                    modifier = Modifier.weight(1f)
-                                )
-                                CircleActionButton(
-                                    icon = RawIconType.TRASH,
-                                    size = 32.dp,
-                                    iconTint = RawColors.ErrorCoral,
-                                    onClick = {
-                                        cacheManager.deleteGithubSkillFile(sf.name)
-                                        githubSkillsList = cacheManager.listGithubSkillFiles()
-                                    }
-                                )
-                            }
-                        }
-                    }
                 }
             }
 

@@ -43,7 +43,6 @@ data class UserProfile(
     val geminiApiKey: String = "",
     val aiProviderRoute: String = AiProvider.GEMINI_FREE.id,
     val geminiTaskRoute: String = GeminiTaskRoute.BALANCED_AUTO.id,
-    val githubAccessToken: String = "",
     val customPromptNotes: String = ""
 ) {
     val hasGroqKey: Boolean
@@ -52,14 +51,7 @@ data class UserProfile(
     val hasGeminiKey: Boolean
         get() = geminiApiKey.isNotBlank() && (geminiApiKey.startsWith("AIza") || geminiApiKey.startsWith("AQ") || geminiApiKey.length >= 20)
 
-    val hasGithubToken: Boolean
-        get() = githubAccessToken.isNotBlank()
 
-    fun maskGithubToken(): String {
-        val clean = githubAccessToken.trim()
-        if (clean.length < 10) return if (clean.isEmpty()) "None" else "••••"
-        return "${clean.take(4)}...${clean.takeLast(4)}"
-    }
 
     fun resolvedAiProvider(): AiProvider = when (aiProviderRoute) {
         AiProvider.GROQ_CLOUD.id -> AiProvider.GROQ_CLOUD
@@ -174,7 +166,6 @@ class UserPreferences(private val context: Context) {
         val GEMINI_API_KEY = stringPreferencesKey("gemini_api_key")
         val AI_PROVIDER_ROUTE = stringPreferencesKey("ai_provider_route")
         val GEMINI_TASK_ROUTE = stringPreferencesKey("gemini_task_route")
-        val GITHUB_ACCESS_TOKEN = stringPreferencesKey("github_access_token")
         val CUSTOM_PROMPT_NOTES = stringPreferencesKey("custom_prompt_notes")
     }
 
@@ -202,7 +193,6 @@ class UserPreferences(private val context: Context) {
             geminiApiKey = prefs[Keys.GEMINI_API_KEY] ?: "",
             aiProviderRoute = prefs[Keys.AI_PROVIDER_ROUTE] ?: AiProvider.GEMINI_FREE.id,
             geminiTaskRoute = prefs[Keys.GEMINI_TASK_ROUTE] ?: GeminiTaskRoute.BALANCED_AUTO.id,
-            githubAccessToken = prefs[Keys.GITHUB_ACCESS_TOKEN] ?: "",
             customPromptNotes = prefs[Keys.CUSTOM_PROMPT_NOTES] ?: ""
         )
     }
@@ -348,22 +338,7 @@ class UserPreferences(private val context: Context) {
         }
     }
 
-    suspend fun saveGithubAccessToken(token: String) {
-        context.dataStore.edit { prefs ->
-            val clean = token.trim().removePrefix("Bearer ").removePrefix("token ").trim()
-            if (clean.isNotEmpty()) {
-                prefs[Keys.GITHUB_ACCESS_TOKEN] = clean
-            } else {
-                prefs.remove(Keys.GITHUB_ACCESS_TOKEN)
-            }
-        }
-    }
 
-    suspend fun clearGithubAccessToken() {
-        context.dataStore.edit { prefs ->
-            prefs.remove(Keys.GITHUB_ACCESS_TOKEN)
-        }
-    }
 
     suspend fun saveCustomPromptNotes(notes: String) {
         context.dataStore.edit { prefs ->
@@ -390,7 +365,6 @@ class UserPreferences(private val context: Context) {
             put("geminiApiKey", current.geminiApiKey)
             put("aiProviderRoute", current.aiProviderRoute)
             put("geminiTaskRoute", current.geminiTaskRoute)
-            put("githubAccessToken", current.githubAccessToken)
             put("customPromptNotes", current.customPromptNotes)
         }
     }
@@ -418,8 +392,6 @@ class UserPreferences(private val context: Context) {
             if (aiRoute.isNotEmpty()) prefs[Keys.AI_PROVIDER_ROUTE] = aiRoute
             val gemRoute = obj.optString("geminiTaskRoute", "")
             if (gemRoute.isNotEmpty()) prefs[Keys.GEMINI_TASK_ROUTE] = gemRoute
-            val ghToken = obj.optString("githubAccessToken", "").trim()
-            if (ghToken.isNotEmpty()) prefs[Keys.GITHUB_ACCESS_TOKEN] = ghToken
             val promptNotes = obj.optString("customPromptNotes", "").trim()
             if (promptNotes.isNotEmpty()) prefs[Keys.CUSTOM_PROMPT_NOTES] = promptNotes else prefs.remove(Keys.CUSTOM_PROMPT_NOTES)
         }

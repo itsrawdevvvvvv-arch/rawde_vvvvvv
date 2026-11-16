@@ -46,15 +46,12 @@ object ChatbotEngine {
 
     private val PROMPT_UPDATE_REGEX = Regex("""<<<PROMPT_UPDATE\s*\n([\s\S]*?)>>>""", RegexOption.IGNORE_CASE)
     private val STYLE_ZIP_REGEX = Regex("""<<<STYLE_ZIP_FILE\s+path="([^"]+)"\s*>>>\s*\n([\s\S]*?)<<<END_STYLE_ZIP_FILE>>>""", RegexOption.IGNORE_CASE)
-    private val GITHUB_FETCH_REGEX = Regex("""<<<GITHUB_FETCH\s+query="([^"]+)"\s*>>>""", RegexOption.IGNORE_CASE)
-    private val GITHUB_CREATE_REPO_REGEX = Regex("<<<GITHUB_CREATE_REPO\\s+([^>]+?)>>>", RegexOption.IGNORE_CASE)
-    private val GITHUB_WRITE_FILE_REGEX = Regex("<<<GITHUB_WRITE_FILE\\s+([^>]+?)>>>\\s*\\n([\\s\\S]*?)<<<END_GITHUB_WRITE_FILE>>>", RegexOption.IGNORE_CASE)
-    private val GITHUB_DELETE_FILE_REGEX = Regex("<<<GITHUB_DELETE_FILE\\s+([^>]+?)>>>", RegexOption.IGNORE_CASE)
     private val WEB_SEARCH_REGEX = Regex("<<<WEB_SEARCH\\s+([^>]+?)>>>", RegexOption.IGNORE_CASE)
     private val WEB_FETCH_REGEX = Regex("<<<WEB_FETCH\\s+([^>]+?)>>>", RegexOption.IGNORE_CASE)
     private val WEB_DOWNLOAD_REGEX = Regex("<<<WEB_DOWNLOAD\\s+([^>]+?)>>>", RegexOption.IGNORE_CASE)
     private val CREATE_PDF_REGEX = Regex("<<<CREATE_PDF([^>]*)>>>\\s*([\\s\\S]*?)(?:<<<END_CREATE_PDF>>>|$)", RegexOption.IGNORE_CASE)
     private val CREATE_FILE_REGEX = Regex("<<<CREATE_FILE([^>]*)>>>\\s*([\\s\\S]*?)(?:<<<END_CREATE_FILE>>>|$)", RegexOption.IGNORE_CASE)
+    private val OPEN_DESIGN_REGEX = Regex("<<<OPEN_DESIGN([^>]*)>>>\\s*([\\s\\S]*?)(?:<<<END_OPEN_DESIGN>>>|$)", RegexOption.IGNORE_CASE)
     private val WEBSITE_PREVIEW_REGEX = Regex("<<<WEBSITE_PREVIEW([^>]*)>>>\\s*([\\s\\S]*?)(?:<<<END_WEBSITE_PREVIEW>>>|$)", RegexOption.IGNORE_CASE)
     private val HTML_FENCE_REGEX = Regex("```(?:html|htm)?\\s*\\n([\\s\\S]*?(?:<!DOCTYPE html|<html)[\\s\\S]*?</html>)\\s*```", RegexOption.IGNORE_CASE)
     private val ANY_FENCE_REGEX = Regex("```([a-zA-Z0-9_.-]*)\\s*\\n([\\s\\S]*?)```", RegexOption.IGNORE_CASE)
@@ -239,21 +236,6 @@ object ChatbotEngine {
 
             val appliedBadges = mutableListOf<String>()
 
-            // If user explicitly asked to fetch from a GitHub URL or repo in their message, pre-fetch it!
-            val directGhMatch = Regex("""(?:github\.com/[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+|fetch\s+from\s+github\s+([A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+))""", RegexOption.IGNORE_CASE)
-                .find(userText)
-            var preFetchedGithubNote = ""
-            if (directGhMatch != null) {
-                val target = directGhMatch.groupValues.getOrNull(1)?.takeIf { it.isNotBlank() } ?: directGhMatch.value
-                GitHubToolFetcher.fetchAndSaveFromGithub(target, userProfile.githubAccessToken, cacheManager)
-                    .onSuccess { items ->
-                        items.forEach { item ->
-                            appliedBadges.add("Fetched GitHub skill: ${item.name}")
-                            preFetchedGithubNote += "\nFetched from GitHub (${item.name}):\n${item.contentPreview}\n"
-                        }
-                    }
-            }
-
             // Resolve active project's full SRT, Script, and HTML code
             val activeSrt = activeProject?.let { cacheManager.resolveSrtText(it.srtText) }.orEmpty()
             val activeTopic = activeProject?.let { cacheManager.resolveTopicText(it.topic) }.orEmpty()
@@ -275,7 +257,6 @@ object ChatbotEngine {
             }
 
             val customFonts = cacheManager.listCustomFonts().map { it.name }
-            val githubSkills = cacheManager.listGithubSkillFiles().map { "${it.name}: ${it.readText(Charsets.UTF_8).take(220).replace("\n", " ")}" }
             val styleSkillMd = cacheManager.readStylePackEntryText("kinetic-explainer-style/SKILL.md").take(1800)
             val styleTokensCss = cacheManager.readStylePackEntryText("kinetic-explainer-style/style/tokens.css").take(1000)
 
@@ -317,9 +298,9 @@ object ChatbotEngine {
                 - Installed custom fonts (${if (customFonts.isEmpty()) "none yet" else customFonts.joinToString(", ")}).
                 - The Style Pack ZIP (`kinetic-explainer-style.zip`, containing `SKILL.md`, `docs/STYLE_BIBLE.md`, `style/tokens.css`, `style/components.css`, `engine/engine.js`, `engine/raw-helpers.js`).
                 - The Cloud AI Prompt generator & Custom Prompt Directives.
-                - GitHub integration & Cloud APK Builder (${if (userProfile.hasGithubToken) "GitHub token active — can push ZIPs to GitHub Actions, auto-fix errors, and return compiled .apk files" else "User can paste a GitHub token in Settings to enable cloud APK builds"}).
+                - **Open Design Studio (`DESIGN.md` + `Motion.md`):** Local-first open-source design & motion graphics engine for generating PNG images, posters, thumbnails, slide decks, UI prototypes, and deterministic HTML motion graphic videos.
 
-                HOW TO APPLY LIVE CHANGES WHEN THE USER ASKS TO TWEAK THE PROMPT, STYLE ZIP, GITHUB SKILLS, OR HTML CODE:
+                HOW TO APPLY LIVE CHANGES WHEN THE USER ASKS TO TWEAK THE PROMPT, STYLE ZIP, OPEN DESIGN, OR HTML CODE:
                 1. To tweak/customize the Prompt that gets copied for AI tools, include a block in your reply:
                 <<<PROMPT_UPDATE
                 [Write the exact custom rules/tweaks to inject into the prompt here]
@@ -328,12 +309,12 @@ object ChatbotEngine {
                 <<<STYLE_ZIP_FILE path="kinetic-explainer-style/SKILL.md">>>
                 [Full updated file content]
                 <<<END_STYLE_ZIP_FILE>>>
-                3. GitHub tools (when token is active):
-                - Fetch repo/skill: <<<GITHUB_FETCH query="owner/repo or search term">>>
-                - Create repo: <<<GITHUB_CREATE_REPO name="repo-name" description="..." private="false">>>
-                - Create or edit file: <<<GITHUB_WRITE_FILE repo="owner/repo" path="path/to/file" message="commit msg">>>\n[file content]\n<<<END_GITHUB_WRITE_FILE>>>
-                - Delete file: <<<GITHUB_DELETE_FILE repo="owner/repo" path="path/to/file" message="commit msg">>>
-                - Build Android APK from uploaded .zip: Handled automatically via GitHub Actions (`GitHubApkBuilder`). NEVER tell the user you cannot compile APKs.
+                3. Open Design Studio Tool (Images, Posters, Motion Graphics Videos, Slide Decks, Landing Pages & UI):
+                Whenever the user asks to create an image, poster, thumbnail, graphic, slide deck, UI prototype, or motion graphic video using Open Design, emit:
+                <<<OPEN_DESIGN type="image|poster|motion|deck|prototype" title="Title" width="1080" height="1080">>>
+                [Complete self-contained HTML/CSS/SVG/JS following DESIGN.md & Motion.md; for motion videos include window.RAW = { duration, width, height, fps: 30, seek(t) }]
+                <<<END_OPEN_DESIGN>>>
+                (For `image` / `poster`, the app automatically renders your HTML into a crisp downloadable `.png` file AND enables live preview!)
                 4. File, PDF & Website Creation Tools (MANDATORY WHEN USER ASKS FOR A FILE):
                 Whenever the user asks to create, export, download, or give any `.html`, `.txt`, `.pdf`, `.md`, `.skill`, `.json`, `.css`, `.js`, or code/document file, you MUST emit the corresponding tool block below (do NOT just paste raw file text in chat):
                 - Create PDF (`.pdf`): <<<CREATE_PDF title="Title" filename="doc.pdf">>>\n[Clean Markdown/text content]\n<<<END_CREATE_PDF>>>
@@ -358,29 +339,6 @@ object ChatbotEngine {
             }.getOrDefault("")
 
             val lowerMsg = userText.lowercase(Locale.US)
-            // Direct Cloud APK Build via GitHub Actions when user uploads a .zip and asks to compile/build APK
-            val wantsApkBuild = uploadedFile != null &&
-                uploadedFile.fileName.endsWith(".zip", ignoreCase = true) &&
-                listOf("apk", "compile", "build").any { lowerMsg.contains(it) }
-            if (wantsApkBuild && uploadedFile != null) {
-                val apkOutcome = GitHubApkBuilder.buildApkFromZip(
-                    zipFile = File(uploadedFile.localPath),
-                    githubToken = userProfile.githubAccessToken,
-                    geminiRouter = geminiRouter,
-                    geminiApiKey = userProfile.geminiApiKey,
-                    cacheManager = cacheManager
-                ).getOrThrow()
-                appliedBadges.add("Compiled APK via GitHub Actions")
-                val msg = ChatMessageItem(
-                    role = "assistant",
-                    text = "## APK Build Complete\n\n${apkOutcome.notes}\n- **Repo:** `${apkOutcome.repoFullName}`\n- **Workflow:** ${apkOutcome.runUrl}\n\nTap **Save** below to save `${apkOutcome.apkFile.name}` to your Downloads.",
-                    appliedActions = appliedBadges,
-                    generatedFilePath = apkOutcome.apkFile.absolutePath,
-                    generatedFileName = apkOutcome.apkFile.name
-                )
-                return@runCatching ChatbotTurnOutcome(assistantMessage = msg)
-            }
-
             val isScriptRequest = listOf("script", "hook", "reel", "tts", "hinglish", "caption", "viral").any { lowerMsg.contains(it) }
             val wantsLiveWeb = listOf("latest", "current", "today", "2026", "trending", "new ", "search", "web", "fetch", "news", "best ", "write a script", "reel script").any { lowerMsg.contains(it) }
 
@@ -410,7 +368,7 @@ object ChatbotEngine {
             }
             val isHeavyTask = uploadedFile != null || !browserPageContext.isNullOrBlank() || isScriptRequest || wantsLiveWeb ||
                 requestedExt.isNotEmpty() || userText.length > 140 ||
-                listOf("srt", "script", "idea", "reel", "prompt", "zip", "style", "skill", "html", "code", "fix", "patch", "github", "font", "pdf", "website", "preview", "css", "js", "file", "md", "txt", "create", "make", "export", "download", "doc").any { lowerMsg.contains(it) }
+                listOf("srt", "script", "idea", "reel", "prompt", "zip", "style", "skill", "html", "code", "fix", "patch", "font", "pdf", "website", "preview", "css", "js", "file", "md", "txt", "create", "make", "export", "download", "doc").any { lowerMsg.contains(it) }
 
             val fullPrompt = if (!isHeavyTask) {
                 buildString {
@@ -436,12 +394,10 @@ object ChatbotEngine {
                     appendLine("=== STYLE PACK ZIP (SKILL.md & tokens.css preview) ===")
                     appendLine(styleSkillMd)
                     appendLine(styleTokensCss)
-                    if (githubSkills.isNotEmpty()) {
-                        appendLine("=== DOWNLOADED GITHUB SKILLS ===")
-                        githubSkills.forEach { appendLine(it) }
-                    }
-                    if (preFetchedGithubNote.isNotBlank()) {
-                        appendLine(preFetchedGithubNote)
+                    val odSpec = OpenDesignEngine.loadDesignSystemSummary(context)
+                    if (odSpec.isNotBlank()) {
+                        appendLine("=== OPEN DESIGN SYSTEM (DESIGN.md + Motion.md) ===")
+                        appendLine(odSpec.take(3500))
                     }
                     if (isScriptRequest && rawdevSkillText.isNotBlank()) {
                         appendLine("=== TRAINED SCRIPT SKILL (rawdev-reel-scripts/SKILL.md — FOLLOW STRICTLY) ===")
@@ -618,59 +574,6 @@ object ChatbotEngine {
                 replyText = replyText.replace(m.value, "").trim()
             }
 
-            // 3b. Hardened GitHub Create Repo / Write File / Delete File
-            GITHUB_CREATE_REPO_REGEX.findAll(replyText).toList().forEach { m ->
-                val attrs = m.groupValues[1]
-                val repoName = extractAttr(attrs, "name")
-                val desc = extractAttr(attrs, "description")
-                val priv = extractAttr(attrs, "private").equals("true", ignoreCase = true)
-                if (repoName.isNotEmpty()) {
-                    GitHubToolFetcher.createRepo(userProfile.githubAccessToken, repoName, desc, priv)
-                        .onSuccess { full ->
-                            appliedBadges.add("Created GitHub repo: $full")
-                            replyText += "\n\nCreated repo: **$full**"
-                        }.onFailure { err ->
-                            replyText += "\n\n*(GitHub create note: ${err.message})*"
-                        }
-                }
-                replyText = replyText.replace(m.value, "").trim()
-            }
-            GITHUB_WRITE_FILE_REGEX.findAll(replyText).toList().forEach { m ->
-                val attrs = m.groupValues[1]
-                val repoSlug = extractAttr(attrs, "repo")
-                val filePath = extractAttr(attrs, "path")
-                val msg = extractAttr(attrs, "message")
-                val content = m.groupValues[2]
-                val parts = repoSlug.split("/", limit = 2)
-                if (parts.size == 2 && filePath.isNotBlank()) {
-                    GitHubToolFetcher.createOrUpdateRepoFile(userProfile.githubAccessToken, parts[0], parts[1], filePath, content, msg)
-                        .onSuccess { target ->
-                            appliedBadges.add("Committed to GitHub: $target")
-                            replyText += "\n\nCommitted: `$target`"
-                        }.onFailure { err ->
-                            replyText += "\n\n*(GitHub write note: ${err.message})*"
-                        }
-                }
-                replyText = replyText.replace(m.value, "").trim()
-            }
-            GITHUB_DELETE_FILE_REGEX.findAll(replyText).toList().forEach { m ->
-                val attrs = m.groupValues[1]
-                val repoSlug = extractAttr(attrs, "repo")
-                val filePath = extractAttr(attrs, "path")
-                val msg = extractAttr(attrs, "message")
-                val parts = repoSlug.split("/", limit = 2)
-                if (parts.size == 2 && filePath.isNotBlank()) {
-                    GitHubToolFetcher.deleteRepoFile(userProfile.githubAccessToken, parts[0], parts[1], filePath, msg)
-                        .onSuccess { resMsg ->
-                            appliedBadges.add(resMsg)
-                            replyText += "\n\n$resMsg"
-                        }.onFailure { err ->
-                            replyText += "\n\n*(GitHub delete note: ${err.message})*"
-                        }
-                }
-                replyText = replyText.replace(m.value, "").trim()
-            }
-
             // 3c. Web Search / Fetch / Download Dependencies
             WEB_DOWNLOAD_REGEX.findAll(replyText).toList().forEach { m ->
                 val attrs = m.groupValues[1]
@@ -713,19 +616,32 @@ object ChatbotEngine {
                 replyText = replyText.replace(m.value, "").trim()
             }
 
-            // 3. Check for <<<GITHUB_FETCH query="...">>>
-            GITHUB_FETCH_REGEX.findAll(replyText).toList().forEach { m ->
-                val q = m.groupValues[1].trim()
-                if (q.isNotBlank()) {
-                    GitHubToolFetcher.fetchAndSaveFromGithub(q, userProfile.githubAccessToken, cacheManager)
-                        .onSuccess { items ->
-                            items.forEach { item ->
-                                appliedBadges.add("Downloaded GitHub tool: ${item.name}")
-                                replyText += "\n\nDownloaded from GitHub: **${item.name}** (`${item.localFileName}`)"
+            OPEN_DESIGN_REGEX.find(replyText)?.let { m ->
+                val attrs = m.groupValues[1]
+                val odType = extractAttr(attrs, "type").lowercase(Locale.US).ifBlank { "image" }
+                val odTitle = extractAttr(attrs, "title").ifBlank { "OpenDesign" }
+                val odW = extractAttr(attrs, "width").toIntOrNull()?.coerceIn(320, 2160) ?: 1080
+                val odH = extractAttr(attrs, "height").toIntOrNull()?.coerceIn(320, 2160) ?: 1080
+                val html = m.groupValues[2].trim()
+                if (html.isNotBlank()) {
+                    val htmlFile = ChatbotFileTools.saveWebsiteHtml(cacheManager, odTitle, html)
+                    webPreviewPath = htmlFile.absolutePath
+                    if (odType == "image" || odType == "poster") {
+                        OpenDesignEngine.renderHtmlToPng(context, cacheManager, html, odW, odH, "opendesign")
+                            .onSuccess { pngFile ->
+                                genFilePath = pngFile.absolutePath
+                                genFileName = pngFile.name
+                                appliedBadges.add("OpenDesign PNG: ${pngFile.name}")
+                            }.onFailure {
+                                genFilePath = htmlFile.absolutePath
+                                genFileName = htmlFile.name
+                                appliedBadges.add("OpenDesign HTML: ${htmlFile.name}")
                             }
-                        }.onFailure { err ->
-                            replyText += "\n\n*(GitHub fetch note: ${err.message})*"
-                        }
+                    } else {
+                        genFilePath = htmlFile.absolutePath
+                        genFileName = htmlFile.name
+                        appliedBadges.add("OpenDesign ${odType}: ${htmlFile.name}")
+                    }
                 }
                 replyText = replyText.replace(m.value, "").trim()
             }

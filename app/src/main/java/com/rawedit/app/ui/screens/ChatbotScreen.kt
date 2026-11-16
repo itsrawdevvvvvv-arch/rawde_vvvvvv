@@ -128,7 +128,7 @@ private val MINIMAL_STARTER_OPTIONS = listOf(
     "Write reel script (RAWDEV style)" to "Write a 60-70 word Hinglish reel script on the latest trending AI video tool using live web data",
     "Analyze my Instagram page" to "OPEN_BROWSER_IG",
     "Tweak prompt & style ZIP" to "Help me tweak my Cloud AI prompt and Style Pack ZIP",
-    "GitHub repo & skills" to "List my GitHub repos or help me create/edit a repo"
+    "Open Design Studio (Images & Motion)" to "OPEN_DESIGN_STUDIO"
 )
 
 @Composable
@@ -143,6 +143,7 @@ fun RawChatbotScreen(
     repository: RawEditRepository,
     geminiRouter: GeminiWaterfallRouter,
     onOpenApiKeySettings: () -> Unit,
+    onOpenDesignStudio: () -> Unit = {},
     onBack: () -> Unit
 ) {
     val context = LocalContext.current
@@ -408,6 +409,8 @@ fun RawChatbotScreen(
                                     if (prompt == "OPEN_BROWSER_IG") {
                                         browserInitialUrl = "https://www.instagram.com/rawde_vvvvvv/"
                                         showInAppBrowser = true
+                                    } else if (prompt == "OPEN_DESIGN_STUDIO") {
+                                        onOpenDesignStudio()
                                     } else {
                                         sendMessage(prompt)
                                     }
@@ -462,7 +465,7 @@ fun RawChatbotScreen(
                                             "pdf" -> "application/pdf"
                                             "html" -> "text/html"
                                             "json" -> "application/json"
-                                            "apk" -> "application/vnd.android.package-archive"
+                                            "png" -> "image/png"
                                             else -> "text/plain"
                                         }
                                         scope.launch {

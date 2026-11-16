@@ -34,7 +34,6 @@ object BackupManager {
         "custom_fonts",
         "custom_style",
         "chat_history",
-        "github_skills",
         "profile",
         "project_assets",
         "project_audio"
@@ -140,7 +139,7 @@ object BackupManager {
                 projectsCount = projects.size,
                 assetsCount = assets.size,
                 fontsCount = cacheManager.listCustomFonts().size,
-                skillsCount = cacheManager.listGithubSkillFiles().size,
+                skillsCount = 0,
                 zipFileName = fileName
             )
             outZip to summary
@@ -288,7 +287,7 @@ object BackupManager {
                 projectsCount = restoredProjectsCount,
                 assetsCount = restoredAssetsCount,
                 fontsCount = cacheManager.listCustomFonts().size,
-                skillsCount = cacheManager.listGithubSkillFiles().size,
+                skillsCount = 0,
                 zipFileName = "restored"
             )
         }

@@ -94,8 +94,6 @@ class CacheManager(val context: Context) {
     val chatHistoryDir: File
         get() = File(context.filesDir, "chat_history").apply { mkdirs() }
 
-    val githubSkillsDir: File
-        get() = File(context.filesDir, "github_skills").apply { mkdirs() }
 
     fun sheetTempDir(projectId: Long): File =
         File(context.cacheDir, "sheet_temp/project_${projectId}").apply { mkdirs() }
@@ -207,13 +205,12 @@ class CacheManager(val context: Context) {
 
     /**
      * Builds the active Style Pack ZIP, merging any Chatbot/user customizations from `customStyleDir`,
-     * user-imported custom fonts from `customFontsDir`, and downloaded GitHub skills from `githubSkillsDir`.
+     * and user-imported custom fonts from `customFontsDir`.
      */
     suspend fun buildCustomizedStylePackFile(packName: String = STYLE_PACK_ASSET_NAME): File = withContext(Dispatchers.IO) {
         val outFile = File(sharedPacksDir, packName)
         val overrides = collectStylePackOverrides()
         val customFonts = listCustomFonts()
-        val ghSkills = listGithubSkillFiles()
 
         if (overrides.isEmpty() && customFonts.isEmpty() && ghSkills.isEmpty()) {
             context.assets.open(STYLE_PACK_ASSET_NAME).use { input ->
@@ -269,16 +266,7 @@ class CacheManager(val context: Context) {
                 }
             }
 
-            // Bundle downloaded GitHub skills inside kinetic-explainer-style/github_skills/
-            for (skillFile in ghSkills) {
-                val entryName = "kinetic-explainer-style/github_skills/${skillFile.name}"
-                if (entryName !in writtenEntries) {
-                    zos.putNextEntry(ZipEntry(entryName))
-                    skillFile.inputStream().use { it.copyTo(zos) }
-                    zos.closeEntry()
-                    writtenEntries.add(entryName)
-                }
-            }
+
         }
         outFile
     }
@@ -385,23 +373,7 @@ class CacheManager(val context: Context) {
         saveFileToDownloads(zipFile, packName, "application/zip")
     }
 
-    fun listGithubSkillFiles(): List<File> {
-        return githubSkillsDir.listFiles { f -> f.isFile && f.length() > 0L }
-            ?.sortedByDescending { it.lastModified() }
-            ?: emptyList()
-    }
 
-    fun saveGithubSkillFile(fileName: String, content: String): File {
-        val safeName = fileName.replace(Regex("[^A-Za-z0-9._-]"), "_").trim('_').ifBlank { "github_skill.md" }
-        val outFile = File(githubSkillsDir, safeName)
-        outFile.writeText(content, Charsets.UTF_8)
-        return outFile
-    }
-
-    fun deleteGithubSkillFile(fileName: String): Boolean {
-        val f = File(githubSkillsDir, fileName.substringAfterLast('/'))
-        return if (f.exists()) f.delete() else false
-    }
 
     /**
      * Imports a file into the Chatbot local storage with a 500 MB limit (250–500 MB range supported),

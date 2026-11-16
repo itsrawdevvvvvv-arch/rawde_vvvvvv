@@ -39,7 +39,6 @@ object PromptGenerator {
         customFonts: List<String> = emptyList(),
         style: ReelEditingStyle = ReelEditingStyle.KINETIC_EXPLAINER,
         customPromptNotes: String = "",
-        githubSkills: List<String> = emptyList(),
         stageWidth: Int = 1920,
         stageHeight: Int = 1080
     ): String {
@@ -51,8 +50,7 @@ object PromptGenerator {
             assets = assets,
             palette = palette,
             customFonts = customFonts,
-            customPromptNotes = customPromptNotes,
-            githubSkills = githubSkills
+            customPromptNotes = customPromptNotes
         )
     }
 
@@ -64,8 +62,7 @@ object PromptGenerator {
         assets: List<LocalAssetEntity>,
         palette: PaletteState?,
         customFonts: List<String>,
-        customPromptNotes: String,
-        githubSkills: List<String>
+        customPromptNotes: String
     ): String {
         val cleanFile = fileName.trim().ifEmpty { "voiceover.mp3" }
         val durationFormatted = String.format(Locale.US, "%.2f", durationSeconds)
@@ -112,13 +109,7 @@ object PromptGenerator {
                 appendLine("## CUSTOM USER & CHATBOT DIRECTIVES (Apply Strictly)")
                 appendLine(customPromptNotes.trim())
             }
-            if (githubSkills.isNotEmpty()) {
-                appendLine()
-                appendLine("## INSTALLED GITHUB SKILLS & TOOLS")
-                githubSkills.forEach { skill ->
-                    appendLine("- $skill")
-                }
-            }
+
         }
 
         return """
