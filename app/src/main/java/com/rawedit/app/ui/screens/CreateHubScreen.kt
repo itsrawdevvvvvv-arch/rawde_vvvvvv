@@ -91,6 +91,7 @@ import com.rawedit.app.ui.motion.AnimatedDottedStepArrow
 import com.rawedit.app.ui.motion.CascadeSkewCard
 import com.rawedit.app.ui.motion.FeatheredScrollEdges
 import com.rawedit.app.ui.motion.KineticHeading
+import com.rawedit.app.ui.components.DomeHeadline
 import com.rawedit.app.ui.motion.RawEasings
 import com.rawedit.app.ui.motion.RawPressButton
 import com.rawedit.app.ui.motion.SwipeToCreateSlider
@@ -296,10 +297,13 @@ fun CreateHubScreen(
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    KineticHeading(
-                        words = listOf("Reel", "levels"),
-                        style = RawTypography.headlineLarge,
-                        highlightLastWord = true,
+                    DomeHeadline(
+                        parts = listOf(
+                            com.rawedit.app.ui.components.DomeHeadPart.Plain("Reel "),
+                            com.rawedit.app.ui.components.DomeHeadPart.Tag("levels")
+                        ),
+                        size = 44.dp,
+                        lineHeightFactor = 0.95f,
                         modifier = Modifier.weight(1f)
                     )
 
@@ -815,9 +819,10 @@ private fun StepActionCard(
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .clip(RoundedCornerShape(28.dp))
-                .background(palette.containerColor.copy(alpha = if (step.enabled) 1f else 0.65f))
-                .padding(horizontal = 17.dp, vertical = 18.dp),
+                .clip(CircleShape)
+                .background(RawColors.CardSurface.copy(alpha = if (step.enabled) 1f else 0.65f))
+                .border(1.dp, RawColors.Divider, CircleShape)
+                .padding(horizontal = 18.dp, vertical = 16.dp),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(14.dp)
         ) {
