@@ -50,6 +50,8 @@ import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.PlatformTextStyle
+import androidx.compose.ui.text.style.LineHeightStyle
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.Dp
@@ -157,12 +159,21 @@ fun DomeHeadline(
         text = annotated,
         fontFamily = BricolageFamily,
         fontSize = size.value.sp,
-        lineHeight = (size.value * lineHeightFactor).sp,
+        // Compose clips glyphs when lineHeight < fontSize, so keep the line box
+        // at least 1.04x the type size and tighten the look with letter spacing.
+        lineHeight = (size.value * lineHeightFactor.coerceAtLeast(1.04f)).sp,
         fontWeight = FontWeight.ExtraBold,
-        letterSpacing = (-0.03f * size.value).sp,
+        letterSpacing = (-0.035f * size.value).sp,
         color = color,
         textAlign = align,
-        modifier = modifier.padding(bottom = 14.dp)
+        style = TextStyle(
+            platformStyle = PlatformTextStyle(includeFontPadding = false),
+            lineHeightStyle = LineHeightStyle(
+                alignment = LineHeightStyle.Alignment.Center,
+                trim = LineHeightStyle.Trim.None
+            )
+        ),
+        modifier = modifier.padding(bottom = 14.dp, top = 2.dp)
     )
 }
 
@@ -508,7 +519,7 @@ fun DomeMascot(
     Box(
         modifier = modifier
             .fillMaxWidth()
-            .height(190.dp),
+            .height(240.dp),
         contentAlignment = Alignment.BottomCenter
     ) {
         Column(horizontalAlignment = Alignment.CenterHorizontally) {
@@ -532,9 +543,9 @@ fun DomeMascot(
 
             Box(
                 modifier = Modifier
-                    .widthIn(max = 386.dp)
+                    .widthIn(max = 412.dp)
                     .fillMaxWidth()
-                    .height(150.dp)
+                    .height(224.dp)
                     .scale(scaleX = 1f, scaleY = 1f + (bob * 0.02f))
                     .then(if (onClick != null) Modifier.clickable { onClick() } else Modifier),
                 contentAlignment = Alignment.TopCenter
