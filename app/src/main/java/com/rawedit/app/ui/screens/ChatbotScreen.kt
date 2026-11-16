@@ -1461,21 +1461,70 @@ private fun ChatBubbleRow(
                     }
                 }
             }
-            if (!isUser && msg.generatedImagePath.isNotBlank() && File(msg.generatedImagePath).exists()) {
-                AsyncImage(
-                    model = ImageRequest.Builder(LocalContext.current)
-                        .data(File(msg.generatedImagePath))
-                        .build(),
-                    contentDescription = "Generated OpenDesign image",
-                    contentScale = ContentScale.Fit,
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .heightIn(max = 260.dp)
-                        .clip(RoundedCornerShape(14.dp))
-                        .background(RawColors.BgPrimary)
-                        .border(1.dp, RawColors.Divider, RoundedCornerShape(14.dp))
-                        .clickable { latestView(msg.generatedImagePath) }
-                )
+            val displayImages = remember(msg.id, msg.generatedImagePath, msg.generatedImagePaths) {
+                (msg.generatedImagePaths + listOfNotNull(msg.generatedImagePath.takeIf { it.isNotBlank() }))
+                    .distinct()
+                    .filter { File(it).exists() }
+            }
+            if (!isUser && displayImages.isNotEmpty()) {
+                if (displayImages.size == 1) {
+                    val imgPath = displayImages.first()
+                    AsyncImage(
+                        model = ImageRequest.Builder(LocalContext.current).data(File(imgPath)).build(),
+                        contentDescription = "Generated OpenDesign image",
+                        contentScale = ContentScale.Fit,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .heightIn(max = 260.dp)
+                            .clip(RoundedCornerShape(14.dp))
+                            .background(RawColors.BgPrimary)
+                            .border(1.dp, RawColors.Divider, RoundedCornerShape(14.dp))
+                            .clickable { latestView(imgPath) }
+                    )
+                } else {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .horizontalScroll(rememberScrollState()),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        displayImages.forEachIndexed { idx, imgPath ->
+                            Column(
+                                modifier = Modifier
+                                    .width(210.dp)
+                                    .clip(RoundedCornerShape(14.dp))
+                                    .background(RawColors.BgPrimary)
+                                    .border(1.dp, RawColors.Divider, RoundedCornerShape(14.dp))
+                                    .clickable { latestView(imgPath) },
+                                verticalArrangement = Arrangement.spacedBy(4.dp)
+                            ) {
+                                AsyncImage(
+                                    model = ImageRequest.Builder(LocalContext.current).data(File(imgPath)).build(),
+                                    contentDescription = "Slide ${idx + 1}",
+                                    contentScale = ContentScale.Fit,
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .heightIn(max = 210.dp)
+                                )
+                                Row(
+                                    modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 4.dp),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Text("Slide ${idx + 1}", fontFamily = JetBrainsMonoFamily, fontSize = 10.sp, color = RawColors.TextMuted)
+                                    Text(
+                                        "Save",
+                                        fontFamily = JetBrainsMonoFamily,
+                                        fontWeight = FontWeight.Bold,
+                                        fontSize = 10.5.sp,
+                                        color = RawColors.Tan,
+                                        modifier = Modifier.clickable { latestSave(imgPath, File(imgPath).name) }
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
             }
 
             if (effectivePreviewPath.isNotBlank()) {
@@ -1644,9 +1693,10 @@ private fun ChatBubbleRow(
 @Composable
 private fun RichFormattedMessage(text: String) {
     val numberedRegex = remember { Regex("^(\\d+\\.)\\s+(.*)$") }
-    val styled = remember(text) {
+    val safeText = remember(text) { if (text.length > 3500) text.take(3500) + "\n\n...(tap Select or Save for full text)" else text }
+    val styled = remember(safeText) {
         buildAnnotatedString {
-            val lines = text.replace("\r\n", "\n").lines()
+            val lines = safeText.replace("\r\n", "\n").lines()
             var inCodeBlock = false
             lines.forEachIndexed { idx, rawLine ->
                 val trimmed = rawLine.trim()

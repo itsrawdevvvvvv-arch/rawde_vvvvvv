@@ -46,6 +46,7 @@ data class ChatMessageItem(
     val generatedFileName: String = "",
     val websitePreviewPath: String = "",
     val generatedImagePath: String = "",
+    val generatedImagePaths: List<String> = emptyList(),
     val openDesignType: String = "",
     val openDesignAspectId: String = "",
     val timestampMs: Long = System.currentTimeMillis()
@@ -69,7 +70,7 @@ object ChatbotEngine {
     private val OPEN_DESIGN_REGEX = Regex("<<<OPEN_DESIGN([^>]*)>>>\\s*([\\s\\S]*?)(?:<<<END_OPEN_DESIGN>>>|$)", RegexOption.IGNORE_CASE)
     private val WEBSITE_PREVIEW_REGEX = Regex("<<<WEBSITE_PREVIEW([^>]*)>>>\\s*([\\s\\S]*?)(?:<<<END_WEBSITE_PREVIEW>>>|$)", RegexOption.IGNORE_CASE)
     private val HTML_FENCE_REGEX = Regex("```(?:html|htm)?\\s*\\n([\\s\\S]*?(?:<!DOCTYPE html|<html)[\\s\\S]*?</html>)\\s*```", RegexOption.IGNORE_CASE)
-    private val ANY_FENCE_REGEX = Regex("```([a-zA-Z0-9_.-]*)\\s*\\n([\\s\\S]*?)```", RegexOption.IGNORE_CASE)
+    private val ANY_FENCE_REGEX = Regex("```([a-zA-Z0-9_.-]*)\\s*\\n([\\s\\S]*?)(?:```|$)", RegexOption.IGNORE_CASE)
 
 
 
@@ -177,6 +178,10 @@ object ChatbotEngine {
                 val actions = (0 until actionsArr.length()).mapNotNull { idx ->
                     actionsArr.optString(idx).takeIf { it.isNotBlank() }
                 }
+                val imgsArr = o.optJSONArray("generatedImagePaths") ?: JSONArray()
+                val imgPaths = (0 until imgsArr.length()).mapNotNull { idx ->
+                    imgsArr.optString(idx).takeIf { it.isNotBlank() }
+                }
                 out.add(
                     ChatMessageItem(
                         id = o.optString("id", "msg_$i"),
@@ -190,6 +195,7 @@ object ChatbotEngine {
                         generatedFileName = o.optString("generatedFileName", ""),
                         websitePreviewPath = o.optString("websitePreviewPath", ""),
                         generatedImagePath = o.optString("generatedImagePath", ""),
+                        generatedImagePaths = imgPaths,
                         openDesignType = o.optString("openDesignType", ""),
                         openDesignAspectId = o.optString("openDesignAspectId", ""),
                         timestampMs = o.optLong("timestampMs", 0L)
@@ -218,6 +224,7 @@ object ChatbotEngine {
                         put("generatedFileName", m.generatedFileName)
                         put("websitePreviewPath", m.websitePreviewPath)
                         put("generatedImagePath", m.generatedImagePath)
+                        put("generatedImagePaths", JSONArray().apply { m.generatedImagePaths.forEach { put(it) } })
                         put("openDesignType", m.openDesignType)
                         put("openDesignAspectId", m.openDesignAspectId)
                         put("timestampMs", m.timestampMs)
@@ -346,6 +353,7 @@ object ChatbotEngine {
                 [Complete self-contained HTML/CSS/SVG/JS following DESIGN.md & Motion.md; for motion videos include window.RAW = { duration, width, height, fps: 30, seek(t) }]
                 <<<END_OPEN_DESIGN>>>
                 (For `image` / `poster`, the app automatically renders your HTML into a crisp downloadable `.png` file AND enables live preview!)
+                MULTI-IMAGE / MULTI-SLIDE RULE: If the user asks for N images or N slides (e.g. "7 slides", "5 posters"), emit ALL N separate `<<<OPEN_DESIGN type="image" ...>>>...<<<END_OPEN_DESIGN>>>` blocks in your single reply so all N PNGs are generated and shown in chat.
                 4. File, PDF & Website Creation Tools (MANDATORY WHEN USER ASKS FOR A FILE):
                 Whenever the user asks to create, export, download, or give any `.html`, `.txt`, `.pdf`, `.md`, `.skill`, `.json`, `.css`, `.js`, or code/document file, you MUST emit the corresponding tool block below (do NOT just paste raw file text in chat):
                 - Create PDF (`.pdf`): <<<CREATE_PDF title="Title" filename="doc.pdf">>>\n[Clean Markdown/text content]\n<<<END_CREATE_PDF>>>
@@ -451,7 +459,9 @@ object ChatbotEngine {
                     }
                     appendLine("=== ACTIVE CHATBOT MODE: ${mode.label} ===")
                     if (mode == ChatbotMode.RAW_DESIGN) {
-                        val palStr = if (designConfig.useStudioPalette) {
+                        val palStr = if (visionInputs.isNotEmpty()) {
+                            "CRITICAL: User attached a palette/reference image! Extract the EXACT hex colors from the attached image and use ONLY those colors in your design."
+                        } else if (designConfig.useStudioPalette) {
                             "Use Studio Palette #${activePalette.numFormatted} (${activePalette.mood}): " +
                                 activePalette.colors.joinToString(", ") { "${it.name}=${it.hex}" }
                         } else "Custom mood-matched palette"
@@ -476,7 +486,7 @@ object ChatbotEngine {
                 routeMode = GeminiRouteMode.FAST_CHAT,
                 expectJson = false,
                 images = visionInputs,
-                maxOutputTokens = if (isHeavyTask) 16384 else 2048
+                maxOutputTokens = if (mode == ChatbotMode.RAW_DESIGN) 32768 else if (isHeavyTask) 16384 else 2048
             ).getOrThrow()
 
             var replyText = genRes.text
@@ -566,6 +576,22 @@ object ChatbotEngine {
                     }
                 }
                 replyText = replyText.replace(m.value, "").trim()
+            }
+            val rawHtmlNoFence = Regex("(<!DOCTYPE html[\\s\\S]*|<html[\\s\\S]*)", RegexOption.IGNORE_CASE).find(replyText)
+            if (rawHtmlNoFence != null) {
+                val html = rawHtmlNoFence.groupValues[1].trim()
+                if (webPreviewPath.isBlank()) {
+                    runCatching {
+                        val out = ChatbotFileTools.saveWebsiteHtml(cacheManager, "design_${System.currentTimeMillis()}", html)
+                        webPreviewPath = out.absolutePath
+                        if (genFilePath.isBlank()) {
+                            genFilePath = out.absolutePath
+                            genFileName = out.name
+                        }
+                        appliedBadges.add("Design ready to preview")
+                    }
+                }
+                replyText = replyText.replace(rawHtmlNoFence.value, "").trim()
             }
             ANY_FENCE_REGEX.findAll(replyText).toList().forEach { m ->
                 val lang = m.groupValues[1].lowercase(Locale.US).trim()
@@ -703,36 +729,42 @@ object ChatbotEngine {
                 replyText = replyText.replace(m.value, "").trim()
             }
 
-            OPEN_DESIGN_REGEX.find(replyText)?.let { m ->
+            val genImageList = mutableListOf<String>()
+            OPEN_DESIGN_REGEX.findAll(replyText).toList().forEachIndexed { idx, m ->
                 val attrs = m.groupValues[1]
                 val odType = extractAttr(attrs, "type").lowercase(Locale.US).ifBlank { designConfig.type.id }
-                val odTitle = extractAttr(attrs, "title").ifBlank { "OpenDesign" }
+                val odTitle = extractAttr(attrs, "title").ifBlank { "OpenDesign_${idx + 1}" }
                 val odW = extractAttr(attrs, "width").toIntOrNull()?.coerceIn(320, 2160) ?: designConfig.aspect.width
                 val odH = extractAttr(attrs, "height").toIntOrNull()?.coerceIn(320, 2160) ?: designConfig.aspect.height
                 val html = m.groupValues[2].trim()
                 odTypeOut = odType
                 if (html.isNotBlank()) {
-                    val htmlFile = ChatbotFileTools.saveWebsiteHtml(cacheManager, odTitle, html)
+                    val htmlFile = ChatbotFileTools.saveWebsiteHtml(cacheManager, "${odTitle}_${idx + 1}", html)
                     webPreviewPath = htmlFile.absolutePath
                     if (odType == "image" || odType == "poster") {
-                        OpenDesignEngine.renderHtmlToPng(context, cacheManager, html, odW, odH, "opendesign")
+                        OpenDesignEngine.renderHtmlToPng(context, cacheManager, html, odW, odH, "opendesign_${idx + 1}")
                             .onSuccess { pngFile ->
-                                genImagePath = pngFile.absolutePath
+                                genImageList.add(pngFile.absolutePath)
+                                if (genImagePath.isBlank()) genImagePath = pngFile.absolutePath
                                 genFilePath = pngFile.absolutePath
                                 genFileName = pngFile.name
-                                appliedBadges.add("OpenDesign PNG: ${pngFile.name}")
                             }.onFailure {
-                                genFilePath = htmlFile.absolutePath
-                                genFileName = htmlFile.name
-                                appliedBadges.add("OpenDesign HTML: ${htmlFile.name}")
+                                if (genFilePath.isBlank()) {
+                                    genFilePath = htmlFile.absolutePath
+                                    genFileName = htmlFile.name
+                                }
                             }
                     } else {
                         genFilePath = htmlFile.absolutePath
                         genFileName = htmlFile.name
-                        appliedBadges.add("OpenDesign ${odType}: ${htmlFile.name}")
                     }
                 }
                 replyText = replyText.replace(m.value, "").trim()
+            }
+            if (genImageList.isNotEmpty()) {
+                appliedBadges.add("Generated ${genImageList.size} OpenDesign image(s)")
+            } else if (odTypeOut.isNotBlank() && genFileName.isNotBlank()) {
+                appliedBadges.add("OpenDesign ${odTypeOut}: $genFileName")
             }
 
             // 4. Check for HTML patches if activeProject has HTML code
@@ -757,6 +789,11 @@ object ChatbotEngine {
                 }
             }
 
+            replyText = replyText
+                .replace(Regex("<<<(?:OPEN_DESIGN|WEBSITE_PREVIEW|CREATE_FILE|CREATE_PDF)[\\s\\S]*?(?:<<<END_(?:OPEN_DESIGN|WEBSITE_PREVIEW|CREATE_FILE|CREATE_PDF)>>>|$)", RegexOption.IGNORE_CASE), "")
+                .replace(Regex("<<<END_(?:OPEN_DESIGN|WEBSITE_PREVIEW|CREATE_FILE|CREATE_PDF)>>>", RegexOption.IGNORE_CASE), "")
+                .trim()
+
             val assistantMsg = ChatMessageItem(
                 role = "assistant",
                 text = replyText.ifBlank { "Done! I've applied your requested updates." },
@@ -765,6 +802,7 @@ object ChatbotEngine {
                 generatedFileName = genFileName,
                 websitePreviewPath = webPreviewPath,
                 generatedImagePath = genImagePath,
+                generatedImagePaths = genImageList,
                 openDesignType = odTypeOut,
                 openDesignAspectId = odAspectOut
             )
