@@ -626,6 +626,8 @@ object FormatHelpers {
         }
     }
 
+    fun formatBytes(bytes: Long): String = formatFileSize(bytes)
+
     fun formatDate(millis: Long): String {
         if (millis <= 0L) return "Today"
         return SimpleDateFormat("MMM d, yyyy", Locale.US).format(Date(millis))

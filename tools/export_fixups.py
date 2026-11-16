@@ -93,6 +93,7 @@ COMMON_IMPORTS = [
     (r'\.horizontalScroll\(', 'androidx.compose.foundation.horizontalScroll'),
     (r'rememberScrollState\(', 'androidx.compose.foundation.rememberScrollState'),
     (r'\.clip\(', 'androidx.compose.ui.draw.clip'),
+    (r'\.border\(', 'androidx.compose.foundation.border'),
     (r'\bReelEditingStyle\b', 'com.rawedit.app.domain.ReelEditingStyle'),
     (r'\bBitmapFactory\.', 'android.graphics.BitmapFactory'),
     (r'\bCircleAvatarCropperDialog\(', 'com.rawedit.app.ui.components.CircleAvatarCropperDialog'),
