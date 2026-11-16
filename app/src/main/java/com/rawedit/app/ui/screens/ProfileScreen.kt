@@ -5,45 +5,26 @@ import android.net.Uri
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
-import androidx.compose.animation.AnimatedVisibility
-import androidx.compose.animation.core.Animatable
-import androidx.compose.animation.core.tween
-import androidx.compose.animation.expandVertically
-import androidx.compose.animation.fadeIn
-import androidx.compose.animation.fadeOut
-import androidx.compose.animation.shrinkVertically
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.IntrinsicSize
-import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.defaultMinSize
-import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.navigationBarsPadding
-import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.layout.wrapContentSize
-import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.ModalBottomSheet
-import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -56,58 +37,40 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.draw.clipToBounds
-import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import androidx.compose.ui.zIndex
-import androidx.core.content.FileProvider
-import com.rawedit.app.BuildConfig
-import android.content.ClipData
-import android.content.ClipboardManager
-import android.content.Context
-import android.content.Intent
-import android.os.Build
-import com.rawedit.app.data.BackupManager
+import androidx.compose.ui.window.Dialog
+import coil.compose.AsyncImage
 import com.rawedit.app.data.CacheManager
 import com.rawedit.app.data.local.UserPreferences
-import com.rawedit.app.data.repository.RawEditRepository
-import java.io.File
 import com.rawedit.app.data.local.UserProfile
 import com.rawedit.app.data.local.VideoEntity
-import com.rawedit.app.domain.AiProvider
-import com.rawedit.app.domain.GeminiTaskRoute
-import com.rawedit.app.domain.GroqCodec
-import com.rawedit.app.ui.components.BigPrimaryButton
-import com.rawedit.app.ui.components.CircleActionButton
+import com.rawedit.app.data.repository.RawEditRepository
 import com.rawedit.app.ui.components.CircleAvatarCropperDialog
-import com.rawedit.app.ui.components.FormatHelpers
-import com.rawedit.app.ui.components.RawSecondaryButton
-import com.rawedit.app.ui.components.RawToastBanner
-import com.rawedit.app.ui.components.UserAvatarView
-import com.rawedit.app.ui.icons.PixelMascotKind
-import com.rawedit.app.ui.icons.PixelRawEditLogo
+import com.rawedit.app.ui.components.DomeButtonKind
+import com.rawedit.app.ui.components.DomeCard
+import com.rawedit.app.ui.components.DomeChip
+import com.rawedit.app.ui.components.DomeHeadPart
+import com.rawedit.app.ui.components.DomeHeadline
+import com.rawedit.app.ui.components.DomeMono
+import com.rawedit.app.ui.components.DomeMuted
+import com.rawedit.app.ui.components.DomePillButton
+import com.rawedit.app.ui.components.DomePillCard
+import com.rawedit.app.ui.components.StaggerIn
 import com.rawedit.app.ui.icons.RawIcon
 import com.rawedit.app.ui.icons.RawIconType
-import com.rawedit.app.ui.icons.RawPixelMascot
-import com.rawedit.app.ui.motion.FeatheredScrollEdges
-import com.rawedit.app.ui.motion.RawEasings
-import com.rawedit.app.ui.motion.RawPressButton
-import com.rawedit.app.ui.motion.rememberAnimationsEnabled
-import com.rawedit.app.ui.theme.BricolageCondensedFamily
 import com.rawedit.app.ui.theme.BricolageFamily
 import com.rawedit.app.ui.theme.JetBrainsMonoFamily
 import com.rawedit.app.ui.theme.RawColors
-import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun ProfileScreen(
     userProfile: UserProfile,
@@ -122,931 +85,303 @@ fun ProfileScreen(
     onRefreshGroqQuota: () -> Unit,
     onOpenChatbot: () -> Unit = {}
 ) {
-    val context = LocalContext.current
     val scope = rememberCoroutineScope()
-    val animEnabled = rememberAnimationsEnabled()
-    val listState = rememberLazyListState()
-
-    var editingName by remember { mutableStateOf(false) }
+    var editingId by remember { mutableStateOf(false) }
     var nameDraft by remember(userProfile.userName) { mutableStateOf(userProfile.userName) }
-    var showPhotoMenu by remember { mutableStateOf(false) }
-    var showAboutSheet by remember { mutableStateOf(false) }
     var pendingCropBitmap by remember { mutableStateOf<Bitmap?>(null) }
-    var cameraTempUri by remember { mutableStateOf<Uri?>(null) }
-
-    var cacheSizeBytes by remember { mutableLongStateOf(0L) }
-    var toastMsg by remember { mutableStateOf<String?>(null) }
-
-    LaunchedEffect(toastMsg) {
-        if (toastMsg != null) {
-            delay(1900)
-            toastMsg = null
-        }
-    }
-
-    val avatarAnim = remember { Animatable(1f) }
-    LaunchedEffect(userProfile.profilePhotoPath) {
-        if (animEnabled) {
-            avatarAnim.snapTo(0.45f)
-            avatarAnim.animateTo(1f, tween(320, easing = RawEasings.OvershootSettle))
-        }
-    }
+    var cacheBytes by remember { mutableLongStateOf(0L) }
+    var toast by remember { mutableStateOf<String?>(null) }
+    var showAbout by remember { mutableStateOf(false) }
 
     LaunchedEffect(Unit) {
-        cacheSizeBytes = cacheManager.getTempCacheSizeBytes()
+        cacheBytes = runCatching { cacheManager.getTempCacheSizeBytes() }.getOrDefault(0L)
+    }
+    LaunchedEffect(toast) {
+        if (toast != null) {
+            kotlinx.coroutines.delay(1900)
+            toast = null
+        }
     }
 
     val galleryPicker = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.PickVisualMedia()
-    ) { uri ->
+    ) { uri: Uri? ->
         if (uri != null) {
-            scope.launch {
-                pendingCropBitmap = cacheManager.loadBitmapWithExif(uri)
-            }
+            scope.launch { pendingCropBitmap = cacheManager.loadBitmapWithExif(uri) }
         }
     }
 
-    val cameraLauncher = rememberLauncherForActivityResult(
-        contract = ActivityResultContracts.TakePicture()
-    ) { ok ->
-        val uri = cameraTempUri
-        if (ok && uri != null) {
-            scope.launch {
-                pendingCropBitmap = cacheManager.loadBitmapWithExif(uri)
-            }
-        }
-    }
+    val initials = userProfile.userName
+        .trim()
+        .split(" ")
+        .filter { it.isNotBlank() }
+        .take(2)
+        .joinToString("") { it.first().uppercase() }
+        .ifBlank { "R" }
 
-
-    var customFontsList by remember { mutableStateOf(cacheManager.listCustomFonts()) }
-    var backupBusy by remember { mutableStateOf(false) }
-    var pendingBackupFile by remember { mutableStateOf<File?>(null) }
-
-    val fontPicker = rememberLauncherForActivityResult(
-        contract = ActivityResultContracts.OpenDocument()
-    ) { uri ->
-        if (uri != null) {
-            val res = cacheManager.importCustomFonts(uri)
-            res.onSuccess { files ->
-                customFontsList = cacheManager.listCustomFonts()
-                toastMsg = if (files.size == 1) "Imported font ${files.first().name}" else "Imported ${files.size} fonts"
-            }.onFailure { err ->
-                toastMsg = err.message ?: "Could not import font."
-            }
-        }
-    }
-
-    val backupSaveLauncher = rememberLauncherForActivityResult(
-        contract = ActivityResultContracts.CreateDocument("application/zip")
-    ) { destUri ->
-        val srcFile = pendingBackupFile
-        pendingBackupFile = null
-        if (destUri != null && srcFile != null && srcFile.exists()) {
-            backupBusy = true
-            scope.launch {
-                val r = cacheManager.saveFileToUri(srcFile, destUri)
-                backupBusy = false
-                r.onSuccess { toastMsg = "Backup exported successfully" }
-                    .onFailure { err -> toastMsg = err.message ?: "Export failed" }
-            }
-        }
-    }
-
-    val backupRestoreLauncher = rememberLauncherForActivityResult(
-        contract = ActivityResultContracts.OpenDocument()
-    ) { uri ->
-        if (uri != null) {
-            backupBusy = true
-            scope.launch {
-                val res = BackupManager.restoreFromBackupUri(
-                    context = context,
-                    cacheManager = cacheManager,
-                    userPreferences = userPreferences,
-                    repository = repository,
-                    sourceUri = uri
-                )
-                backupBusy = false
-                res.onSuccess { sum ->
-                    customFontsList = cacheManager.listCustomFonts()
-                    toastMsg = "Restored ${sum.projectsCount} projects, ${sum.fontsCount} fonts, ${sum.skillsCount} skills"
-                }.onFailure { err ->
-                    toastMsg = err.message ?: "Could not restore backup ZIP"
-                }
-            }
-        }
-    }
-
-    val displayName = if (editingName) nameDraft.ifBlank { userProfile.userName } else userProfile.userName.ifBlank { "Creator" }
-    val totalVideoSec = remember(videos) { videos.sumOf { it.durationSec } }
-    val lastReelDate = remember(videos) {
-        videos.maxOfOrNull { it.createdAt }?.let { FormatHelpers.formatDate(it) } ?: "-"
-    }
-
-    Box(
+    Column(
         modifier = Modifier
             .fillMaxSize()
-            .background(RawColors.BgPrimary)
+            .statusBarsPadding()
+            .verticalScroll(rememberScrollState())
+            .padding(horizontal = 20.dp)
+            .padding(top = 16.dp, bottom = 28.dp)
     ) {
-        LazyColumn(
-            state = listState,
-            modifier = Modifier.fillMaxSize(),
-            contentPadding = PaddingValues(bottom = 240.dp)
-        ) {
-            // Hero (.ph) + Overlapping Straight ID Card (.idc)
-            item {
-                Column(modifier = Modifier.fillMaxWidth().statusBarsPadding().padding(top = 14.dp)) {
-                    Text(
-                        text = "Profile",
-                        fontFamily = BricolageFamily,
-                        fontWeight = FontWeight.Bold,
-                        fontSize = 44.sp,
-                        lineHeight = 46.sp,
-                        letterSpacing = (-1.6).sp,
-                        color = RawColors.Cream,
-                        modifier = Modifier.padding(horizontal = 20.dp, vertical = 8.dp)
+        StaggerIn(0) {
+            DomeHeadline(
+                parts = listOf(DomeHeadPart.Plain("Profile")),
+                size = 44.dp,
+                lineHeightFactor = 0.95f
+            )
+        }
+
+        // ---------------- creator ID card
+        StaggerIn(1) {
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(bottom = 12.dp)
+                    .clip(RoundedCornerShape(28.dp))
+                    .background(
+                        androidx.compose.ui.graphics.Brush.linearGradient(
+                            listOf(Color(0x40C89F72), Color(0xF5171718))
+                        )
                     )
-                    // Straight Overlapping ID Card (.idc 28dp borderless + .spine)
-                    Box(
-                        modifier = Modifier
-                            .zIndex(2f)
-                                                        .padding(horizontal = 18.dp)
-                            .fillMaxWidth()
-                            .clip(RoundedCornerShape(26.dp))
-                            .background(RawColors.CardSurface)
-                            .border(1.5.dp, RawColors.AccentBorder, RoundedCornerShape(26.dp))
+                    .border(1.dp, Color(0x66C89F72), RoundedCornerShape(28.dp))
+                    .padding(16.dp)
+            ) {
+                Column {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Row(
+                        DomeMono(
+                            text = "CREATOR ID · #001",
+                            size = 10,
+                            color = RawColors.Tan
+                        )
+                        DomeChip(
+                            text = if (editingId) "Close" else "Edit ID",
+                            active = true
+                        ) { editingId = !editingId }
+                    }
+                    Spacer(Modifier.height(10.dp))
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Box(
                             modifier = Modifier
-                                .fillMaxWidth()
-                                .height(IntrinsicSize.Min)
-                        ) {
-                            Column(
-                                modifier = Modifier
-                                    .weight(1f)
-                                    .padding(18.dp)
-                            ) {
-                                Row(
-                                    modifier = Modifier.fillMaxWidth(),
-                                    horizontalArrangement = Arrangement.SpaceBetween,
-                                    verticalAlignment = Alignment.CenterVertically
-                                ) {
-                                    Text(
-                                        text = "CREATOR ID · #001",
-                                        fontFamily = JetBrainsMonoFamily,
-                                        fontWeight = FontWeight.Medium,
-                                        fontSize = 13.sp,
-                                        letterSpacing = 0.2.sp,
-                                        color = RawColors.Tan
+                                .size(60.dp)
+                                .clip(CircleShape)
+                                .background(RawColors.Tan)
+                                .clickable {
+                                    galleryPicker.launch(
+                                        PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)
                                     )
-                                    Box(
-        modifier = Modifier
-            .clip(CircleShape)
-            .background(RawColors.TanButtonBrush)
-            .clickable { editingName = !editingName }
-            .padding(horizontal = 11.dp, vertical = 4.dp)
-    ) {
-        Text(
-            text = if (editingName) "Close" else "Edit ID",
-            fontFamily = JetBrainsMonoFamily,
-            fontWeight = FontWeight.Bold,
-            fontSize = 10.sp,
-            color = RawColors.Ink
-        )
-    }
-                                }
-
-                                Spacer(modifier = Modifier.height(14.dp))
-
-                                Row(
-                                    verticalAlignment = Alignment.CenterVertically,
-                                    horizontalArrangement = Arrangement.spacedBy(14.dp)
-                                ) {
-                                    Box(
-                                        modifier = Modifier.graphicsLayer {
-                                            scaleX = avatarAnim.value
-                                            scaleY = avatarAnim.value
-                                        }
-                                    ) {
-                                        UserAvatarView(
-                                            name = displayName,
-                                            photoPath = userProfile.profilePhotoPath,
-                                            size = 84.dp,
-                                            onClick = { showPhotoMenu = true }
-                                        )
-                                        CircleActionButton(
-                                            icon = RawIconType.EDIT,
-                                            size = 30.dp,
-                                            onClick = { showPhotoMenu = true },
-                                            modifier = Modifier
-                                                .align(Alignment.BottomEnd)
-                                                .offset(x = 6.dp, y = 4.dp)
-                                        )
-                                    }
-
-                                    Column(modifier = Modifier.weight(1f)) {
-                                        Row(
-                                            verticalAlignment = Alignment.CenterVertically,
-                                            horizontalArrangement = Arrangement.spacedBy(8.dp),
-                                            modifier = Modifier.clickable { editingName = !editingName }
-                                        ) {
-                                            Text(
-                                                text = displayName,
-                                                fontFamily = BricolageFamily,
-                                                fontWeight = FontWeight.Bold,
-                                                fontSize = 27.sp,
-                                                lineHeight = 31.sp,
-                                                color = RawColors.TextPrimary,
-                                                maxLines = 2,
-                                                overflow = TextOverflow.Ellipsis,
-                                                modifier = Modifier.weight(1f, fill = false)
-                                            )
-                                            RawIcon(
-                                                type = RawIconType.EDIT,
-                                                size = 16.dp,
-                                                tint = RawColors.TextMuted
-                                            )
-                                        }
-                                        Spacer(modifier = Modifier.height(4.dp))
-                                        Text(
-                                            text = "joined ${FormatHelpers.formatDate(userProfile.joinDateMillis)}",
-                                            fontFamily = JetBrainsMonoFamily,
-                                            fontWeight = FontWeight.Medium,
-                                            fontSize = 13.sp,
-                                            style = TextStyle(fontFeatureSettings = "tnum"),
-                                            color = RawColors.TextMuted
-                                        )
-                                    }
-                                }
-
-                                AnimatedVisibility(
-                                    visible = editingName,
-                                    enter = fadeIn(tween(200)) + expandVertically(tween(220, easing = RawEasings.Morph)),
-                                    exit = fadeOut(tween(140)) + shrinkVertically(tween(180))
-                                ) {
-                                    Column {
-                                        Spacer(modifier = Modifier.height(12.dp))
-                                        OutlinedTextField(
-                                            value = nameDraft,
-                                            onValueChange = {
-                                                if (it.length <= 32) {
-                                                    nameDraft = it
-                                                }
-                                            },
-                                            singleLine = true,
-                                            textStyle = TextStyle(
-                                                fontFamily = BricolageFamily,
-                                                fontWeight = FontWeight.SemiBold,
-                                                fontSize = 19.sp,
-                                                color = RawColors.TextPrimary
-                                            ),
-                                            placeholder = {
-                                                Text(
-                                                    text = "Your name",
-                                                    fontFamily = BricolageFamily,
-                                                    fontWeight = FontWeight.Medium,
-                                                    fontSize = 17.sp,
-                                                    color = RawColors.TextMuted
-                                                )
-                                            },
-                                            shape = RoundedCornerShape(20.dp),
-                                            colors = OutlinedTextFieldDefaults.colors(
-                                                focusedBorderColor = RawColors.AccentFocus,
-                                                unfocusedBorderColor = Color.Transparent,
-                                                focusedContainerColor = RawColors.RaisedCard,
-                                                unfocusedContainerColor = RawColors.RaisedCard,
-                                                focusedTextColor = RawColors.TextPrimary,
-                                                unfocusedTextColor = RawColors.TextPrimary,
-                                                cursorColor = RawColors.Tan
-                                            ),
-                                            modifier = Modifier.fillMaxWidth()
-                                        )
-                                        Spacer(modifier = Modifier.height(8.dp))
-                                        RawPressButton(
-                                            onClick = {
-                                                val trimmed = nameDraft.trim()
-                                                if (trimmed.isNotEmpty()) {
-                                                    onUpdateName(trimmed)
-                                                }
-                                                editingName = false
-                                            }
-                                        ) {
-                                            Box(
-                                                modifier = Modifier
-                                                    .height(38.dp)
-                                                    .clip(CircleShape)
-                                                    .background(RawColors.Cream)
-                                                    .padding(horizontal = 18.dp),
-                                                contentAlignment = Alignment.Center
-                                            ) {
-                                                Text(
-                                                    text = "Done",
-                                                    fontFamily = BricolageFamily,
-                                                    fontWeight = FontWeight.Bold,
-                                                    fontSize = 14.5.sp,
-                                                    color = RawColors.Ink
-                                                )
-                                            }
-                                        }
-                                    }
-                                }
-                            }
-
-                            Box(
-                                modifier = Modifier
-                                    .width(42.dp)
-                                    .fillMaxHeight()
-                                    .background(RawColors.RaisedCard),
-                                contentAlignment = Alignment.Center
-                            ) {
-                                Text(
-                                    text = "ID card",
-                                    fontFamily = JetBrainsMonoFamily,
-                                    fontWeight = FontWeight.Medium,
-                                    fontSize = 11.sp,
-                                    letterSpacing = 0.7.sp,
-                                    color = RawColors.TextMuted,
-                                    maxLines = 1,
-                                    softWrap = false,
-                                    modifier = Modifier
-                                        .wrapContentSize(unbounded = true)
-                                        .rotate(-90f)
-                                )
-                            }
-                        }
-                    }
-                }
-            }
-
-            // Stats card (28dp borderless)
-            item {
-                Column(
-                    modifier = Modifier
-                        .padding(horizontal = 18.dp)
-                        .offset(y = (-8).dp)
-                        .fillMaxWidth()
-                        .clip(RoundedCornerShape(28.dp))
-                        .background(RawColors.CardSurface)
-                        .padding(18.dp)
-                ) {
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.Bottom
-                    ) {
-                        Column {
-                            Text(
-                                text = "${videos.size}",
-                                fontFamily = BricolageCondensedFamily,
-                                fontWeight = FontWeight.Medium,
-                                fontSize = 58.sp,
-                                lineHeight = 58.sp,
-                                letterSpacing = (-1.6).sp,
-                                style = TextStyle(fontFeatureSettings = "tnum"),
-                                color = RawColors.TextPrimary
-                            )
-                            Text(
-                                text = "reels made",
-                                fontFamily = JetBrainsMonoFamily,
-                                fontWeight = FontWeight.Medium,
-                                fontSize = 13.sp,
-                                color = RawColors.TextMuted
-                            )
-                        }
-                        Column(horizontalAlignment = Alignment.End) {
-                            Text(
-                                text = FormatHelpers.formatDuration(totalVideoSec),
-                                fontFamily = BricolageCondensedFamily,
-                                fontWeight = FontWeight.Medium,
-                                fontSize = 42.sp,
-                                lineHeight = 44.sp,
-                                letterSpacing = (-1.1).sp,
-                                style = TextStyle(fontFeatureSettings = "tnum"),
-                                color = RawColors.Tan
-                            )
-                            Text(
-                                text = "Total video time",
-                                fontFamily = JetBrainsMonoFamily,
-                                fontWeight = FontWeight.Medium,
-                                fontSize = 13.sp,
-                                color = RawColors.TextMuted
-                            )
-                        }
-                    }
-
-                    Spacer(modifier = Modifier.height(14.dp))
-                    Box(modifier = Modifier.fillMaxWidth().height(1.dp).background(RawColors.Divider))
-                    Spacer(modifier = Modifier.height(12.dp))
-
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Text(
-                            text = "Last reel date",
-                            fontFamily = JetBrainsMonoFamily,
-                            fontWeight = FontWeight.Medium,
-                            fontSize = 13.sp,
-                            color = RawColors.TextMuted
-                        )
-                        Text(
-                            text = lastReelDate,
-                            fontFamily = BricolageFamily,
-                            fontWeight = FontWeight.Bold,
-                            fontSize = 15.5.sp,
-                            color = RawColors.TextPrimary
-                        )
-                    }
-                }
-            }
-
-            // Google Gemini AI & Waterfall card
-            item {
-                Spacer(modifier = Modifier.height(4.dp))
-                val hasKey = userProfile.hasGeminiKey
-                val routeLabel = when (userProfile.geminiTaskRoute) {
-                    GeminiTaskRoute.MAX_QUOTA_SAVER.id -> "Max Quota (1,000 RPD)"
-                    GeminiTaskRoute.MAX_QUALITY.id -> "Max Creative (Flash 3.8)"
-                    else -> "Balanced Waterfall"
-                }
-                val subtitle = if (hasKey) {
-                    "${userProfile.maskGeminiKey()}  \u2022  Hydrogen 4"
-                } else {
-                    "Add API key"
-                }
-                val cardShape = RoundedCornerShape(28.dp)
-                Column(
-                    modifier = Modifier
-                        .padding(horizontal = 18.dp)
-                        .fillMaxWidth()
-                        .clip(cardShape)
-                        .background(RawColors.CardSurface)
-                        .clickable(onClick = onOpenGroqKey)
-                        .padding(18.dp),
-                    verticalArrangement = Arrangement.spacedBy(12.dp)
-                ) {
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Row(
-                            modifier = Modifier.weight(1f).padding(end = 10.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(12.dp)
+                                },
+                            contentAlignment = Alignment.Center
                         ) {
-                            Box(
-                                modifier = Modifier
-                                    .size(42.dp)
-                                    .clip(CircleShape)
-                                    .background(if (hasKey) RawColors.AccentSoft else RawColors.RaisedCard),
-                                contentAlignment = Alignment.Center
-                            ) {
-                                RawIcon(
-                                    type = RawIconType.KEY,
-                                    size = 19.dp,
-                                    tint = if (hasKey) RawColors.Tan else RawColors.TextMuted
+                            val photo = userProfile.profilePhotoPath
+                            if (photo != null) {
+                                AsyncImage(
+                                    model = photo,
+                                    contentDescription = "Creator photo",
+                                    contentScale = ContentScale.Crop,
+                                    modifier = Modifier
+                                        .size(60.dp)
+                                        .clip(CircleShape)
                                 )
-                            }
-                            Column {
+                            } else {
                                 Text(
-                                    text = "Gemini AI",
+                                    text = initials,
                                     fontFamily = BricolageFamily,
-                                    fontWeight = FontWeight.Bold,
-                                    fontSize = 18.sp,
-                                    color = RawColors.TextPrimary
-                                )
-                                Spacer(modifier = Modifier.height(2.dp))
-                                Text(
-                                    text = subtitle,
-                                    fontFamily = JetBrainsMonoFamily,
-                                    fontWeight = FontWeight.Medium,
-                                    fontSize = 12.sp,
-                                    color = if (hasKey) RawColors.Tan else RawColors.TextMuted,
-                                    maxLines = 1,
-                                    overflow = TextOverflow.Ellipsis
+                                    fontSize = 19.sp,
+                                    fontWeight = FontWeight.ExtraBold,
+                                    color = RawColors.Ink
                                 )
                             }
                         }
-
-                        if (hasKey) {
-                            RawSecondaryButton(
-                                text = "Manage",
-                                height = 42.dp,
-                                fillWidth = false,
-                                onClick = onOpenGroqKey
-                            )
-                        } else {
-                            RawSecondaryButton(
-                                text = "Add key",
-                                height = 46.dp,
-                                leadingIcon = RawIconType.KEY,
-                                fillWidth = false,
-                                onClick = onOpenGroqKey
-                            )
-                        }
-                    }
-
-
-                }
-            }
-
-            // Version & about app (28dp borderless)
-            item {
-                Spacer(modifier = Modifier.height(12.dp))
-                Row(
-                    modifier = Modifier
-                        .padding(horizontal = 18.dp)
-                        .fillMaxWidth()
-                        .clip(RoundedCornerShape(28.dp))
-                        .background(RawColors.CardSurface)
-                        .padding(horizontal = 18.dp, vertical = 20.dp),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Column(modifier = Modifier.weight(1f).padding(end = 12.dp)) {
-                        Text(
-                            text = "Version ${BuildConfig.VERSION_NAME}",
-                            fontFamily = BricolageFamily,
-                            fontWeight = FontWeight.Bold,
-                            fontSize = 19.sp,
-                            color = RawColors.TextPrimary
-                        )
-                        Spacer(modifier = Modifier.height(3.dp))
-                        Text(
-                            text = "offline stage  \u2022  no ads",
-                            fontFamily = JetBrainsMonoFamily,
-                            fontWeight = FontWeight.Medium,
-                            fontSize = 13.sp,
-                            color = RawColors.TextMuted
-                        )
-                    }
-                    RawSecondaryButton(
-                        text = "About app",
-                        height = 48.dp,
-                        leadingIcon = RawIconType.INFO,
-                        fillWidth = false,
-                        onClick = { showAboutSheet = true }
-                    )
-                }
-            }
-
-            // Custom Fonts Import Card (.ttf / .otf / .zip)
-            item {
-                Spacer(modifier = Modifier.height(12.dp))
-                Column(
-                    modifier = Modifier
-                        .padding(horizontal = 18.dp)
-                        .fillMaxWidth()
-                        .clip(RoundedCornerShape(28.dp))
-                        .background(RawColors.CardSurface)
-                        .padding(18.dp),
-                    verticalArrangement = Arrangement.spacedBy(10.dp)
-                ) {
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
+                        Spacer(Modifier.width(14.dp))
                         Column(modifier = Modifier.weight(1f)) {
                             Text(
-                                text = "Custom Fonts (${customFontsList.size})",
+                                text = userProfile.userName.ifBlank { "Creator" },
                                 fontFamily = BricolageFamily,
-                                fontWeight = FontWeight.Bold,
-                                fontSize = 18.5.sp,
-                                color = RawColors.TextPrimary
+                                fontSize = 19.sp,
+                                fontWeight = FontWeight.ExtraBold,
+                                color = RawColors.Cream,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
                             )
-                            Text(
-                                text = "Import .ttf, .otf, or .zip font packs locally",
+                            DomeMono(
+                                text = "@" + handleFor(userProfile.userName),
+                                size = 11,
+                                color = RawColors.Tan
+                            )
+                            Spacer(Modifier.height(3.dp))
+                            DomeMono(
+                                text = "DIR · 1080P OFFLINE · ${videos.size} REELS",
+                                size = 9.5f.toInt()
+                            )
+                        }
+                    }
+
+                    if (editingId) {
+                        Spacer(Modifier.height(12.dp))
+                        BasicTextField(
+                            value = nameDraft,
+                            onValueChange = { nameDraft = it },
+                            singleLine = true,
+                            textStyle = TextStyle(
                                 fontFamily = JetBrainsMonoFamily,
-                                fontSize = 11.5.sp,
-                                color = RawColors.TextMuted
-                            )
-                        }
-                        RawSecondaryButton(
-                            text = "Import Font",
-                            height = 42.dp,
-                            leadingIcon = RawIconType.PLUS,
-                            fillWidth = false,
-                            onClick = { fontPicker.launch(arrayOf("*/*")) }
+                                fontSize = 12.sp,
+                                color = RawColors.Cream
+                            ),
+                            cursorBrush = SolidColor(RawColors.Tan),
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clip(RoundedCornerShape(16.dp))
+                                .background(RawColors.RaisedCard)
+                                .border(1.dp, RawColors.Divider, RoundedCornerShape(16.dp))
+                                .padding(horizontal = 14.dp, vertical = 12.dp)
                         )
-                    }
-                    if (customFontsList.isNotEmpty()) {
-                        customFontsList.forEach { fontFile ->
-                            val family = fontFile.nameWithoutExtension.replace(
-                                Regex("[-_](Bold|Regular|Medium|SemiBold|Light|Black|ExtraBold)", RegexOption.IGNORE_CASE),
-                                ""
-                            ).replace('-', ' ').replace('_', ' ').trim()
-                            Row(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .clip(RoundedCornerShape(14.dp))
-                                    .background(RawColors.RaisedCard)
-                                    .padding(horizontal = 12.dp, vertical = 8.dp),
-                                horizontalArrangement = Arrangement.SpaceBetween,
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                Column(modifier = Modifier.weight(1f)) {
-                                    Text(
-                                        text = fontFile.name,
-                                        fontFamily = BricolageFamily,
-                                        fontWeight = FontWeight.Bold,
-                                        fontSize = 13.5.sp,
-                                        color = RawColors.TextPrimary
-                                    )
-                                    Text(
-                                        text = "font-family: '$family'",
-                                        fontFamily = JetBrainsMonoFamily,
-                                        fontSize = 11.sp,
-                                        color = RawColors.Tan
-                                    )
-                                }
-                                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                                    CircleActionButton(
-                                        icon = RawIconType.COPY,
-                                        size = 34.dp,
-                                        onClick = {
-                                            val cb = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
-                                            cb.setPrimaryClip(ClipData.newPlainText("font", family))
-                                            toastMsg = "Copied '$family'"
-                                        }
-                                    )
-                                    CircleActionButton(
-                                        icon = RawIconType.TRASH,
-                                        size = 34.dp,
-                                        iconTint = RawColors.ErrorCoral,
-                                        onClick = {
-                                            cacheManager.deleteCustomFont(fontFile.name)
-                                            customFontsList = cacheManager.listCustomFonts()
-                                        }
-                                    )
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-
-            // Local Backup: Export Data & Import Data
-            item {
-                Spacer(modifier = Modifier.height(12.dp))
-                Column(
-                    modifier = Modifier
-                        .padding(horizontal = 18.dp)
-                        .fillMaxWidth()
-                        .clip(RoundedCornerShape(28.dp))
-                        .background(RawColors.CardSurface)
-                        .padding(18.dp),
-                    verticalArrangement = Arrangement.spacedBy(10.dp)
-                ) {
-                    Text(
-                        text = "App Backup (Local Phone Storage)",
-                        fontFamily = BricolageFamily,
-                        fontWeight = FontWeight.Bold,
-                        fontSize = 18.5.sp,
-                        color = RawColors.TextPrimary
-                    )
-                    Text(
-                        text = "Export or restore all projects, scripts, SRTs, assets, fonts, skills & settings as a local ZIP backup.",
-                        fontFamily = BricolageFamily,
-                        fontSize = 13.sp,
-                        lineHeight = 18.sp,
-                        color = RawColors.TextMuted
-                    )
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(10.dp)
-                    ) {
-                        BigPrimaryButton(
-                            text = if (backupBusy) "Working..." else "Export Data",
-                            height = 46.dp,
-                            enabled = !backupBusy,
-                            leadingIcon = RawIconType.DOWNLOAD,
+                        Spacer(Modifier.height(10.dp))
+                        DomePillButton(
+                            text = "Save Creator ID",
+                            kind = DomeButtonKind.Primary,
+                            enabled = nameDraft.isNotBlank(),
                             onClick = {
-                                backupBusy = true
-                                scope.launch {
-                                    val res = BackupManager.createBackupFile(context, cacheManager, userPreferences, repository)
-                                    res.onSuccess { (zipFile, summary) ->
-                                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                                            val dl = cacheManager.saveFileToDownloads(zipFile, summary.zipFileName, "application/zip")
-                                            backupBusy = false
-                                            dl.onSuccess {
-                                                toastMsg = "Backup saved to Downloads/raw_edit/${summary.zipFileName}"
-                                            }.onFailure {
-                                                pendingBackupFile = zipFile
-                                                backupSaveLauncher.launch(summary.zipFileName)
-                                            }
-                                        } else {
-                                            backupBusy = false
-                                            pendingBackupFile = zipFile
-                                            backupSaveLauncher.launch(summary.zipFileName)
-                                        }
-                                    }.onFailure { err ->
-                                        backupBusy = false
-                                        toastMsg = err.message ?: "Backup export failed"
-                                    }
-                                }
-                            },
-                            modifier = Modifier.weight(1f)
-                        )
-                        RawSecondaryButton(
-                            text = "Import Data",
-                            height = 46.dp,
-                            enabled = !backupBusy,
-                            leadingIcon = RawIconType.FILE,
-                            onClick = { backupRestoreLauncher.launch(arrayOf("application/zip", "*/*")) },
-                            modifier = Modifier.weight(1f)
-                        )
-                    }
-                }
-            }
-
-            // Clear cache (28dp borderless)
-            item {
-                Spacer(modifier = Modifier.height(12.dp))
-                Row(
-                    modifier = Modifier
-                        .padding(horizontal = 18.dp)
-                        .fillMaxWidth()
-                        .clip(RoundedCornerShape(28.dp))
-                        .background(RawColors.CardSurface)
-                        .padding(horizontal = 18.dp, vertical = 20.dp),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Column {
-                        Text(
-                            text = "Clear cache",
-                            fontFamily = BricolageFamily,
-                            fontWeight = FontWeight.Bold,
-                            fontSize = 19.sp,
-                            color = RawColors.TextPrimary
-                        )
-                        Spacer(modifier = Modifier.height(3.dp))
-                        Text(
-                            text = "Temp files: ${FormatHelpers.formatFileSize(cacheSizeBytes)}",
-                            fontFamily = JetBrainsMonoFamily,
-                            fontWeight = FontWeight.Medium,
-                            fontSize = 13.sp,
-                            style = TextStyle(fontFeatureSettings = "tnum"),
-                            color = RawColors.TextMuted
-                        )
-                    }
-                    CircleActionButton(
-                        icon = RawIconType.TRASH,
-                        size = 40.dp,
-                        backgroundColor = RawColors.ErrorSoft,
-                        iconTint = RawColors.ErrorCoral,
-                        onClick = {
-                            scope.launch {
-                                cacheManager.clearAllTempCache()
-                                cacheSizeBytes = cacheManager.getTempCacheSizeBytes()
-                                toastMsg = "Cache cleared"
+                                onUpdateName(nameDraft.trim())
+                                editingId = false
+                                toast = "Creator ID saved"
                             }
-                        }
-                    )
+                        )
+                    }
                 }
             }
         }
 
-        FeatheredScrollEdges(
-            listState = listState,
-            topHeight = 40.dp,
-            bottomHeight = 124.dp,
-            alwaysShowBottom = true
-        )
-
-        RawToastBanner(
-            message = toastMsg,
-            modifier = Modifier
-                .align(Alignment.BottomCenter)
-                .navigationBarsPadding()
-                .padding(bottom = 104.dp)
-        )
-    }
-
-    if (showPhotoMenu) {
-        ModalBottomSheet(
-            onDismissRequest = { showPhotoMenu = false },
-            shape = RoundedCornerShape(topStart = 32.dp, topEnd = 32.dp),
-            containerColor = RawColors.CardSurface,
-            contentColor = RawColors.TextPrimary
-        ) {
-            Column(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 20.dp, vertical = 6.dp)
-            ) {
-                Text(
-                    text = "Profile photo",
-                    fontFamily = BricolageFamily,
-                    fontWeight = FontWeight.Bold,
-                    fontSize = 22.sp,
-                    color = RawColors.TextPrimary
-                )
-                Spacer(modifier = Modifier.height(8.dp))
-                SheetActionRow(
-                    icon = RawIconType.IMAGE,
-                    label = "Gallery",
-                    onClick = {
-                        showPhotoMenu = false
-                        galleryPicker.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly))
+        // ---------------- settings group
+        StaggerIn(2) {
+            DomePillCard(
+                title = "AI & Quota",
+                subtitle = if (userProfile.hasGroqKey) "Groq / Gemini · key connected" else "Add a key for AI review",
+                leading = { SettingsIcon(RawIconType.SPARK) },
+                trailing = if (userProfile.hasGroqKey) "Connected" else "Add",
+                onClick = onOpenGroqKey
+            )
+        }
+        StaggerIn(3) {
+            DomePillCard(
+                title = "AI Chatbot",
+                subtitle = "Script, design & repo assistant",
+                leading = { SettingsIcon(RawIconType.GLOBE) },
+                trailingIcon = RawIconType.CHEVRON_RIGHT,
+                onClick = onOpenChatbot
+            )
+        }
+        StaggerIn(4) {
+            DomePillCard(
+                title = "Clear cache",
+                subtitle = "Temp files: ${formatSize(cacheBytes)}",
+                leading = { SettingsIcon(RawIconType.TRASH) },
+                trailing = "Clear",
+                onClick = {
+                    scope.launch {
+                        cacheManager.clearAllTempCache()
+                        cacheBytes = runCatching { cacheManager.getTempCacheSizeBytes() }.getOrDefault(0L)
+                        toast = "Cache cleared"
                     }
-                )
-                Box(modifier = Modifier.fillMaxWidth().height(1.dp).background(RawColors.Divider))
-                SheetActionRow(
-                    icon = RawIconType.CAMERA,
-                    label = "Camera",
-                    onClick = {
-                        showPhotoMenu = false
-                        val file = cacheManager.createCameraTempFile()
-                        val uri = FileProvider.getUriForFile(context, "${context.packageName}.fileprovider", file)
-                        cameraTempUri = uri
-                        cameraLauncher.launch(uri)
-                    }
-                )
-                if (userProfile.profilePhotoPath != null) {
-                    Box(modifier = Modifier.fillMaxWidth().height(1.dp).background(RawColors.Divider))
-                    SheetActionRow(
-                        icon = RawIconType.TRASH,
-                        label = "Remove photo",
-                        tint = RawColors.ErrorCoral,
-                        onClick = {
-                            showPhotoMenu = false
-                            onUpdatePhoto(null)
-                        }
-                    )
                 }
-                Spacer(modifier = Modifier.height(22.dp))
+            )
+        }
+        StaggerIn(5) {
+            DomePillCard(
+                title = "About raw_edit",
+                subtitle = "Version 1.58.0 · offline renderer",
+                leading = { SettingsIcon(RawIconType.INFO) },
+                trailingIcon = RawIconType.CHEVRON_RIGHT,
+                onClick = { showAbout = true }
+            )
+        }
+
+        StaggerIn(6) {
+            Spacer(Modifier.height(6.dp))
+            DomeCard(tan = false) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    RawIcon(type = RawIconType.LOCK, size = 16.dp, tint = RawColors.Tan)
+                    Spacer(Modifier.width(10.dp))
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            text = "Everything stays on this phone",
+                            fontFamily = BricolageFamily,
+                            fontSize = 13.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = RawColors.Cream
+                        )
+                        DomeMuted("Renders, drafts and assets are local only.")
+                    }
+                }
             }
         }
     }
 
-    if (showAboutSheet) {
-        ModalBottomSheet(
-            onDismissRequest = { showAboutSheet = false },
-            shape = RoundedCornerShape(topStart = 32.dp, topEnd = 32.dp),
-            containerColor = RawColors.CardSurface,
-            contentColor = RawColors.TextPrimary
-        ) {
+    if (showAbout) {
+        androidx.compose.ui.window.Dialog(onDismissRequest = { showAbout = false }) {
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .verticalScroll(rememberScrollState())
-                    .padding(horizontal = 20.dp, vertical = 8.dp),
-                verticalArrangement = Arrangement.spacedBy(10.dp)
+                    .clip(RoundedCornerShape(28.dp))
+                    .background(RawColors.CardSurface)
+                    .border(1.dp, RawColors.Divider, RoundedCornerShape(28.dp))
+                    .padding(20.dp)
             ) {
-                PixelRawEditLogo(width = 42.dp, height = 33.dp)
                 Text(
                     text = "About raw_edit",
                     fontFamily = BricolageFamily,
-                    fontWeight = FontWeight.Bold,
-                    fontSize = 27.sp,
-                    letterSpacing = (-0.7).sp,
-                    color = RawColors.TextPrimary
+                    fontSize = 22.sp,
+                    fontWeight = FontWeight.ExtraBold,
+                    color = RawColors.Cream
                 )
-                Text(
-                    text = "Version ${BuildConfig.VERSION_NAME}  \u2022  offline render stage  \u2022  no ads",
-                    fontFamily = JetBrainsMonoFamily,
-                    fontWeight = FontWeight.Medium,
-                    fontSize = 13.sp,
-                    color = RawColors.TextMuted
-                )
-                Spacer(modifier = Modifier.height(4.dp))
-                Text(
-                    text = "Licenses",
-                    fontFamily = JetBrainsMonoFamily,
-                    fontWeight = FontWeight.Medium,
-                    fontSize = 13.sp,
-                    color = RawColors.TextPrimary
-                )
+                Spacer(Modifier.height(6.dp))
+                DomeMono(text = "Version 1.58.0 · offline renderer + optional AI tools", size = 11)
+                Spacer(Modifier.height(14.dp))
                 listOf(
-                    "Jetpack Compose - Apache-2.0",
-                    "Kotlin standard library - Apache-2.0",
-                    "AndroidX Media3 - Apache-2.0",
-                    "Coil image loading - Apache-2.0",
-                    "Bricolage Grotesque - SIL OFL 1.1",
-                    "JetBrains Mono - SIL OFL 1.1"
-                ).forEachIndexed { i, lic ->
-                    if (i > 0) {
-                        Box(modifier = Modifier.fillMaxWidth().height(1.dp).background(RawColors.Divider))
-                    }
-                    Text(
-                        text = lic,
-                        fontFamily = BricolageFamily,
-                        fontWeight = FontWeight.SemiBold,
-                        fontSize = 15.5.sp,
-                        color = RawColors.TextPrimary,
-                        modifier = Modifier.padding(vertical = 8.dp)
-                    )
+                    "Jetpack Compose — Apache-2.0",
+                    "Kotlin standard library — Apache-2.0",
+                    "AndroidX Media3 — Apache-2.0",
+                    "Bricolage Grotesque & JetBrains Mono — OFL 1.1"
+                ).forEach {
+                    DomeMuted(it, modifier = Modifier.padding(bottom = 4.dp))
                 }
-                Spacer(modifier = Modifier.height(6.dp))
-                BigPrimaryButton(
+                Spacer(Modifier.height(14.dp))
+                DomePillButton(
                     text = "Close",
-                    height = 56.dp,
-                    onClick = { showAboutSheet = false }
+                    kind = DomeButtonKind.Ghost,
+                    onClick = { showAbout = false }
                 )
-                Spacer(modifier = Modifier.height(20.dp))
+            }
+        }
+    }
+
+    toast?.let { message ->
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(bottom = 120.dp),
+            contentAlignment = Alignment.BottomCenter
+        ) {
+            Box(
+                modifier = Modifier
+                    .clip(CircleShape)
+                    .background(RawColors.Cream)
+                    .padding(horizontal = 16.dp, vertical = 9.dp)
+            ) {
+                Text(
+                    text = message,
+                    fontFamily = JetBrainsMonoFamily,
+                    fontSize = 11.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = RawColors.Ink
+                )
             }
         }
     }
@@ -1058,11 +393,35 @@ fun ProfileScreen(
             onConfirmCrop = { cropped ->
                 pendingCropBitmap = null
                 scope.launch {
-                    val savedPath = cacheManager.saveProfileAvatar(cropped)
-                    onUpdatePhoto(savedPath)
-                    toastMsg = "Photo updated"
+                    val path = cacheManager.saveProfileAvatar(cropped)
+                    onUpdatePhoto(path)
+                    toast = "Photo updated"
                 }
             }
         )
     }
+}
+
+@Composable
+private fun SettingsIcon(type: RawIconType) {
+    Box(
+        modifier = Modifier
+            .size(34.dp)
+            .clip(CircleShape)
+            .background(RawColors.RaisedCard),
+        contentAlignment = Alignment.Center
+    ) {
+        RawIcon(type = type, size = 16.dp, tint = RawColors.Tan, strokeWidth = 1.9.dp)
+    }
+}
+
+private fun handleFor(name: String): String {
+    val cleaned = name.trim().lowercase().replace(Regex("[^a-z0-9]+"), "_").trim('_')
+    return cleaned.ifBlank { "raw_edit" }
+}
+
+private fun formatSize(bytes: Long): String {
+    if (bytes <= 0L) return "0 MB"
+    val mb = bytes / (1024.0 * 1024.0)
+    return if (mb >= 1.0) "%.1f MB".format(mb) else "%.0f KB".format(bytes / 1024.0)
 }
