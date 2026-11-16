@@ -202,9 +202,9 @@ object LayerTimelineCompiler {
       if (!stage) return '[]';
       var proj = window.PROJECT || {};
       var totalDur = Number(proj.duration) || (window.RAW && Number(window.RAW.duration)) || 15;
-      var scenes = Array.isArray(proj.scenes) ? proj.scenes : [];
+      var raw = (window.__ensureRawContract && window.__ensureRawContract()) || window.RAW;
       var sceneEls = stage.querySelectorAll('.scene');
-      var out = [];
+      var candidates = [];
       var idx = 0;
 
       function rgbToHex(rgb) {
@@ -215,23 +215,66 @@ object LayerTimelineCompiler {
         return ('#' + hex(m[1]) + hex(m[2]) + hex(m[3])).toUpperCase();
       }
 
-      function addEl(el, sStart, sEnd) {
-        if (!el || el.nodeType !== 1) return;
-        if (el.id === 'raw-layer-overlay') return;
+      function isVisibleInStage(el) {
+        var cur = el;
+        while (cur && cur !== document.body) {
+          var cs = getComputedStyle(cur);
+          if (cs.display === 'none' || cs.visibility === 'hidden' || parseFloat(cs.opacity) <= 0.03) return false;
+          cur = cur.parentElement;
+        }
+        return true;
+      }
+
+      function collectEl(el) {
+        if (!el || el.nodeType !== 1 || el.id === 'raw-layer-overlay') return;
         var tag = (el.tagName || '').toUpperCase();
         if (tag === 'SCRIPT' || tag === 'STYLE' || tag === 'LINK') return;
         var cls = (el.className && typeof el.className === 'string') ? el.className.toLowerCase() : '';
         if (cls.indexOf('dust') !== -1 || cls.indexOf('grain') !== -1) return;
-
         var eid = el.getAttribute('data-raw-eid');
         if (!eid) {
           eid = 'dom_' + idx;
           el.setAttribute('data-raw-eid', eid);
         }
         idx++;
+        candidates.push(el);
+      }
 
+      if (sceneEls.length > 0) {
+        for (var si = 0; si < sceneEls.length; si++) {
+          var kids = sceneEls[si].children;
+          for (var ki = 0; ki < kids.length; ki++) collectEl(kids[ki]);
+        }
+      } else {
+        var topKids = stage.children;
+        for (var ti = 0; ti < topKids.length; ti++) collectEl(topKids[ti]);
+      }
+
+      // Sample RAW.seek(t) across the whole duration to measure exact [startSec, endSec] for each element
+      var windows = candidates.map(function() { return { start: null, end: null }; });
+      if (raw && typeof raw.seek === 'function') {
+        var step = Math.max(0.15, totalDur / 120);
+        for (var t = 0; t <= totalDur + 0.001; t += step) {
+          var clampedT = Math.min(t, totalDur);
+          try { raw.seek(clampedT); } catch (_) {}
+          for (var ci = 0; ci < candidates.length; ci++) {
+            if (isVisibleInStage(candidates[ci])) {
+              if (windows[ci].start === null) windows[ci].start = clampedT;
+              windows[ci].end = clampedT;
+            }
+          }
+        }
+        try { raw.seek(0); } catch (_) {}
+      }
+
+      var out = [];
+      for (var i = 0; i < candidates.length; i++) {
+        var el = candidates[i];
+        var eid = el.getAttribute('data-raw-eid');
         var cs = getComputedStyle(el);
         var txt = (el.innerText || el.textContent || '').trim().replace(/\s+/g, ' ');
+        var tag = (el.tagName || '').toUpperCase();
+        var cls = (el.className && typeof el.className === 'string') ? el.className.toLowerCase() : '';
         var type = 'shape';
         if (tag === 'VIDEO') type = 'video';
         else if (tag === 'IMG') type = 'image';
@@ -244,38 +287,23 @@ object LayerTimelineCompiler {
         else if (type === 'image') label = 'Image: ' + (el.getAttribute('src') || 'img').split('/').pop();
         else label = (txt ? txt.slice(0, 20) : (cls.split(' ')[0] || tag.toLowerCase()));
 
+        var st = windows[i].start !== null ? windows[i].start : 0;
+        var en = windows[i].end !== null ? Math.min(totalDur, windows[i].end + 0.18) : totalDur;
+        if (en <= st) en = Math.min(totalDur, st + 0.5);
+
         out.push({
           eid: eid,
           type: type,
-          name: label || ('Element ' + idx),
-          startSec: sStart,
-          endSec: sEnd,
+          name: label || ('Element ' + (i + 1)),
+          startSec: Number(st.toFixed(2)),
+          endSec: Number(en.toFixed(2)),
           text: txt.slice(0, 200),
           fontSize: parseFloat(cs.fontSize) || 48,
           colorHex: rgbToHex(cs.color) || '#1A1A1E',
           bgColorHex: rgbToHex(cs.backgroundColor) || '#C89F72'
         });
       }
-
-      if (sceneEls.length > 0) {
-        for (var si = 0; si < sceneEls.length; si++) {
-          var scEl = sceneEls[si];
-          var scMeta = scenes[si] || {};
-          var st = Number(scMeta.start);
-          var en = Number(scMeta.end);
-          if (!Number.isFinite(st)) st = (si * totalDur) / sceneEls.length;
-          if (!Number.isFinite(en) || en <= st) en = ((si + 1) * totalDur) / sceneEls.length;
-          var kids = scEl.children;
-          for (var ki = 0; ki < kids.length; ki++) {
-            addEl(kids[ki], st, en);
-          }
-        }
-      } else {
-        var topKids = stage.children;
-        for (var ti = 0; ti < topKids.length; ti++) {
-          addEl(topKids[ti], 0, totalDur);
-        }
-      }
+      out.sort(function(a, b) { return a.startSec - b.startSec; });
       return JSON.stringify(out.slice(0, 48));
     })();
     """

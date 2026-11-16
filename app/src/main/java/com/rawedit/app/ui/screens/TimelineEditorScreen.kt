@@ -30,6 +30,7 @@ import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -172,6 +173,8 @@ fun TimelineEditorScreen(
                 if (extracted.isNotEmpty()) {
                     val customOnly = layers.filter { it.domEid.isBlank() }
                     layers = extracted + customOnly
+                    val tStr = String.format(Locale.US, "%.3f", currentTimeSec)
+                    wv.evaluateJavascript("(function(){ var r=(window.__ensureRawContract&&window.__ensureRawContract())||window.RAW; if(r&&typeof r.seek==='function'){ r.seek($tStr); } })()", null)
                 }
             }
         }
@@ -252,6 +255,7 @@ fun TimelineEditorScreen(
     val pxPerSec = 52.dp
     val pxPerSecFloat = with(density) { pxPerSec.toPx() }
     val timelineScroll = rememberScrollState()
+    val trackListState = rememberLazyListState()
     val scope = rememberCoroutineScope()
     var programmaticScroll by remember { mutableStateOf(false) }
 
@@ -272,6 +276,15 @@ fun TimelineEditorScreen(
             programmaticScroll = true
             timelineScroll.scrollTo((currentTimeSec * pxPerSecFloat).roundToInt())
             programmaticScroll = false
+        }
+        if (selectedLayerId == null && layers.isNotEmpty()) {
+            val activeIdx = layers.indexOfFirst { currentTimeSec in it.startSec..it.endSec }
+            if (activeIdx >= 0) {
+                val visible = trackListState.layoutInfo.visibleItemsInfo.map { it.index }
+                if (activeIdx !in visible) {
+                    runCatching { trackListState.animateScrollToItem(activeIdx) }
+                }
+            }
         }
     }
 
@@ -546,6 +559,7 @@ fun TimelineEditorScreen(
                             }
 
                             LazyColumn(
+                                state = trackListState,
                                 modifier = Modifier.fillMaxSize(),
                                 contentPadding = PaddingValues(vertical = 2.dp)
                             ) {
