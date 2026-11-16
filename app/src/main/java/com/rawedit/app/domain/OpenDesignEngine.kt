@@ -2,6 +2,8 @@ package com.rawedit.app.domain
 
 import android.annotation.SuppressLint
 import android.content.Context
+import android.content.res.Configuration
+import android.util.DisplayMetrics
 import android.graphics.Bitmap
 import android.graphics.Canvas
 import android.view.View
@@ -62,11 +64,17 @@ object OpenDesignEngine {
             val ready = CompletableDeferred<Unit>()
             var wv: WebView? = null
             withContext(Dispatchers.Main) {
-                val webView = WebView(context)
+                val config = Configuration(context.resources.configuration).apply {
+                    densityDpi = DisplayMetrics.DENSITY_DEFAULT
+                    fontScale = 1.0f
+                }
+                val ctx160 = context.createConfigurationContext(config)
+                val webView = WebView(ctx160)
                 wv = webView
                 server.configureSandboxedWebView(webView) {
                     if (!ready.isCompleted) ready.complete(Unit)
                 }
+                webView.setInitialScale(100)
                 webView.measure(
                     View.MeasureSpec.makeMeasureSpec(safeW, View.MeasureSpec.EXACTLY),
                     View.MeasureSpec.makeMeasureSpec(safeH, View.MeasureSpec.EXACTLY)

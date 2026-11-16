@@ -27,6 +27,7 @@ import android.webkit.CookieManager
 import android.webkit.WebResourceRequest
 import androidx.activity.result.PickVisualMediaRequest
 import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.mutableIntStateOf
 import com.rawedit.app.domain.ChatbotBackgroundManager
 import android.webkit.WebChromeClient
@@ -79,6 +80,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -181,12 +183,13 @@ fun RawChatbotScreen(
 
     var sessions by remember { mutableStateOf(ChatbotEngine.listChatSessions(cacheManager)) }
     var currentSessionId by remember {
-        mutableStateOf(sessions.firstOrNull()?.id ?: "chat_${System.currentTimeMillis()}")
+        mutableStateOf("chat_${System.currentTimeMillis()}")
     }
     var activeMode by remember { mutableStateOf(ChatbotMode.RAW_DESIGN) }
     var designType by remember { mutableStateOf(OpenDesignDeliverableType.IMAGE) }
     var designAspect by remember { mutableStateOf(AspectPreset.ALL_PRESETS[3]) }
     var designUsePalette by remember { mutableStateOf(true) }
+    var showModeSettings by remember { mutableStateOf(true) }
     var showHistoryDialog by remember { mutableStateOf(false) }
     var viewingFile by remember { mutableStateOf<File?>(null) }
     var selectingText by remember { mutableStateOf<String?>(null) }
@@ -229,10 +232,13 @@ fun RawChatbotScreen(
         }
     }
 
-    LaunchedEffect(messages.size) {
+    LaunchedEffect(currentSessionId, messages.size) {
         if (messages.isNotEmpty()) {
-            runCatching { listState.animateScrollToItem(messages.lastIndex) }
+            runCatching { listState.scrollToItem(messages.lastIndex) }
         }
+    }
+    val showScrollToBottom by remember {
+        derivedStateOf { listState.canScrollForward }
     }
 
     fun startNewChat() {
@@ -405,35 +411,70 @@ fun RawChatbotScreen(
                 }
             }
 
-            // Mode Tabs: RAW Design | RAW Script | RAW Assistant
+            // Mode Tabs: RAW Design | RAW Script | RAW Assistant + Settings Toggle
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(horizontal = 18.dp, vertical = 4.dp)
-                    .clip(CircleShape)
-                    .background(RawColors.CardSurface)
-                    .padding(4.dp),
-                horizontalArrangement = Arrangement.spacedBy(4.dp)
+                    .padding(horizontal = 16.dp, vertical = 4.dp),
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                verticalAlignment = Alignment.CenterVertically
             ) {
-                ChatbotMode.entries.forEach { m ->
-                    val sel = activeMode == m
-                    Surface(
-                        onClick = { activeMode = m },
-                        shape = CircleShape,
-                        color = if (sel) RawColors.Tan else Color.Transparent,
-                        modifier = Modifier.weight(1f)
-                    ) {
-                        Text(
-                            text = m.label,
-                            fontFamily = BricolageFamily,
-                            fontWeight = FontWeight.Bold,
-                            fontSize = 12.sp,
-                            color = if (sel) RawColors.Ink else RawColors.TextMuted,
-                            textAlign = TextAlign.Center,
-                            maxLines = 1,
-                            modifier = Modifier.padding(vertical = 8.dp)
-                        )
+                Row(
+                    modifier = Modifier
+                        .weight(1f)
+                        .clip(CircleShape)
+                        .background(RawColors.CardSurface)
+                        .padding(4.dp),
+                    horizontalArrangement = Arrangement.spacedBy(4.dp)
+                ) {
+                    ChatbotMode.entries.forEach { m ->
+                        val sel = activeMode == m
+                        Box(
+                            modifier = Modifier
+                                .weight(1f)
+                                .clip(CircleShape)
+                                .background(if (sel) RawColors.Tan else Color.Transparent)
+                                .clickable {
+                                    if (activeMode != m) {
+                                        activeMode = m
+                                        if (!sending) {
+                                            currentSessionId = "chat_${System.currentTimeMillis()}"
+                                            messages = emptyList()
+                                            pendingAttachment = null
+                                            inputText = ""
+                                        }
+                                    }
+                                }
+                                .padding(vertical = 8.dp),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Text(
+                                text = m.label,
+                                fontFamily = BricolageFamily,
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 11.5.sp,
+                                color = if (sel) RawColors.Ink else RawColors.TextMuted,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                        }
                     }
+                }
+                Box(
+                    modifier = Modifier
+                        .clip(CircleShape)
+                        .background(if (showModeSettings) RawColors.AccentSoft else RawColors.CardSurface)
+                        .border(1.dp, if (showModeSettings) RawColors.Tan else RawColors.Divider, CircleShape)
+                        .clickable { showModeSettings = !showModeSettings }
+                        .padding(horizontal = 11.dp, vertical = 8.dp)
+                ) {
+                    Text(
+                        text = if (showModeSettings) "Hide" else "Tools",
+                        fontFamily = JetBrainsMonoFamily,
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 10.5.sp,
+                        color = if (showModeSettings) RawColors.Tan else RawColors.TextMuted
+                    )
                 }
             }
 
@@ -595,6 +636,30 @@ fun RawChatbotScreen(
                             }
                         }
                     }
+
+                    if (showScrollToBottom) {
+                        Box(
+                            modifier = Modifier
+                                .align(Alignment.BottomEnd)
+                                .padding(end = 16.dp, bottom = 12.dp)
+                                .clip(CircleShape)
+                                .background(RawColors.Tan)
+                                .clickable {
+                                    scope.launch {
+                                        if (messages.isNotEmpty()) listState.animateScrollToItem(messages.lastIndex)
+                                    }
+                                }
+                                .padding(horizontal = 13.dp, vertical = 8.dp)
+                        ) {
+                            Text(
+                                text = "↓ Bottom",
+                                fontFamily = JetBrainsMonoFamily,
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 11.sp,
+                                color = RawColors.Ink
+                            )
+                        }
+                    }
                 }
             }
 
@@ -675,87 +740,156 @@ fun RawChatbotScreen(
                 }
             }
 
-            if (activeMode == ChatbotMode.RAW_DESIGN) {
-                Column(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = 16.dp, vertical = 4.dp),
-                    verticalArrangement = Arrangement.spacedBy(6.dp)
-                ) {
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .horizontalScroll(rememberScrollState()),
-                        horizontalArrangement = Arrangement.spacedBy(6.dp)
-                    ) {
-                        OpenDesignDeliverableType.entries.forEach { t ->
-                            val sel = designType == t
-                            Surface(
-                                onClick = { designType = t },
-                                shape = CircleShape,
-                                color = if (sel) RawColors.Tan else RawColors.CardSurface
-                            ) {
-                                Text(
-                                    text = t.label,
-                                    fontFamily = BricolageFamily,
-                                    fontWeight = FontWeight.Bold,
-                                    fontSize = 11.sp,
-                                    color = if (sel) RawColors.Ink else RawColors.Cream,
-                                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp)
-                                )
-                            }
-                        }
-                        Surface(
-                            onClick = onOpenDesignStudio,
-                            shape = CircleShape,
-                            color = RawColors.AccentSoft
+            if (showModeSettings) {
+                when (activeMode) {
+                    ChatbotMode.RAW_DESIGN -> {
+                        Column(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(vertical = 4.dp),
+                            verticalArrangement = Arrangement.spacedBy(6.dp)
                         ) {
-                            Text(
-                                text = "Manual Studio",
-                                fontFamily = JetBrainsMonoFamily,
-                                fontWeight = FontWeight.Bold,
-                                fontSize = 10.5.sp,
-                                color = RawColors.Tan,
-                                modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp)
-                            )
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .horizontalScroll(rememberScrollState()),
+                                horizontalArrangement = Arrangement.spacedBy(6.dp)
+                            ) {
+                                Spacer(modifier = Modifier.width(12.dp))
+                                OpenDesignDeliverableType.entries.forEach { t ->
+                                    val sel = designType == t
+                                    Box(
+                                        modifier = Modifier
+                                            .clip(CircleShape)
+                                            .background(if (sel) RawColors.Tan else RawColors.CardSurface)
+                                            .clickable { designType = t }
+                                            .padding(horizontal = 11.dp, vertical = 6.dp)
+                                    ) {
+                                        Text(
+                                            text = t.label,
+                                            fontFamily = BricolageFamily,
+                                            fontWeight = FontWeight.Bold,
+                                            fontSize = 11.sp,
+                                            color = if (sel) RawColors.Ink else RawColors.Cream,
+                                            maxLines = 1
+                                        )
+                                    }
+                                }
+                                Box(
+                                    modifier = Modifier
+                                        .clip(CircleShape)
+                                        .background(RawColors.AccentSoft)
+                                        .clickable { onOpenDesignStudio() }
+                                        .padding(horizontal = 11.dp, vertical = 6.dp)
+                                ) {
+                                    Text(
+                                        text = "Manual Studio",
+                                        fontFamily = JetBrainsMonoFamily,
+                                        fontWeight = FontWeight.Bold,
+                                        fontSize = 10.5.sp,
+                                        color = RawColors.Tan,
+                                        maxLines = 1
+                                    )
+                                }
+                                Spacer(modifier = Modifier.width(12.dp))
+                            }
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .horizontalScroll(rememberScrollState()),
+                                horizontalArrangement = Arrangement.spacedBy(6.dp)
+                            ) {
+                                Spacer(modifier = Modifier.width(12.dp))
+                                AspectPreset.ALL_PRESETS.take(5).forEach { ap ->
+                                    val sel = designAspect.id == ap.id
+                                    Box(
+                                        modifier = Modifier
+                                            .clip(CircleShape)
+                                            .background(if (sel) RawColors.Cream else RawColors.RaisedCard)
+                                            .clickable { designAspect = ap }
+                                            .padding(horizontal = 11.dp, vertical = 5.dp)
+                                    ) {
+                                        Text(
+                                            text = ap.label,
+                                            fontFamily = JetBrainsMonoFamily,
+                                            fontWeight = FontWeight.Bold,
+                                            fontSize = 10.5.sp,
+                                            color = if (sel) RawColors.Ink else RawColors.TextPrimary,
+                                            maxLines = 1
+                                        )
+                                    }
+                                }
+                                Box(
+                                    modifier = Modifier
+                                        .clip(CircleShape)
+                                        .background(if (designUsePalette) RawColors.AccentSoft else RawColors.RaisedCard)
+                                        .clickable { designUsePalette = !designUsePalette }
+                                        .padding(horizontal = 11.dp, vertical = 5.dp)
+                                ) {
+                                    Text(
+                                        text = if (designUsePalette) "Palette: Studio" else "Palette: Custom",
+                                        fontFamily = JetBrainsMonoFamily,
+                                        fontWeight = FontWeight.Bold,
+                                        fontSize = 10.5.sp,
+                                        color = if (designUsePalette) RawColors.Tan else RawColors.TextMuted,
+                                        maxLines = 1
+                                    )
+                                }
+                                Spacer(modifier = Modifier.width(12.dp))
+                            }
                         }
                     }
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .horizontalScroll(rememberScrollState()),
-                        horizontalArrangement = Arrangement.spacedBy(6.dp)
-                    ) {
-                        AspectPreset.ALL_PRESETS.take(5).forEach { ap ->
-                            val sel = designAspect.id == ap.id
-                            Surface(
-                                onClick = { designAspect = ap },
-                                shape = CircleShape,
-                                color = if (sel) RawColors.Cream else RawColors.RaisedCard
-                            ) {
-                                Text(
-                                    text = ap.label,
-                                    fontFamily = JetBrainsMonoFamily,
-                                    fontWeight = FontWeight.Bold,
-                                    fontSize = 10.5.sp,
-                                    color = if (sel) RawColors.Ink else RawColors.TextPrimary,
-                                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp)
-                                )
-                            }
-                        }
-                        Surface(
-                            onClick = { designUsePalette = !designUsePalette },
-                            shape = CircleShape,
-                            color = if (designUsePalette) RawColors.AccentSoft else RawColors.RaisedCard
+                    ChatbotMode.RAW_SCRIPT -> {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .horizontalScroll(rememberScrollState())
+                                .padding(vertical = 4.dp),
+                            horizontalArrangement = Arrangement.spacedBy(6.dp)
                         ) {
-                            Text(
-                                text = if (designUsePalette) "Palette: Studio" else "Palette: Custom",
-                                fontFamily = JetBrainsMonoFamily,
-                                fontWeight = FontWeight.Bold,
-                                fontSize = 10.5.sp,
-                                color = if (designUsePalette) RawColors.Tan else RawColors.TextMuted,
-                                modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp)
-                            )
+                            Spacer(modifier = Modifier.width(12.dp))
+                            listOf(
+                                "Hinglish Hook" to "Write 3 scroll-stopping Hinglish hooks for my active script",
+                                "H-V-P-A Script" to "Write a 60-word Hinglish reel script using H-V-P-A",
+                                "Save as .txt" to "Export my active script as a clean downloadable .txt file"
+                            ).forEach { (lbl, pr) ->
+                                Box(
+                                    modifier = Modifier
+                                        .clip(CircleShape)
+                                        .background(RawColors.CardSurface)
+                                        .clickable { sendMessage(pr) }
+                                        .padding(horizontal = 11.dp, vertical = 6.dp)
+                                ) {
+                                    Text(lbl, fontFamily = JetBrainsMonoFamily, fontWeight = FontWeight.Bold, fontSize = 10.5.sp, color = RawColors.Tan)
+                                }
+                            }
+                            Spacer(modifier = Modifier.width(12.dp))
+                        }
+                    }
+                    ChatbotMode.RAW_ASSISTANT -> {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .horizontalScroll(rememberScrollState())
+                                .padding(vertical = 4.dp),
+                            horizontalArrangement = Arrangement.spacedBy(6.dp)
+                        ) {
+                            Spacer(modifier = Modifier.width(12.dp))
+                            listOf(
+                                "IG Browser" to { showInAppBrowser = true },
+                                "Attach Media" to { showAttachChooser = true }
+                            ).forEach { (lbl, act) ->
+                                Box(
+                                    modifier = Modifier
+                                        .clip(CircleShape)
+                                        .background(RawColors.CardSurface)
+                                        .clickable { act() }
+                                        .padding(horizontal = 11.dp, vertical = 6.dp)
+                                ) {
+                                    Text(lbl, fontFamily = JetBrainsMonoFamily, fontWeight = FontWeight.Bold, fontSize = 10.5.sp, color = RawColors.Cream)
+                                }
+                            }
+                            Spacer(modifier = Modifier.width(12.dp))
                         }
                     }
                 }
@@ -1219,6 +1353,12 @@ private fun ChatBubbleRow(
     onOpenAsMotionProject: (String, String) -> Unit = { _, _ -> },
     onPreviewWebsite: (String) -> Unit
 ) {
+    val latestCopy by rememberUpdatedState(onCopyFull)
+    val latestSelect by rememberUpdatedState(onSelectText)
+    val latestView by rememberUpdatedState(onViewFile)
+    val latestSave by rememberUpdatedState(onSaveFile)
+    val latestMotion by rememberUpdatedState(onOpenAsMotionProject)
+    val latestPreview by rememberUpdatedState(onPreviewWebsite)
     val isUser = msg.role == "user"
     Column(
         modifier = Modifier.fillMaxWidth(),
@@ -1327,21 +1467,25 @@ private fun ChatBubbleRow(
                         .data(File(msg.generatedImagePath))
                         .build(),
                     contentDescription = "Generated OpenDesign image",
-                    contentScale = ContentScale.FillWidth,
+                    contentScale = ContentScale.Fit,
                     modifier = Modifier
                         .fillMaxWidth()
+                        .heightIn(max = 260.dp)
                         .clip(RoundedCornerShape(14.dp))
+                        .background(RawColors.BgPrimary)
                         .border(1.dp, RawColors.Divider, RoundedCornerShape(14.dp))
-                        .clickable { onViewFile(msg.generatedImagePath) }
+                        .clickable { latestView(msg.generatedImagePath) }
                 )
             }
 
             if (effectivePreviewPath.isNotBlank()) {
-                Surface(
-                    onClick = { onPreviewWebsite(effectivePreviewPath) },
-                    shape = RoundedCornerShape(14.dp),
-                    color = RawColors.Tan,
-                    modifier = Modifier.fillMaxWidth()
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .heightIn(min = 42.dp)
+                        .clip(RoundedCornerShape(14.dp))
+                        .background(RawColors.Tan)
+                        .clickable { latestPreview(effectivePreviewPath) }
                 ) {
                     Row(
                         modifier = Modifier
@@ -1368,7 +1512,7 @@ private fun ChatBubbleRow(
                 }
                 if (!isUser && msg.openDesignType == "motion") {
                     Surface(
-                        onClick = { onOpenAsMotionProject(effectivePreviewPath, msg.openDesignAspectId.ifBlank { "16:9" }) },
+                        onClick = { latestMotion(effectivePreviewPath, msg.openDesignAspectId.ifBlank { "16:9" }) },
                         shape = RoundedCornerShape(12.dp),
                         color = RawColors.AccentSoft,
                         modifier = Modifier.fillMaxWidth()
@@ -1415,7 +1559,7 @@ private fun ChatBubbleRow(
                     Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                         if (!msg.generatedFileName.endsWith(".pdf", true)) {
                             Surface(
-                                onClick = { onViewFile(msg.generatedFilePath) },
+                                onClick = { latestView(msg.generatedFilePath) },
                                 shape = CircleShape,
                                 color = RawColors.CardSurface
                             ) {
@@ -1430,7 +1574,7 @@ private fun ChatBubbleRow(
                             }
                         }
                         Surface(
-                            onClick = { onSaveFile(msg.generatedFilePath, msg.generatedFileName) },
+                            onClick = { latestSave(msg.generatedFilePath, msg.generatedFileName) },
                             shape = CircleShape,
                             color = RawColors.AccentSoft
                         ) {
@@ -1452,46 +1596,45 @@ private fun ChatBubbleRow(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.End)
             ) {
-                Surface(
-                    onClick = onSelectText,
-                    shape = CircleShape,
-                    color = if (isUser) Color.Black.copy(alpha = 0.14f) else RawColors.RaisedCard
+                Box(
+                    modifier = Modifier
+                        .heightIn(min = 36.dp)
+                        .clip(CircleShape)
+                        .background(if (isUser) Color.Black.copy(alpha = 0.14f) else RawColors.RaisedCard)
+                        .clickable { latestSelect() }
+                        .padding(horizontal = 14.dp, vertical = 8.dp),
+                    contentAlignment = Alignment.Center
                 ) {
-                    Box(
-                        modifier = Modifier.padding(horizontal = 14.dp, vertical = 9.dp)
-                    ) {
-                        Text(
-                            text = "Select",
-                            fontFamily = JetBrainsMonoFamily,
-                            fontWeight = FontWeight.Bold,
-                            fontSize = 11.5.sp,
-                            color = if (isUser) RawColors.Ink else RawColors.TextPrimary
-                        )
-                    }
+                    Text(
+                        text = "Select",
+                        fontFamily = JetBrainsMonoFamily,
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 11.5.sp,
+                        color = if (isUser) RawColors.Ink else RawColors.TextPrimary
+                    )
                 }
-                Surface(
-                    onClick = onCopyFull,
-                    shape = CircleShape,
-                    color = if (isUser) Color.Black.copy(alpha = 0.14f) else RawColors.RaisedCard
+                Row(
+                    modifier = Modifier
+                        .heightIn(min = 36.dp)
+                        .clip(CircleShape)
+                        .background(if (isUser) Color.Black.copy(alpha = 0.14f) else RawColors.RaisedCard)
+                        .clickable { latestCopy() }
+                        .padding(horizontal = 14.dp, vertical = 8.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(5.dp)
                 ) {
-                    Row(
-                        modifier = Modifier.padding(horizontal = 14.dp, vertical = 9.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(5.dp)
-                    ) {
-                        RawIcon(
-                            type = RawIconType.COPY,
-                            size = 12.dp,
-                            tint = if (isUser) RawColors.Ink else RawColors.Tan
-                        )
-                        Text(
-                            text = "Copy",
-                            fontFamily = JetBrainsMonoFamily,
-                            fontWeight = FontWeight.Bold,
-                            fontSize = 11.5.sp,
-                            color = if (isUser) RawColors.Ink else RawColors.TextPrimary
-                        )
-                    }
+                    RawIcon(
+                        type = RawIconType.COPY,
+                        size = 12.dp,
+                        tint = if (isUser) RawColors.Ink else RawColors.Tan
+                    )
+                    Text(
+                        text = "Copy",
+                        fontFamily = JetBrainsMonoFamily,
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 11.5.sp,
+                        color = if (isUser) RawColors.Ink else RawColors.TextPrimary
+                    )
                 }
             }
         }
@@ -1728,8 +1871,8 @@ private fun ChatFileViewerDialog(
                         AsyncImage(
                             model = ImageRequest.Builder(LocalContext.current).data(file).build(),
                             contentDescription = file.name,
-                            contentScale = ContentScale.FillWidth,
-                            modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(14.dp))
+                            contentScale = ContentScale.Fit,
+                            modifier = Modifier.fillMaxSize().clip(RoundedCornerShape(14.dp))
                         )
                     } else if (file.extension.lowercase() in setOf("md", "skill")) {
                         RichFormattedMessage(text = content)

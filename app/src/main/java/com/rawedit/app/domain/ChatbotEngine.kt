@@ -35,7 +35,7 @@ data class ChatSessionMeta(
 )
 
 data class ChatMessageItem(
-    val id: String = "msg_${System.currentTimeMillis()}_${(100..999).random()}",
+    val id: String = "msg_${System.currentTimeMillis()}_${java.util.UUID.randomUUID().toString().take(6)}",
     val role: String, // "user" or "assistant"
     val text: String,
     val attachmentName: String = "",
