@@ -302,53 +302,7 @@ fun CreateHubScreen(
                         highlightLastWord = true,
                         modifier = Modifier.weight(1f)
                     )
-                    Spacer(modifier = Modifier.width(12.dp))
-                    RawPixelMascot(
-                        kind = PixelMascotKind.PHANTOM_BUDDY,
-                        size = 50.dp
-                    )
-                }
-            }
 
-            // Warm Tan line-art stage banner (.ban, 30dp borderless)
-            item {
-                Box(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(132.dp)
-                        .clip(RoundedCornerShape(30.dp))
-                        .background(RawColors.CardSurface)
-                ) {
-                    HubBannerLineArt(modifier = Modifier.fillMaxSize())
-
-                    RawPixelMascot(
-                        kind = PixelMascotKind.TV_BOT,
-                        size = 44.dp,
-                        modifier = Modifier
-                            .align(Alignment.BottomStart)
-                            .padding(start = 12.dp, bottom = 8.dp)
-                    )
-                    RawPixelMascot(
-                        kind = PixelMascotKind.LENS_BOT,
-                        size = 44.dp,
-                        modifier = Modifier
-                            .align(Alignment.BottomEnd)
-                            .padding(end = 14.dp, bottom = 6.dp)
-                    )
-                    PixelSparkle(
-                        size = 12.dp,
-                        tint = RawColors.Tan,
-                        phaseOffsetMs = 260,
-                        modifier = Modifier
-                            .align(Alignment.TopEnd)
-                            .padding(top = 12.dp, end = 64.dp)
-                    )
-                    PixelTypeMarqueeBadge(
-                        size = 24.dp,
-                        modifier = Modifier
-                            .align(Alignment.TopEnd)
-                            .padding(top = 10.dp, end = 16.dp)
-                    )
                 }
             }
 

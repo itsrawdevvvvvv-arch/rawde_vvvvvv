@@ -365,6 +365,7 @@ private fun MainAuthenticatedHost(
                         ) { tab ->
                             when (tab) {
                                 MainTab.HOME -> {
+                                    val recentDraft = projects.firstOrNull { it.state == ProjectEntity.STATE_IN_PROGRESS }
                                     HomeScreen(
                                         userProfile = userProfile,
                                         reelsCount = videos.size,
@@ -383,7 +384,11 @@ private fun MainAuthenticatedHost(
                                         },
                                         onOpenChatbot = {
                                             pushRoute(AppRoute.Chatbot(projects.firstOrNull()?.id))
-                                        }
+                                        },
+                                        onOpenPalette = { switchTab(MainTab.PALETTE) },
+                                        onOpenOpenDesign = { pushRoute(AppRoute.OpenDesign) },
+                                        onOpenReels = { switchTab(MainTab.REELS) },
+                                        recentDraftDurationSec = recentDraft?.audioDurationSec ?: 0.0
                                     )
                                 }
 
@@ -444,19 +449,7 @@ private fun MainAuthenticatedHost(
                             }
                         }
 
-                        val domeSpeech = when (currentTab) {
-                            MainTab.HOME -> "Voice in, reel out"
-                            MainTab.PALETTE -> "Tap Next for fresh vibes"
-                            MainTab.CREATE -> "Pick a reel level"
-                            MainTab.REELS -> "Swipe through your reels"
-                            MainTab.PROFILE -> "Creator ID & settings"
-                        }
-                        CuteDomeCharacter(
-                            speechText = domeSpeech,
-                            visible = true,
-                            isHappyState = currentTab == MainTab.HOME,
-                            modifier = Modifier.align(Alignment.BottomCenter)
-                        )
+
                         RawBottomNavBar(
                             currentTab = currentTab,
                             onSelectTab = ::switchTab,
@@ -854,6 +847,33 @@ private fun MainAuthenticatedHost(
                 }
             }
         }
+
+        val showDome = currentRoute !is AppRoute.Chatbot && currentRoute !is AppRoute.TimelineEditor
+        val domeSpeech = when (currentRoute) {
+            AppRoute.Tabs -> when (currentTab) {
+                MainTab.HOME -> "Voice in, reel out"
+                MainTab.PALETTE -> "Tap Next for fresh vibes"
+                MainTab.CREATE -> "Pick a reel level"
+                MainTab.REELS -> "Swipe through your reels"
+                MainTab.PROFILE -> "Creator ID & settings"
+            }
+            is AppRoute.CreateHub -> "Pick any aspect ratio!"
+            is AppRoute.AddVoice -> "1-word SRT generator"
+            is AppRoute.AssetLocker -> "Custom .ttf/.otf & clips"
+            is AppRoute.CopyPrompt -> "Style Pack bundled"
+            is AppRoute.CodePaste -> "HTML syntax validated"
+            is AppRoute.KeyframeSheet -> "Inspect frames before render"
+            AppRoute.OpenDesign -> "Poster · Motion · Deck · UI"
+            is AppRoute.Rendering -> "1080p hardware capture"
+            is AppRoute.Result -> "Reel ready to share!"
+            is AppRoute.Chatbot, is AppRoute.TimelineEditor -> ""
+        }
+        CuteDomeCharacter(
+            speechText = domeSpeech,
+            visible = showDome,
+            isHappyState = (currentRoute == AppRoute.Tabs && currentTab == MainTab.HOME) || currentRoute is AppRoute.Result,
+            modifier = Modifier.align(Alignment.BottomCenter)
+        )
 
         RawToastBanner(
             message = hostToastMsg,
