@@ -1,8 +1,10 @@
 package com.rawedit.app.ui.screens
 
 import android.annotation.SuppressLint
+import android.graphics.Color as AndroidColor
 import android.view.ViewGroup
 import android.webkit.WebView
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -14,7 +16,6 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
@@ -34,8 +35,6 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
-import androidx.compose.material3.Slider
-import androidx.compose.material3.SliderDefaults
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -50,6 +49,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.clipToBounds
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
@@ -77,9 +77,15 @@ import com.rawedit.app.ui.theme.BricolageFamily
 import com.rawedit.app.ui.theme.JetBrainsMonoFamily
 import com.rawedit.app.ui.theme.RawColors
 import kotlinx.coroutines.delay
+import org.json.JSONArray
 import java.util.Locale
 import kotlin.math.abs
 import kotlin.math.roundToInt
+
+private val STUDIO_SWATCHES = listOf(
+    "#F3EFE6", "#111114", "#C89F72", "#FFFFFF",
+    "#E53E3E", "#3182CE", "#38A169", "#D69E2E", "#805AD5"
+)
 
 @SuppressLint("SetJavaScriptEnabled")
 @Composable
@@ -103,19 +109,8 @@ fun TimelineEditorScreen(
         maxOf(project.audioDurationSec, project.codeDurationSec, 15.0)
     }
 
-    val initialLayers = remember(project.id, project.layersJson, hasBaseHtml) {
-        val decoded = LayerTimelineCodec.decode(project.layersJson)
-        if (decoded.isNotEmpty() || hasBaseHtml) decoded else listOf(
-            TimelineLayer(
-                type = TimelineLayerType.TEXT,
-                name = "It's Rawdev",
-                startSec = 0.0,
-                endSec = minOf(6.0, totalDurationSec),
-                text = "It's Rawdev",
-                fontSize = 84f,
-                colorHex = "#F3EFE6"
-            )
-        )
+    val initialLayers = remember(project.id, project.layersJson) {
+        LayerTimelineCodec.decode(project.layersJson)
     }
 
     var layers by remember { mutableStateOf(initialLayers) }
@@ -124,6 +119,7 @@ fun TimelineEditorScreen(
     var isPlaying by remember { mutableStateOf(false) }
     var showMediaPicker by remember { mutableStateOf(false) }
     var editingTextLayer by remember { mutableStateOf<TimelineLayer?>(null) }
+    var editingHexLayer by remember { mutableStateOf<TimelineLayer?>(null) }
     var previewWebView by remember { mutableStateOf<WebView?>(null) }
     var webPageReady by remember { mutableStateOf(false) }
 
@@ -142,15 +138,38 @@ fun TimelineEditorScreen(
         }
     }
 
-    // Reload WebView when layer list structure changes, and seek smoothly when time or transform changes
-    val structuralKey = remember(layers.map { "${it.id}:${it.visible}:${it.text}:${it.fontSize}:${it.startSec}:${it.endSec}" }, baseHtml) {
-        layers.joinToString("|") { "${it.id}:${it.visible}:${it.text}:${it.fontSize}:${it.startSec}:${it.endSec}" } + baseHtml.length
-    }
-
-    LaunchedEffect(structuralKey) {
-        previewWebView?.let { wv ->
-            webPageReady = false
-            wv.loadUrl(LocalAssetServer.ENTRY_URL)
+    fun extractHtmlLayersFromWebView(wv: WebView, forceReplace: Boolean = false) {
+        if (!hasBaseHtml) return
+        if (!forceReplace && layers.any { it.domEid.isNotBlank() }) return
+        wv.evaluateJavascript(LayerTimelineCompiler.EXTRACT_DOM_ELEMENTS_JS) { rawJson ->
+            val clean = rawJson?.trim()?.removeSurrounding("\"")
+                ?.replace("\\\"", "\"")
+                ?.replace("\\\\", "\\")
+                .orEmpty()
+            runCatching {
+                val arr = JSONArray(clean)
+                val extracted = (0 until arr.length()).mapNotNull { i ->
+                    val o = arr.optJSONObject(i) ?: return@mapNotNull null
+                    val eid = o.optString("eid")
+                    if (eid.isBlank()) return@mapNotNull null
+                    TimelineLayer(
+                        id = "dom_$eid",
+                        type = TimelineLayerType.fromId(o.optString("type", "shape")),
+                        name = o.optString("name", "Element ${i + 1}"),
+                        startSec = o.optDouble("startSec", 0.0).coerceIn(0.0, totalDurationSec),
+                        endSec = o.optDouble("endSec", totalDurationSec).coerceIn(0.2, totalDurationSec),
+                        text = o.optString("text", ""),
+                        fontSize = o.optDouble("fontSize", 48.0).toFloat(),
+                        colorHex = o.optString("colorHex", "#1A1A1E").ifBlank { "#1A1A1E" },
+                        bgColorHex = o.optString("bgColorHex", "#C89F72").ifBlank { "#C89F72" },
+                        domEid = eid
+                    )
+                }
+                if (extracted.isNotEmpty()) {
+                    val customOnly = layers.filter { it.domEid.isBlank() }
+                    layers = extracted + customOnly
+                }
+            }
         }
     }
 
@@ -158,7 +177,7 @@ fun TimelineEditorScreen(
         if (!webPageReady) return@LaunchedEffect
         val wv = previewWebView ?: return@LaunchedEffect
         val tStr = String.format(Locale.US, "%.3f", currentTimeSec)
-        val jsonArg = LayerTimelineCodec.encode(layers.filter { it.visible })
+        val jsonArg = LayerTimelineCodec.encode(layers)
             .replace("\\", "\\\\")
             .replace("'", "\\'")
         wv.evaluateJavascript(
@@ -237,12 +256,11 @@ fun TimelineEditorScreen(
             .statusBarsPadding()
             .navigationBarsPadding()
     ) {
-        // Minimal Top Bar
+        // Clean Top Bar (generous padding so timecode never clips)
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .height(52.dp)
-                .padding(horizontal = 14.dp),
+                .padding(horizontal = 14.dp, vertical = 8.dp),
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically
         ) {
@@ -252,12 +270,12 @@ fun TimelineEditorScreen(
                 modifier = Modifier.weight(1f)
             ) {
                 CircleActionButton(icon = RawIconType.BACK, size = 36.dp, onClick = onBack)
-                Column {
+                Column(verticalArrangement = Arrangement.spacedBy(1.dp)) {
                     Text(
                         text = project.title.ifBlank { "Timeline" },
                         fontFamily = BricolageFamily,
                         fontWeight = FontWeight.Bold,
-                        fontSize = 15.sp,
+                        fontSize = 14.5.sp,
                         color = RawColors.TextPrimary,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis
@@ -271,19 +289,35 @@ fun TimelineEditorScreen(
                     )
                 }
             }
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+            Row(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
+                if (hasBaseHtml) {
+                    Surface(
+                        onClick = { previewWebView?.let { extractHtmlLayersFromWebView(it, forceReplace = true) } },
+                        shape = CircleShape,
+                        color = RawColors.RaisedCard
+                    ) {
+                        Text(
+                            text = "Scan",
+                            fontFamily = JetBrainsMonoFamily,
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 11.sp,
+                            color = RawColors.Cream,
+                            modifier = Modifier.padding(horizontal = 10.dp, vertical = 7.dp)
+                        )
+                    }
+                }
                 Surface(
                     onClick = onOpenChatbot,
                     shape = CircleShape,
                     color = RawColors.AccentSoft
                 ) {
                     Text(
-                        text = "Fix w/ AI",
+                        text = "AI",
                         fontFamily = BricolageFamily,
                         fontWeight = FontWeight.Bold,
                         fontSize = 12.sp,
                         color = RawColors.Tan,
-                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 7.dp)
+                        modifier = Modifier.padding(horizontal = 11.dp, vertical = 7.dp)
                     )
                 }
                 Surface(
@@ -295,15 +329,15 @@ fun TimelineEditorScreen(
                         text = "Save",
                         fontFamily = BricolageFamily,
                         fontWeight = FontWeight.Bold,
-                        fontSize = 12.5.sp,
+                        fontSize = 12.sp,
                         color = RawColors.Ink,
-                        modifier = Modifier.padding(horizontal = 14.dp, vertical = 7.dp)
+                        modifier = Modifier.padding(horizontal = 13.dp, vertical = 7.dp)
                     )
                 }
             }
         }
 
-        // 16:9 Live Preview Stage (renders actual HTML code + timeline layers)
+        // 16:9 Live Preview Stage
         Box(
             modifier = Modifier
                 .fillMaxWidth()
@@ -323,6 +357,7 @@ fun TimelineEditorScreen(
                         )
                         assetServer.configureSandboxedWebView(this) {
                             webPageReady = true
+                            extractHtmlLayersFromWebView(this, forceReplace = false)
                             val tStr = String.format(Locale.US, "%.3f", currentTimeSec)
                             evaluateJavascript(
                                 "(function(){ var r=(window.__ensureRawContract&&window.__ensureRawContract())||window.RAW; if(r&&typeof r.seek==='function'){ r.seek($tStr); } })()",
@@ -340,11 +375,11 @@ fun TimelineEditorScreen(
             )
         }
 
-        // Minimal Transport + Scrubbing Slider
+        // Sleek Transport + Custom Scrub Track
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(horizontal = 14.dp, vertical = 4.dp),
+                .padding(horizontal = 14.dp, vertical = 8.dp),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(10.dp)
         ) {
@@ -362,18 +397,13 @@ fun TimelineEditorScreen(
                     modifier = Modifier.padding(horizontal = 14.dp, vertical = 6.dp)
                 )
             }
-            Slider(
+            SleekScrubBar(
                 value = currentTimeSec.toFloat().coerceIn(0f, totalDurationSec.toFloat()),
-                onValueChange = {
+                range = 0f..totalDurationSec.toFloat(),
+                onChange = {
                     isPlaying = false
                     currentTimeSec = it.toDouble()
                 },
-                valueRange = 0f..totalDurationSec.toFloat(),
-                colors = SliderDefaults.colors(
-                    thumbColor = RawColors.Tan,
-                    activeTrackColor = RawColors.Tan,
-                    inactiveTrackColor = RawColors.RaisedCard
-                ),
                 modifier = Modifier.weight(1f)
             )
             if (selectedLayer != null) {
@@ -395,7 +425,7 @@ fun TimelineEditorScreen(
             }
         }
 
-        // Minimal Multi-Track Layer Timeline
+        // Multi-Track Layer Timeline (All extracted HTML elements + added layers)
         val timelineWidthDp = (totalDurationSec * pxPerSec.value).toFloat().coerceAtLeast(360f).dp
         Box(
             modifier = Modifier
@@ -407,33 +437,23 @@ fun TimelineEditorScreen(
                 // Eye Visibility Column
                 Column(
                     modifier = Modifier
-                        .width(38.dp)
+                        .width(36.dp)
                         .fillMaxHeight()
                         .background(Color(0xFF101013))
                         .padding(top = 24.dp),
                     horizontalAlignment = Alignment.CenterHorizontally
                 ) {
-                    if (hasBaseHtml) {
-                        Box(modifier = Modifier.height(38.dp), contentAlignment = Alignment.Center) {
-                            Box(
-                                modifier = Modifier
-                                    .size(12.dp)
-                                    .clip(CircleShape)
-                                    .background(RawColors.Cream.copy(alpha = 0.7f))
-                            )
-                        }
-                    }
                     layers.forEach { layer ->
                         Box(
                             modifier = Modifier
-                                .height(38.dp)
+                                .height(36.dp)
                                 .fillMaxWidth()
                                 .clickable { updateLayer(layer.id) { it.copy(visible = !it.visible) } },
                             contentAlignment = Alignment.Center
                         ) {
                             Box(
                                 modifier = Modifier
-                                    .size(14.dp)
+                                    .size(13.dp)
                                     .clip(CircleShape)
                                     .background(if (layer.visible) RawColors.Tan else RawColors.RaisedCard)
                                     .border(1.dp, RawColors.DividerStrong, CircleShape)
@@ -450,7 +470,6 @@ fun TimelineEditorScreen(
                         .horizontalScroll(timelineScroll)
                 ) {
                     Column(modifier = Modifier.width(timelineWidthDp).fillMaxHeight()) {
-                        // Tap-to-jump Time Ruler
                         Box(
                             modifier = Modifier
                                 .fillMaxWidth()
@@ -479,39 +498,10 @@ fun TimelineEditorScreen(
                             modifier = Modifier.fillMaxSize(),
                             contentPadding = PaddingValues(vertical = 2.dp)
                         ) {
-                            if (hasBaseHtml) {
-                                item(key = "__base_html_track__") {
-                                    Box(
-                                        modifier = Modifier
-                                            .fillMaxWidth()
-                                            .height(38.dp)
-                                            .padding(vertical = 3.dp)
-                                    ) {
-                                        Box(
-                                            modifier = Modifier
-                                                .width((totalDurationSec * pxPerSec.value).toFloat().dp)
-                                                .fillMaxHeight()
-                                                .clip(RoundedCornerShape(8.dp))
-                                                .background(Color(0xFF23232A))
-                                                .padding(horizontal = 10.dp),
-                                            contentAlignment = Alignment.CenterStart
-                                        ) {
-                                            Text(
-                                                text = "HTML Reel Code (Base)",
-                                                fontFamily = JetBrainsMonoFamily,
-                                                fontWeight = FontWeight.Bold,
-                                                fontSize = 11.sp,
-                                                color = RawColors.Cream
-                                            )
-                                        }
-                                    }
-                                }
-                            }
-
                             itemsIndexed(layers, key = { _, l -> l.id }) { _, layer ->
                                 val isSel = layer.id == selectedLayerId
                                 val startDp = (layer.startSec * pxPerSec.value).toFloat().dp
-                                val barWidthDp = ((layer.endSec - layer.startSec) * pxPerSec.value).toFloat().coerceAtLeast(36f).dp
+                                val barWidthDp = ((layer.endSec - layer.startSec) * pxPerSec.value).toFloat().coerceAtLeast(44f).dp
                                 val barColor = when (layer.type) {
                                     TimelineLayerType.VIDEO -> Color(0xFF2B6CB0)
                                     TimelineLayerType.IMAGE -> Color(0xFF2F855A)
@@ -522,24 +512,25 @@ fun TimelineEditorScreen(
                                 Box(
                                     modifier = Modifier
                                         .fillMaxWidth()
-                                        .height(38.dp)
-                                        .padding(vertical = 3.dp)
+                                        .height(36.dp)
+                                        .padding(vertical = 2.dp)
                                 ) {
                                     Box(
                                         modifier = Modifier
                                             .offset(x = startDp)
                                             .width(barWidthDp)
                                             .fillMaxHeight()
-                                            .clip(RoundedCornerShape(8.dp))
+                                            .clip(RoundedCornerShape(7.dp))
                                             .background(barColor.copy(alpha = if (layer.visible) 0.88f else 0.35f))
                                             .border(
                                                 width = if (isSel) 2.dp else 0.dp,
                                                 color = if (isSel) RawColors.Cream else Color.Transparent,
-                                                shape = RoundedCornerShape(8.dp)
+                                                shape = RoundedCornerShape(7.dp)
                                             )
                                             .pointerInput(layer.id) {
                                                 detectTapGestures {
                                                     selectedLayerId = if (selectedLayerId == layer.id) null else layer.id
+                                                    currentTimeSec = layer.startSec.coerceIn(0.0, totalDurationSec)
                                                 }
                                             }
                                             .pointerInput(layer.id, pxPerSecFloat) {
@@ -556,14 +547,14 @@ fun TimelineEditorScreen(
                                                     }
                                                 )
                                             }
-                                            .padding(horizontal = 10.dp),
+                                            .padding(horizontal = 9.dp),
                                         contentAlignment = Alignment.CenterStart
                                     ) {
                                         Text(
                                             text = layer.name,
                                             fontFamily = BricolageFamily,
                                             fontWeight = FontWeight.Bold,
-                                            fontSize = 11.5.sp,
+                                            fontSize = 11.sp,
                                             color = Color.White,
                                             maxLines = 1,
                                             overflow = TextOverflow.Ellipsis
@@ -574,7 +565,7 @@ fun TimelineEditorScreen(
                         }
                     }
 
-                    // Playhead Line
+                    // Playhead Needle
                     Box(
                         modifier = Modifier
                             .offset(x = (currentTimeSec * pxPerSec.value).toFloat().dp)
@@ -586,16 +577,19 @@ fun TimelineEditorScreen(
             }
         }
 
-        // Minimal Bottom Inspector / Add-Layer Bar
+        // Bottom Inspector (Transforms + Color Swatches + Text Edit) OR Add-Layer Dock
         if (selectedLayer != null) {
             val tr = selectedLayer.sampleAt(currentTimeSec)
+            val isText = selectedLayer.type == TimelineLayerType.TEXT
+            val activeHex = if (isText) selectedLayer.colorHex else selectedLayer.bgColorHex
+
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
                     .background(RawColors.CardSurface)
                     .border(1.dp, RawColors.Divider, RoundedCornerShape(topStart = 18.dp, topEnd = 18.dp))
                     .padding(horizontal = 14.dp, vertical = 10.dp),
-                verticalArrangement = Arrangement.spacedBy(2.dp)
+                verticalArrangement = Arrangement.spacedBy(6.dp)
             ) {
                 Row(
                     modifier = Modifier.fillMaxWidth(),
@@ -603,7 +597,7 @@ fun TimelineEditorScreen(
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     Text(
-                        text = selectedLayer.name,
+                        text = "${selectedLayer.type.label}: ${selectedLayer.name}",
                         fontFamily = BricolageFamily,
                         fontWeight = FontWeight.Bold,
                         fontSize = 13.sp,
@@ -613,24 +607,28 @@ fun TimelineEditorScreen(
                         modifier = Modifier.weight(1f)
                     )
                     Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                        if (selectedLayer.type == TimelineLayerType.TEXT) {
+                        if (isText) {
                             Surface(
                                 onClick = { editingTextLayer = selectedLayer },
                                 shape = CircleShape,
                                 color = RawColors.RaisedCard
                             ) {
-                                Text("Edit", fontFamily = JetBrainsMonoFamily, fontSize = 10.5.sp, color = RawColors.Cream, modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp))
+                                Text("Edit Text", fontFamily = JetBrainsMonoFamily, fontSize = 10.5.sp, color = RawColors.Cream, modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp))
                             }
                         }
                         Surface(
                             onClick = {
-                                layers = layers.filterNot { it.id == selectedLayer.id }
+                                if (selectedLayer.domEid.isNotBlank()) {
+                                    updateLayer(selectedLayer.id) { it.copy(visible = false) }
+                                } else {
+                                    layers = layers.filterNot { it.id == selectedLayer.id }
+                                }
                                 selectedLayerId = null
                             },
                             shape = CircleShape,
                             color = RawColors.ErrorSoft
                         ) {
-                            Text("Del", fontFamily = JetBrainsMonoFamily, fontSize = 10.5.sp, color = RawColors.ErrorCoral, modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp))
+                            Text("Hide/Del", fontFamily = JetBrainsMonoFamily, fontSize = 10.5.sp, color = RawColors.ErrorCoral, modifier = Modifier.padding(horizontal = 9.dp, vertical = 4.dp))
                         }
                         Surface(
                             onClick = { selectedLayerId = null },
@@ -638,6 +636,59 @@ fun TimelineEditorScreen(
                             color = RawColors.RaisedCard
                         ) {
                             Text("Done", fontFamily = JetBrainsMonoFamily, fontWeight = FontWeight.Bold, fontSize = 10.5.sp, color = RawColors.Tan, modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp))
+                        }
+                    }
+                }
+
+                // Color Picker Swatches Row (for Text, Shape, Solid)
+                if (selectedLayer.type in setOf(TimelineLayerType.TEXT, TimelineLayerType.SHAPE, TimelineLayerType.SOLID)) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .horizontalScroll(rememberScrollState()),
+                        horizontalArrangement = Arrangement.spacedBy(7.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            text = if (isText) "Color" else "Fill",
+                            fontFamily = BricolageFamily,
+                            fontWeight = FontWeight.SemiBold,
+                            fontSize = 11.5.sp,
+                            color = RawColors.TextMuted
+                        )
+                        STUDIO_SWATCHES.forEach { hex ->
+                            val isChosen = activeHex.equals(hex, ignoreCase = true)
+                            val col = runCatching { Color(AndroidColor.parseColor(hex)) }.getOrDefault(RawColors.Tan)
+                            Box(
+                                modifier = Modifier
+                                    .size(22.dp)
+                                    .clip(CircleShape)
+                                    .background(col)
+                                    .border(
+                                        width = if (isChosen) 2.dp else 1.dp,
+                                        color = if (isChosen) RawColors.Tan else RawColors.DividerStrong,
+                                        shape = CircleShape
+                                    )
+                                    .clickable {
+                                        updateLayer(selectedLayer.id) {
+                                            if (isText) it.copy(colorHex = hex, colorEdited = true)
+                                            else it.copy(bgColorHex = hex, bgColorEdited = true)
+                                        }
+                                    }
+                            )
+                        }
+                        Surface(
+                            onClick = { editingHexLayer = selectedLayer },
+                            shape = CircleShape,
+                            color = RawColors.RaisedCard
+                        ) {
+                            Text(
+                                text = activeHex,
+                                fontFamily = JetBrainsMonoFamily,
+                                fontSize = 10.sp,
+                                color = RawColors.Tan,
+                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
+                            )
                         }
                     }
                 }
@@ -802,22 +853,13 @@ fun TimelineEditorScreen(
                     .padding(16.dp),
                 verticalArrangement = Arrangement.spacedBy(12.dp)
             ) {
-                Text(
-                    text = "Edit Text",
-                    fontFamily = BricolageFamily,
-                    fontWeight = FontWeight.Bold,
-                    fontSize = 17.sp,
-                    color = RawColors.TextPrimary
-                )
+                Text("Edit Text", fontFamily = BricolageFamily, fontWeight = FontWeight.Bold, fontSize = 17.sp, color = RawColors.TextPrimary)
                 OutlinedTextField(
                     value = draftText,
                     onValueChange = { draftText = it },
                     label = { Text("Text") },
                     singleLine = true,
-                    colors = OutlinedTextFieldDefaults.colors(
-                        focusedBorderColor = RawColors.Tan,
-                        unfocusedBorderColor = RawColors.Divider
-                    ),
+                    colors = OutlinedTextFieldDefaults.colors(focusedBorderColor = RawColors.Tan, unfocusedBorderColor = RawColors.Divider),
                     modifier = Modifier.fillMaxWidth()
                 )
                 OutlinedTextField(
@@ -825,24 +867,122 @@ fun TimelineEditorScreen(
                     onValueChange = { draftSize = it },
                     label = { Text("Font size (px)") },
                     singleLine = true,
-                    colors = OutlinedTextFieldDefaults.colors(
-                        focusedBorderColor = RawColors.Tan,
-                        unfocusedBorderColor = RawColors.Divider
-                    ),
+                    colors = OutlinedTextFieldDefaults.colors(focusedBorderColor = RawColors.Tan, unfocusedBorderColor = RawColors.Divider),
                     modifier = Modifier.fillMaxWidth()
                 )
                 BigPrimaryButton(
                     text = "Apply",
                     height = 44.dp,
                     onClick = {
-                        val fs = draftSize.toFloatOrNull()?.coerceIn(18f, 240f) ?: target.fontSize
+                        val fs = draftSize.toFloatOrNull()?.coerceIn(14f, 260f) ?: target.fontSize
                         updateLayer(target.id) {
-                            it.copy(text = draftText, name = draftText.take(22).ifBlank { "Text" }, fontSize = fs)
+                            it.copy(
+                                text = draftText,
+                                name = draftText.take(24).ifBlank { "Text" },
+                                fontSize = fs,
+                                textEdited = true,
+                                fontSizeEdited = true
+                            )
                         }
                         editingTextLayer = null
                     }
                 )
             }
+        }
+    }
+
+    editingHexLayer?.let { target ->
+        val isText = target.type == TimelineLayerType.TEXT
+        var draftHex by remember(target.id) { mutableStateOf(if (isText) target.colorHex else target.bgColorHex) }
+        Dialog(onDismissRequest = { editingHexLayer = null }) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(22.dp))
+                    .background(RawColors.CardSurface)
+                    .border(1.dp, RawColors.Divider, RoundedCornerShape(22.dp))
+                    .padding(16.dp),
+                verticalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
+                Text("Custom Hex Color", fontFamily = BricolageFamily, fontWeight = FontWeight.Bold, fontSize = 17.sp, color = RawColors.TextPrimary)
+                OutlinedTextField(
+                    value = draftHex,
+                    onValueChange = { draftHex = it },
+                    label = { Text("#RRGGBB") },
+                    singleLine = true,
+                    colors = OutlinedTextFieldDefaults.colors(focusedBorderColor = RawColors.Tan, unfocusedBorderColor = RawColors.Divider),
+                    modifier = Modifier.fillMaxWidth()
+                )
+                BigPrimaryButton(
+                    text = "Apply Color",
+                    height = 44.dp,
+                    onClick = {
+                        val clean = draftHex.trim().let { if (it.startsWith("#")) it else "#$it" }
+                        val valid = runCatching { AndroidColor.parseColor(clean); true }.getOrDefault(false)
+                        if (valid) {
+                            updateLayer(target.id) {
+                                if (isText) it.copy(colorHex = clean, colorEdited = true)
+                                else it.copy(bgColorHex = clean, bgColorEdited = true)
+                            }
+                        }
+                        editingHexLayer = null
+                    }
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun SleekScrubBar(
+    value: Float,
+    range: ClosedFloatingPointRange<Float>,
+    onChange: (Float) -> Unit,
+    modifier: Modifier = Modifier
+) {
+    val latestOnChange by rememberUpdatedState(onChange)
+    val span = (range.endInclusive - range.start).coerceAtLeast(0.0001f)
+    val norm = ((value - range.start) / span).coerceIn(0f, 1f)
+
+    Box(
+        modifier = modifier
+            .height(26.dp)
+            .pointerInput(range) {
+                detectTapGestures { offset ->
+                    val frac = (offset.x / size.width.coerceAtLeast(1)).coerceIn(0f, 1f)
+                    latestOnChange(range.start + frac * span)
+                }
+            }
+            .pointerInput(range) {
+                detectHorizontalDragGestures { change, _ ->
+                    change.consume()
+                    val frac = (change.position.x / size.width.coerceAtLeast(1)).coerceIn(0f, 1f)
+                    latestOnChange(range.start + frac * span)
+                }
+            },
+        contentAlignment = Alignment.Center
+    ) {
+        Canvas(modifier = Modifier.fillMaxWidth().height(16.dp)) {
+            val cy = size.height / 2f
+            val trackH = 4.dp.toPx()
+            drawLine(
+                color = RawColors.RaisedCard,
+                start = Offset(0f, cy),
+                end = Offset(size.width, cy),
+                strokeWidth = trackH
+            )
+            val activeX = norm * size.width
+            drawLine(
+                color = RawColors.Tan,
+                start = Offset(0f, cy),
+                end = Offset(activeX, cy),
+                strokeWidth = trackH
+            )
+            drawCircle(
+                color = RawColors.Cream,
+                radius = 6.5.dp.toPx(),
+                center = Offset(activeX, cy)
+            )
         }
     }
 }
@@ -859,12 +999,12 @@ private fun AddLayerButton(
         color = RawColors.RaisedCard,
         modifier = modifier
     ) {
-        Box(modifier = Modifier.padding(vertical = 11.dp), contentAlignment = Alignment.Center) {
+        Box(modifier = Modifier.padding(vertical = 10.dp), contentAlignment = Alignment.Center) {
             Text(
                 text = label,
                 fontFamily = BricolageFamily,
                 fontWeight = FontWeight.Bold,
-                fontSize = 12.5.sp,
+                fontSize = 12.sp,
                 color = RawColors.Cream
             )
         }
@@ -883,7 +1023,7 @@ private fun MinimalTransformSlider(
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .height(30.dp),
+            .height(26.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(8.dp)
     ) {
@@ -891,36 +1031,31 @@ private fun MinimalTransformSlider(
             text = label,
             fontFamily = BricolageFamily,
             fontWeight = FontWeight.SemiBold,
-            fontSize = 12.sp,
+            fontSize = 11.5.sp,
             color = RawColors.TextPrimary,
-            modifier = Modifier.width(54.dp)
+            modifier = Modifier.width(50.dp)
         )
-        Slider(
+        SleekScrubBar(
             value = value.coerceIn(range.start, range.endInclusive),
-            onValueChange = onChange,
-            valueRange = range,
-            colors = SliderDefaults.colors(
-                thumbColor = RawColors.Tan,
-                activeTrackColor = RawColors.Tan,
-                inactiveTrackColor = RawColors.RaisedCard
-            ),
+            range = range,
+            onChange = onChange,
             modifier = Modifier.weight(1f)
         )
         Surface(
             onClick = onReset,
-            shape = RoundedCornerShape(8.dp),
+            shape = RoundedCornerShape(7.dp),
             color = RawColors.RaisedCard
         ) {
             Text(
                 text = "${value.roundToInt()}$unit",
                 fontFamily = JetBrainsMonoFamily,
                 fontWeight = FontWeight.Bold,
-                fontSize = 11.sp,
+                fontSize = 10.5.sp,
                 color = RawColors.Tan,
                 textAlign = TextAlign.Center,
                 modifier = Modifier
-                    .width(52.dp)
-                    .padding(vertical = 4.dp)
+                    .width(48.dp)
+                    .padding(vertical = 3.dp)
             )
         }
     }
