@@ -515,6 +515,19 @@ def fix_enum_body_brace():
         print("  GeminiRouteMode closing brace restored")
 
 
+def fix_leftover_ghskills():
+    """CacheManager keeps a condition term from the removed GitHub skills feature."""
+    p = root / "app/src/main/java/com/rawedit/app/data/CacheManager.kt"
+    s = read(p)
+    if s is None:
+        return
+    bad = "if (overrides.isEmpty() && customFonts.isEmpty() && ghSkills.isEmpty()) {"
+    good = "if (overrides.isEmpty() && customFonts.isEmpty()) {"
+    if bad in s:
+        p.write_text(s.replace(bad, good, 1))
+        print("  leftover ghSkills condition removed")
+
+
 STEPS = [
     fix_version,
     fix_navigation,
@@ -534,6 +547,7 @@ STEPS = [
     fix_assetlocker_card_call,
     fix_chatbot_state_order,
     fix_enum_body_brace,
+    fix_leftover_ghskills,
 ]
 
 for step in STEPS:

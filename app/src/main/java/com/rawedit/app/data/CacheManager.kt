@@ -212,7 +212,7 @@ class CacheManager(val context: Context) {
         val overrides = collectStylePackOverrides()
         val customFonts = listCustomFonts()
 
-        if (overrides.isEmpty() && customFonts.isEmpty() && ghSkills.isEmpty()) {
+        if (overrides.isEmpty() && customFonts.isEmpty()) {
             context.assets.open(STYLE_PACK_ASSET_NAME).use { input ->
                 FileOutputStream(outFile).use { output ->
                     input.copyTo(output)
