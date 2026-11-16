@@ -3,6 +3,7 @@ package com.rawedit.app.ui.screens
 import android.graphics.Bitmap
 import android.net.Uri
 import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -101,7 +102,7 @@ fun ProfileSetupScreen(
         }
 
         StaggerIn(2) {
-            DomeCard(tan = true, onClick = { galleryPicker.launch(null) }) {
+            DomeCard(tan = true, onClick = { galleryPicker.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)) }) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Box(
                         modifier = Modifier

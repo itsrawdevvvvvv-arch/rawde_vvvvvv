@@ -59,7 +59,7 @@ fun HomeScreen(
     onOpenReels: () -> Unit = {},
     recentDraftDurationSec: Double = 0.0
 ) {
-    val firstName = userProfile.name.trim().ifBlank { "Creator" }
+    val firstName = userProfile.userName.trim().ifBlank { "Creator" }
     Column(
         modifier = Modifier
             .fillMaxSize()
