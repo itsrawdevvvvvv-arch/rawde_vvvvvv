@@ -74,24 +74,31 @@ class GeminiWaterfallRouter(context: Context) {
     companion object {
         val WORKHORSE_CHAIN = listOf(
             "gemini-4-hydrogen",
-            "gemini-3.5-flash-lite",
+            "gemini-2.5-flash-lite",
             "gemini-3.1-flash-lite",
-            "gemini-3.6-flash",
-            "gemini-3.8-flash"
+            "gemini-2.0-flash-lite",
+            "gemini-2.0-flash",
+            "gemini-2.5-flash",
+            "gemini-3.5-flash-lite"
         )
 
         val CREATIVE_CHAIN = listOf(
             "gemini-4-hydrogen",
-            "gemini-3.8-flash",
+            "gemini-2.5-flash",
+            "gemini-2.0-flash",
             "gemini-3.6-flash",
-            "gemini-3.5-flash-lite",
-            "gemini-3.1-flash-lite"
+            "gemini-3.8-flash",
+            "gemini-2.5-flash-lite",
+            "gemini-3.5-flash-lite"
         )
 
         val FAST_CHAIN = listOf(
             "gemini-4-hydrogen",
             "gemini-2.5-flash",
             "gemini-2.5-flash-lite",
+            "gemini-2.0-flash",
+            "gemini-2.0-flash-lite",
+            "gemini-3.1-flash-lite",
             "gemini-3.5-flash-lite"
         )
 
@@ -297,7 +304,7 @@ class GeminiWaterfallRouter(context: Context) {
                 val conn = (URL(endpoint).openConnection() as HttpURLConnection).apply {
                     requestMethod = "POST"
                     connectTimeout = 8_000
-                    readTimeout = if (isQuick) 15_000 else 50_000
+                    readTimeout = if (maxOutputTokens >= 16384 || !isQuick) 65_000 else 20_000
                     doOutput = true
                     setRequestProperty("Content-Type", "application/json; charset=UTF-8")
                     setRequestProperty("x-goog-api-key", cleanKey)
@@ -389,7 +396,7 @@ class GeminiWaterfallRouter(context: Context) {
 
     suspend fun testApiKeyHealth(apiKey: String): List<ModelHealthStatus> = withContext(Dispatchers.IO) {
         val cleanKey = sanitizeApiKey(apiKey)
-        val testModels = listOf("gemini-2.5-flash", "gemini-3.5-flash-lite", "gemini-3.8-flash")
+        val testModels = listOf("gemini-4-hydrogen", "gemini-2.5-flash", "gemini-2.5-flash-lite", "gemini-2.0-flash")
         val results = mutableListOf<ModelHealthStatus>()
 
         for (model in testModels) {
