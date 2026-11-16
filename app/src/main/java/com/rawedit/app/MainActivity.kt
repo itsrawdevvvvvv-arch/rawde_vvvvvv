@@ -58,6 +58,7 @@ import com.rawedit.app.ui.screens.ProfileSetupScreen
 import com.rawedit.app.ui.screens.RawChatbotScreen
 import com.rawedit.app.ui.screens.RenderingScreen
 import com.rawedit.app.ui.screens.ResultScreen
+import com.rawedit.app.domain.AspectPreset
 import com.rawedit.app.domain.AspectPresetStore
 import com.rawedit.app.ui.screens.OpenDesignScreen
 import com.rawedit.app.ui.screens.TimelineEditorScreen
@@ -746,6 +747,22 @@ private fun MainAuthenticatedHost(
                         geminiRouter = geminiRouter,
                         onOpenApiKeySettings = { openGroqDialog(switchMode = false) },
                         onOpenDesignStudio = { pushRoute(AppRoute.OpenDesign) },
+                        onCreateProjectFromHtml = { htmlPath, title, aspectId ->
+                            scope.launch {
+                                val html = runCatching { File(htmlPath).readText(Charsets.UTF_8) }.getOrDefault("")
+                                if (html.isNotBlank()) {
+                                    val newId = container.repository.createEmptyProject()
+                                    val stored = container.cacheManager.persistHtmlCode(newId, html)
+                                    val ap = AspectPreset.ALL_PRESETS.firstOrNull { it.id == aspectId } ?: AspectPreset.ALL_PRESETS.first()
+                                    AspectPresetStore.set(container.cacheManager, newId, ap)
+                                    val p = container.repository.getProject(newId)
+                                    if (p != null) {
+                                        container.repository.saveProject(p.copy(title = title, code = stored, codeDurationSec = 6.0))
+                                    }
+                                    pushRoute(AppRoute.CreateHub(newId))
+                                }
+                            }
+                        },
                         onBack = ::popRoute
                     )
                 }

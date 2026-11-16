@@ -56,7 +56,9 @@ object ChatbotBackgroundManager {
         historySnapshot: List<ChatMessageItem>,
         userText: String,
         uploadedFile: ChatUploadedFile?,
-        browserPageContext: String?
+        browserPageContext: String?,
+        mode: ChatbotMode = ChatbotMode.RAW_ASSISTANT,
+        designConfig: DesignRequestConfig = DesignRequestConfig()
     ) {
         _activeSessions.value = _activeSessions.value + sessionId
         runCatching {
@@ -80,7 +82,9 @@ object ChatbotBackgroundManager {
                     history = historySnapshot,
                     userText = userText,
                     uploadedFile = uploadedFile,
-                    browserPageContext = browserPageContext
+                    browserPageContext = browserPageContext,
+                    mode = mode,
+                    designConfig = designConfig
                 )
 
                 val currentList = ChatbotEngine.loadChatHistory(cacheManager, sessionId).ifEmpty { historySnapshot }

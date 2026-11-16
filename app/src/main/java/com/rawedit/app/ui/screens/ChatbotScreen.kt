@@ -13,6 +13,9 @@ import android.webkit.SslErrorHandler
 import android.webkit.WebResourceError
 import android.widget.Toast
 import androidx.compose.material3.Surface
+import androidx.compose.ui.layout.ContentScale
+import coil.compose.AsyncImage
+import coil.request.ImageRequest
 import androidx.activity.compose.BackHandler
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.zIndex
@@ -40,6 +43,7 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -101,7 +105,11 @@ import com.rawedit.app.data.local.ProjectEntity
 import com.rawedit.app.data.local.UserPreferences
 import com.rawedit.app.data.local.UserProfile
 import com.rawedit.app.data.repository.RawEditRepository
+import com.rawedit.app.domain.AspectPreset
 import com.rawedit.app.domain.ChatMessageItem
+import com.rawedit.app.domain.ChatbotMode
+import com.rawedit.app.domain.DesignRequestConfig
+import com.rawedit.app.domain.OpenDesignDeliverableType
 import com.rawedit.app.domain.ChatSessionMeta
 import com.rawedit.app.domain.ChatbotEngine
 import com.rawedit.app.domain.GeminiWaterfallRouter
@@ -124,10 +132,23 @@ import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 
+private val DESIGN_STARTER_OPTIONS = listOf(
+    "Design a bold poster (PNG)" to "Create a high-contrast poster using my active palette and uploaded custom fonts",
+    "Create motion graphics video" to "Create a 6-second deterministic HTML motion graphics reel using my uploaded fonts and assets",
+    "Build a 4:5 slide deck" to "Design a clean 4-slide visual carousel deck in Open Design style",
+    "Open Manual Design Studio" to "OPEN_DESIGN_STUDIO"
+)
+
+private val SCRIPT_STARTER_OPTIONS = listOf(
+    "Write Hinglish reel script" to "Write a 60-70 word Hinglish reel script on the latest trending AI video tool using live web data",
+    "3 viral hooks for my SRT" to "Write 3 scroll-stopping Hinglish hooks based on my active project script",
+    "Rewrite script with H-V-P-A" to "Rewrite my active project script using H-V-P-A retention structure"
+)
+
 private val MINIMAL_STARTER_OPTIONS = listOf(
-    "Write reel script (RAWDEV style)" to "Write a 60-70 word Hinglish reel script on the latest trending AI video tool using live web data",
     "Analyze my Instagram page" to "OPEN_BROWSER_IG",
     "Tweak prompt & style ZIP" to "Help me tweak my Cloud AI prompt and Style Pack ZIP",
+    "Export guide as PDF" to "Create a clean downloadable PDF checklist for viral reel pacing",
     "Open Design Studio (Images & Motion)" to "OPEN_DESIGN_STUDIO"
 )
 
@@ -144,6 +165,7 @@ fun RawChatbotScreen(
     geminiRouter: GeminiWaterfallRouter,
     onOpenApiKeySettings: () -> Unit,
     onOpenDesignStudio: () -> Unit = {},
+    onCreateProjectFromHtml: (htmlPath: String, title: String, aspectId: String) -> Unit = { _, _, _ -> },
     onBack: () -> Unit
 ) {
     val context = LocalContext.current
@@ -161,6 +183,10 @@ fun RawChatbotScreen(
     var currentSessionId by remember {
         mutableStateOf(sessions.firstOrNull()?.id ?: "chat_${System.currentTimeMillis()}")
     }
+    var activeMode by remember { mutableStateOf(ChatbotMode.RAW_DESIGN) }
+    var designType by remember { mutableStateOf(OpenDesignDeliverableType.IMAGE) }
+    var designAspect by remember { mutableStateOf(AspectPreset.ALL_PRESETS[3]) }
+    var designUsePalette by remember { mutableStateOf(true) }
     var showHistoryDialog by remember { mutableStateOf(false) }
     var viewingFile by remember { mutableStateOf<File?>(null) }
     var selectingText by remember { mutableStateOf<String?>(null) }
@@ -317,7 +343,13 @@ fun RawChatbotScreen(
             historySnapshot = updatedWithUser,
             userText = effectiveUserText,
             uploadedFile = attached,
-            browserPageContext = browserCtx
+            browserPageContext = browserCtx,
+            mode = activeMode,
+            designConfig = DesignRequestConfig(
+                type = designType,
+                aspect = designAspect,
+                useStudioPalette = designUsePalette
+            )
         )
     }
 
@@ -373,6 +405,38 @@ fun RawChatbotScreen(
                 }
             }
 
+            // Mode Tabs: RAW Design | RAW Script | RAW Assistant
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 18.dp, vertical = 4.dp)
+                    .clip(CircleShape)
+                    .background(RawColors.CardSurface)
+                    .padding(4.dp),
+                horizontalArrangement = Arrangement.spacedBy(4.dp)
+            ) {
+                ChatbotMode.entries.forEach { m ->
+                    val sel = activeMode == m
+                    Surface(
+                        onClick = { activeMode = m },
+                        shape = CircleShape,
+                        color = if (sel) RawColors.Tan else Color.Transparent,
+                        modifier = Modifier.weight(1f)
+                    ) {
+                        Text(
+                            text = m.label,
+                            fontFamily = BricolageFamily,
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 12.sp,
+                            color = if (sel) RawColors.Ink else RawColors.TextMuted,
+                            textAlign = TextAlign.Center,
+                            maxLines = 1,
+                            modifier = Modifier.padding(vertical = 8.dp)
+                        )
+                    }
+                }
+            }
+
             // Main Content
             Box(
                 modifier = Modifier
@@ -404,7 +468,12 @@ fun RawChatbotScreen(
                             modifier = Modifier.fillMaxWidth(),
                             verticalArrangement = Arrangement.spacedBy(10.dp)
                         ) {
-                            MINIMAL_STARTER_OPTIONS.forEach { (label, prompt) ->
+                            val starters = when (activeMode) {
+                                ChatbotMode.RAW_DESIGN -> DESIGN_STARTER_OPTIONS
+                                ChatbotMode.RAW_SCRIPT -> SCRIPT_STARTER_OPTIONS
+                                ChatbotMode.RAW_ASSISTANT -> MINIMAL_STARTER_OPTIONS
+                            }
+                            starters.forEach { (label, prompt) ->
                                 RawPressButton(onClick = {
                                     if (prompt == "OPEN_BROWSER_IG") {
                                         browserInitialUrl = "https://www.instagram.com/rawde_vvvvvv/"
@@ -476,6 +545,9 @@ fun RawChatbotScreen(
                                     } else {
                                         toastMsg = "Saved locally: ${f.name}"
                                     }
+                                },
+                                onOpenAsMotionProject = { htmlPath, aspectId ->
+                                    onCreateProjectFromHtml(htmlPath, "OpenDesign Motion", aspectId)
                                 },
                                 onPreviewWebsite = { path ->
                                     keyboard?.hide()
@@ -600,6 +672,92 @@ fun RawChatbotScreen(
                         size = 28.dp,
                         onClick = { pendingAttachment = null }
                     )
+                }
+            }
+
+            if (activeMode == ChatbotMode.RAW_DESIGN) {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 16.dp, vertical = 4.dp),
+                    verticalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .horizontalScroll(rememberScrollState()),
+                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        OpenDesignDeliverableType.entries.forEach { t ->
+                            val sel = designType == t
+                            Surface(
+                                onClick = { designType = t },
+                                shape = CircleShape,
+                                color = if (sel) RawColors.Tan else RawColors.CardSurface
+                            ) {
+                                Text(
+                                    text = t.label,
+                                    fontFamily = BricolageFamily,
+                                    fontWeight = FontWeight.Bold,
+                                    fontSize = 11.sp,
+                                    color = if (sel) RawColors.Ink else RawColors.Cream,
+                                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp)
+                                )
+                            }
+                        }
+                        Surface(
+                            onClick = onOpenDesignStudio,
+                            shape = CircleShape,
+                            color = RawColors.AccentSoft
+                        ) {
+                            Text(
+                                text = "Manual Studio",
+                                fontFamily = JetBrainsMonoFamily,
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 10.5.sp,
+                                color = RawColors.Tan,
+                                modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp)
+                            )
+                        }
+                    }
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .horizontalScroll(rememberScrollState()),
+                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        AspectPreset.ALL_PRESETS.take(5).forEach { ap ->
+                            val sel = designAspect.id == ap.id
+                            Surface(
+                                onClick = { designAspect = ap },
+                                shape = CircleShape,
+                                color = if (sel) RawColors.Cream else RawColors.RaisedCard
+                            ) {
+                                Text(
+                                    text = ap.label,
+                                    fontFamily = JetBrainsMonoFamily,
+                                    fontWeight = FontWeight.Bold,
+                                    fontSize = 10.5.sp,
+                                    color = if (sel) RawColors.Ink else RawColors.TextPrimary,
+                                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp)
+                                )
+                            }
+                        }
+                        Surface(
+                            onClick = { designUsePalette = !designUsePalette },
+                            shape = CircleShape,
+                            color = if (designUsePalette) RawColors.AccentSoft else RawColors.RaisedCard
+                        ) {
+                            Text(
+                                text = if (designUsePalette) "Palette: Studio" else "Palette: Custom",
+                                fontFamily = JetBrainsMonoFamily,
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 10.5.sp,
+                                color = if (designUsePalette) RawColors.Tan else RawColors.TextMuted,
+                                modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp)
+                            )
+                        }
+                    }
                 }
             }
 
@@ -1058,6 +1216,7 @@ private fun ChatBubbleRow(
     onSelectText: () -> Unit,
     onViewFile: (String) -> Unit,
     onSaveFile: (String, String) -> Unit,
+    onOpenAsMotionProject: (String, String) -> Unit = { _, _ -> },
     onPreviewWebsite: (String) -> Unit
 ) {
     val isUser = msg.role == "user"
@@ -1162,6 +1321,21 @@ private fun ChatBubbleRow(
                     }
                 }
             }
+            if (!isUser && msg.generatedImagePath.isNotBlank() && File(msg.generatedImagePath).exists()) {
+                AsyncImage(
+                    model = ImageRequest.Builder(LocalContext.current)
+                        .data(File(msg.generatedImagePath))
+                        .build(),
+                    contentDescription = "Generated OpenDesign image",
+                    contentScale = ContentScale.FillWidth,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(14.dp))
+                        .border(1.dp, RawColors.Divider, RoundedCornerShape(14.dp))
+                        .clickable { onViewFile(msg.generatedImagePath) }
+                )
+            }
+
             if (effectivePreviewPath.isNotBlank()) {
                 Surface(
                     onClick = { onPreviewWebsite(effectivePreviewPath) },
@@ -1190,6 +1364,24 @@ private fun ChatBubbleRow(
                             )
                         }
                         RawIcon(RawIconType.ARROW_RIGHT, size = 14.dp, tint = RawColors.Ink)
+                    }
+                }
+                if (!isUser && msg.openDesignType == "motion") {
+                    Surface(
+                        onClick = { onOpenAsMotionProject(effectivePreviewPath, msg.openDesignAspectId.ifBlank { "16:9" }) },
+                        shape = RoundedCornerShape(12.dp),
+                        color = RawColors.AccentSoft,
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Text(
+                            text = "Open as MP4 Project",
+                            fontFamily = BricolageFamily,
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 12.5.sp,
+                            color = RawColors.Tan,
+                            textAlign = TextAlign.Center,
+                            modifier = Modifier.padding(vertical = 9.dp)
+                        )
                     }
                 }
             }
@@ -1532,7 +1724,14 @@ private fun ChatFileViewerDialog(
                         .verticalScroll(rememberScrollState())
                         .padding(16.dp)
                 ) {
-                    if (file.extension.lowercase() in setOf("md", "skill")) {
+                    if (file.extension.lowercase() in setOf("png", "jpg", "jpeg", "webp")) {
+                        AsyncImage(
+                            model = ImageRequest.Builder(LocalContext.current).data(file).build(),
+                            contentDescription = file.name,
+                            contentScale = ContentScale.FillWidth,
+                            modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(14.dp))
+                        )
+                    } else if (file.extension.lowercase() in setOf("md", "skill")) {
                         RichFormattedMessage(text = content)
                     } else {
                         Text(
