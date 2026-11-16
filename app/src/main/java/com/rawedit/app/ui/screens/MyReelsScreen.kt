@@ -195,7 +195,7 @@ fun MyReelsScreen(
                 modifier = Modifier
                     .weight(1f)
                     .fillMaxWidth()
-                    .padding(bottom = 110.dp),
+                    .padding(bottom = 176.dp),
                 contentAlignment = Alignment.Center
             ) {
                 AnimatedContent(
@@ -252,7 +252,7 @@ fun MyReelsScreen(
                 LazyColumn(
                     state = listState,
                     modifier = Modifier.fillMaxSize(),
-                    contentPadding = PaddingValues(start = 18.dp, end = 18.dp, bottom = 126.dp),
+                    contentPadding = PaddingValues(start = 18.dp, end = 18.dp, bottom = 176.dp),
                     verticalArrangement = Arrangement.spacedBy(12.dp)
                 ) {
                     itemsIndexed(

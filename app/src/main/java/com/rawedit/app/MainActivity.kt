@@ -40,6 +40,8 @@ import com.rawedit.app.domain.PaletteState
 import com.rawedit.app.ui.components.MainTab
 import com.rawedit.app.ui.components.RawBottomNavBar
 import com.rawedit.app.ui.components.RawToastBanner
+import com.rawedit.app.ui.motion.CuteDomeCharacter
+import com.rawedit.app.ui.motion.KineticIntroSplash
 import com.rawedit.app.ui.motion.RawScreenTransition
 import com.rawedit.app.ui.motion.RawTabMorphTransition
 import com.rawedit.app.ui.screens.AddVoiceScreen
@@ -138,6 +140,9 @@ private fun RawEditAppRoot(container: AppContainer) {
         else -> RootStage.PROFILE_SETUP
     }
 
+    var showIntroSplash by remember { mutableStateOf(true) }
+
+    Box(modifier = Modifier.fillMaxSize()) {
     RawScreenTransition(
         targetState = rootStage,
         isForward = true
@@ -161,6 +166,12 @@ private fun RawEditAppRoot(container: AppContainer) {
                 userProfile = profile
             )
         }
+    }
+
+    KineticIntroSplash(
+        visible = showIntroSplash,
+        onDismiss = { showIntroSplash = false }
+    )
     }
 }
 
@@ -433,6 +444,19 @@ private fun MainAuthenticatedHost(
                             }
                         }
 
+                        val domeSpeech = when (currentTab) {
+                            MainTab.HOME -> "Voice in, reel out"
+                            MainTab.PALETTE -> "Tap Next for fresh vibes"
+                            MainTab.CREATE -> "Pick a reel level"
+                            MainTab.REELS -> "Swipe through your reels"
+                            MainTab.PROFILE -> "Creator ID & settings"
+                        }
+                        CuteDomeCharacter(
+                            speechText = domeSpeech,
+                            visible = true,
+                            isHappyState = currentTab == MainTab.HOME,
+                            modifier = Modifier.align(Alignment.BottomCenter)
+                        )
                         RawBottomNavBar(
                             currentTab = currentTab,
                             onSelectTab = ::switchTab,

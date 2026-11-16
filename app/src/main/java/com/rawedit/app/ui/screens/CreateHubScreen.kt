@@ -87,6 +87,7 @@ import com.rawedit.app.ui.icons.PixelTypeMarqueeBadge
 import com.rawedit.app.ui.icons.RawIcon
 import com.rawedit.app.ui.icons.RawIconType
 import com.rawedit.app.ui.icons.RawPixelMascot
+import com.rawedit.app.ui.motion.AnimatedDottedStepArrow
 import com.rawedit.app.ui.motion.CascadeSkewCard
 import com.rawedit.app.ui.motion.FeatheredScrollEdges
 import com.rawedit.app.ui.motion.KineticHeading
@@ -296,7 +297,7 @@ fun CreateHubScreen(
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     KineticHeading(
-                        words = listOf("Typography", "Reel"),
+                        words = listOf("Reel", "levels"),
                         style = RawTypography.headlineLarge,
                         highlightLastWord = true,
                         modifier = Modifier.weight(1f)
@@ -422,33 +423,39 @@ fun CreateHubScreen(
                     ) {
                         Surface(
                             onClick = { showPresetsDialog = true },
-                            shape = RoundedCornerShape(14.dp),
+                            shape = CircleShape,
                             color = RawColors.CardSurface,
-                            modifier = Modifier.weight(1f)
+                            modifier = Modifier.weight(1f).height(40.dp)
                         ) {
-                            Text(
-                                text = "Style Presets",
-                                fontFamily = BricolageFamily,
-                                fontWeight = FontWeight.Bold,
-                                fontSize = 13.sp,
-                                color = RawColors.Cream,
-                                modifier = Modifier.padding(horizontal = 14.dp, vertical = 11.dp)
-                            )
+                            Box(contentAlignment = Alignment.Center) {
+                                Text(
+                                    text = "Style Presets",
+                                    fontFamily = BricolageFamily,
+                                    fontWeight = FontWeight.Bold,
+                                    fontSize = 12.5.sp,
+                                    color = RawColors.Cream,
+                                    maxLines = 1,
+                                    softWrap = false
+                                )
+                            }
                         }
                         Surface(
                             onClick = { showCaptionsDialog = true },
-                            shape = RoundedCornerShape(14.dp),
+                            shape = CircleShape,
                             color = RawColors.AccentSoft,
-                            modifier = Modifier.weight(1f)
+                            modifier = Modifier.weight(1f).height(40.dp)
                         ) {
-                            Text(
-                                text = "SRT Captions & Pin",
-                                fontFamily = BricolageFamily,
-                                fontWeight = FontWeight.Bold,
-                                fontSize = 13.sp,
-                                color = RawColors.Tan,
-                                modifier = Modifier.padding(horizontal = 14.dp, vertical = 11.dp)
-                            )
+                            Box(contentAlignment = Alignment.Center) {
+                                Text(
+                                    text = "SRT & Pin",
+                                    fontFamily = BricolageFamily,
+                                    fontWeight = FontWeight.Bold,
+                                    fontSize = 12.5.sp,
+                                    color = RawColors.Tan,
+                                    maxLines = 1,
+                                    softWrap = false
+                                )
+                            }
                         }
                     }
                 }

@@ -8,6 +8,7 @@ import androidx.compose.material3.Typography
 import androidx.compose.material3.darkColorScheme
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.Font
@@ -20,33 +21,53 @@ import com.rawedit.app.R
 
 object RawColors {
     val BgPrimary = Color(0xFF0D0D0F)
-    val CardSurface = Color(0xFF17171A)
-    val HeroSurface = Color(0xFF17171A)
-    val RaisedCard = Color(0xFF202023)
+    val CardSurface = Color(0xFF171718)
+    val HeroSurface = Color(0xFF171718)
+    val RaisedCard = Color(0xFF202024)
     val CodeSurface = Color(0xFF121215)
-    val PillGrey = Color(0xFF2C2B2D)
-    val DockBg = Color(0xDB202023)
+    val PillGrey = Color(0xFF202024)
+    val DockBg = Color(0xEB0D0D0F)
 
-    val Cream = Color(0xFFF7ECE6)
-    val Tan = Color(0xFFCAA07D)
+    val Cream = Color(0xFFF3EFE6)
+    val Tan = Color(0xFFC89F72)
+    val TanLight = Color(0xFFE2BC91)
+    val TanDeep = Color(0xFFAD8255)
     val Ink = Color(0xFF0D0D0F)
 
-    val TextPrimary = Color(0xFFF7ECE6)
-    val TextMuted = Color(0xFFA99D95)
+    val TextPrimary = Color(0xFFF3EFE6)
+    val TextMuted = Color(0xFF8E8A84)
 
-    val Divider = Color(0x14F7ECE6)       // rgba(247,236,230,0.08)
-    val DividerStrong = Color(0x26F7ECE6) // rgba(247,236,230,0.15)
+    val Divider = Color(0x1AF3EFE6)       // rgba(243,239,230,0.10)
+    val DividerStrong = Color(0x33F3EFE6) // rgba(243,239,230,0.20)
 
-    val AccentSoft = Color(0x24CAA07D)    // rgba(202,160,125,0.14)
-    val AccentBorder = Color(0x61CAA07D)  // rgba(202,160,125,0.38)
-    val AccentFocus = Color(0x80CAA07D)
+    val AccentSoft = Color(0x24C89F72)    // rgba(200,159,114,0.14)
+    val AccentBorder = Color(0x66C89F72)  // rgba(200,159,114,0.40)
+    val AccentFocus = Color(0x8CC89F72)
 
-    val PrimaryBtnBg = Color(0xFFF7ECE6)
+    val PrimaryBtnBg = Color(0xFFF3EFE6)
     val PrimaryBtnText = Color(0xFF0D0D0F)
 
-    val ErrorCoral = Color(0xFFFF8F80)
-    val ErrorSoft = Color(0x1FFF8F80)     // rgba(255,143,128,0.12)
-    val ErrorBorder = Color(0x40FF8F80)   // rgba(255,143,128,0.25)
+    val Success = Color(0xFF4E8B63)
+    val Danger = Color(0xFFD9534F)
+    val Blush = Color(0xFFD97B66)
+
+    val ErrorCoral = Color(0xFFD9534F)
+    val ErrorSoft = Color(0x1FD9534F)     // rgba(217,83,79,0.12)
+    val ErrorBorder = Color(0x4DD9534F)   // rgba(217,83,79,0.30)
+
+    val TanButtonBrush: Brush = Brush.linearGradient(
+        colors = listOf(Color(0xFFE2BC91), Color(0xFFC89F72), Color(0xFFAD8255))
+    )
+    val LightButtonBrush: Brush = Brush.linearGradient(
+        colors = listOf(Color(0xFFFFFFFF), Color(0xFFF3EFE6), Color(0xFFDED7C8))
+    )
+    val SuccessButtonBrush: Brush = Brush.linearGradient(
+        colors = listOf(Color(0xFF5BA876), Color(0xFF3E7B53), Color(0xFF2D5C3D))
+    )
+    val DangerButtonBrush: Brush = Brush.linearGradient(
+        colors = listOf(Color(0xFFE86B67), Color(0xFFC94440), Color(0xFF9C2F2B))
+    )
+    val TopInnerHighlight = Color(0x61FFFFFF) // rgba(255,255,255,0.38)
 }
 
 val BricolageFamily = FontFamily(
@@ -74,25 +95,25 @@ val RawTypography = Typography(
     displayLarge = TextStyle(
         fontFamily = BricolageFamily,
         fontWeight = FontWeight.Bold,
-        fontSize = 44.sp,
-        lineHeight = 45.sp,
-        letterSpacing = (-1.4).sp,
+        fontSize = 48.sp,
+        lineHeight = 46.sp,
+        letterSpacing = (-1.8).sp,
         color = RawColors.TextPrimary
     ),
     headlineLarge = TextStyle(
         fontFamily = BricolageFamily,
         fontWeight = FontWeight.Bold,
         fontSize = 40.sp,
-        lineHeight = 42.sp,
-        letterSpacing = (-1.3).sp,
+        lineHeight = 40.sp,
+        letterSpacing = (-1.5).sp,
         color = RawColors.TextPrimary
     ),
     headlineMedium = TextStyle(
         fontFamily = BricolageFamily,
         fontWeight = FontWeight.Bold,
         fontSize = 26.sp,
-        lineHeight = 29.sp,
-        letterSpacing = (-0.8).sp,
+        lineHeight = 28.sp,
+        letterSpacing = (-0.9).sp,
         color = RawColors.TextPrimary
     ),
     titleLarge = TextStyle(
@@ -100,7 +121,7 @@ val RawTypography = Typography(
         fontWeight = FontWeight.Bold,
         fontSize = 20.sp,
         lineHeight = 24.sp,
-        letterSpacing = (-0.2).sp,
+        letterSpacing = (-0.3).sp,
         color = RawColors.TextPrimary
     ),
     titleMedium = TextStyle(
@@ -108,38 +129,38 @@ val RawTypography = Typography(
         fontWeight = FontWeight.Bold,
         fontSize = 18.sp,
         lineHeight = 22.sp,
-        letterSpacing = (-0.1).sp,
+        letterSpacing = (-0.15).sp,
         color = RawColors.TextPrimary
     ),
     bodyLarge = TextStyle(
         fontFamily = BricolageFamily,
         fontWeight = FontWeight.Medium,
-        fontSize = 16.sp,
-        lineHeight = 23.sp,
+        fontSize = 15.5.sp,
+        lineHeight = 22.sp,
         letterSpacing = 0.sp,
         color = RawColors.TextPrimary
     ),
     bodyMedium = TextStyle(
         fontFamily = BricolageFamily,
         fontWeight = FontWeight.Medium,
-        fontSize = 15.5.sp,
-        lineHeight = 22.5.sp,
+        fontSize = 14.sp,
+        lineHeight = 20.sp,
         letterSpacing = 0.sp,
         color = RawColors.TextMuted
     ),
     labelLarge = TextStyle(
         fontFamily = BricolageFamily,
         fontWeight = FontWeight.Bold,
-        fontSize = 17.sp,
-        lineHeight = 21.sp,
+        fontSize = 15.sp,
+        lineHeight = 19.sp,
         letterSpacing = 0.sp,
         color = RawColors.TextPrimary
     ),
     labelMedium = TextStyle(
         fontFamily = JetBrainsMonoFamily,
         fontWeight = FontWeight.Medium,
-        fontSize = 13.sp,
-        lineHeight = 18.sp,
+        fontSize = 12.sp,
+        lineHeight = 16.sp,
         letterSpacing = 0.1.sp,
         fontFeatureSettings = "tnum",
         color = RawColors.TextMuted
@@ -147,9 +168,9 @@ val RawTypography = Typography(
     labelSmall = TextStyle(
         fontFamily = JetBrainsMonoFamily,
         fontWeight = FontWeight.SemiBold,
-        fontSize = 11.5.sp,
-        lineHeight = 15.sp,
-        letterSpacing = 0.1.sp,
+        fontSize = 10.5.sp,
+        lineHeight = 14.sp,
+        letterSpacing = 0.15.sp,
         fontFeatureSettings = "tnum",
         color = RawColors.TextMuted
     )
@@ -180,9 +201,6 @@ fun RawEditTheme(content: @Composable () -> Unit) {
     )
 }
 
-/**
- * Clean zero-overdraw surface wrapper matching the Wallet palette system.
- */
 @Composable
 fun DotGridSurface(
     modifier: Modifier = Modifier,

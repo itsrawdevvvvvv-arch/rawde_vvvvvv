@@ -7,6 +7,12 @@ import android.content.Intent
 import android.os.Build
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
@@ -215,7 +221,7 @@ fun PaletteScreen(
             modifier = Modifier
                 .fillMaxSize()
                 .verticalScroll(scrollState)
-                .padding(start = 18.dp, end = 18.dp, top = 8.dp, bottom = 128.dp),
+                .padding(start = 18.dp, end = 18.dp, top = 8.dp, bottom = 176.dp),
             verticalArrangement = Arrangement.spacedBy(14.dp)
         ) {
             // Clean header without Gemini Free API Key button
@@ -227,7 +233,7 @@ fun PaletteScreen(
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Text(
-                    text = "STUDIO PALETTES",
+                    text = "Palette",
                     fontFamily = JetBrainsMonoFamily,
                     fontWeight = FontWeight.Bold,
                     fontSize = 12.sp,
@@ -313,8 +319,18 @@ fun PaletteScreen(
                     for (i in 0 until 3) {
                         val swatch = swatches.getOrElse(i) { PaletteState.DEFAULT_SWATCHES[i] }
                         val normalizedHex = PaletteColorMath.normalizeHex(swatch.hex)
-                        val rowBg = Color(PaletteColorMath.parseColorInt(normalizedHex))
-                        val rowInk = Color(PaletteColorMath.contrastInkArgb(normalizedHex))
+                        val targetBg = Color(PaletteColorMath.parseColorInt(normalizedHex))
+                        val targetInk = Color(PaletteColorMath.contrastInkArgb(normalizedHex))
+                        val rowBg by animateColorAsState(
+                            targetValue = targetBg,
+                            animationSpec = tween(520),
+                            label = "pal_bg_$i"
+                        )
+                        val rowInk by animateColorAsState(
+                            targetValue = targetInk,
+                            animationSpec = tween(420),
+                            label = "pal_ink_$i"
+                        )
 
                         RawPressButton(
                             onClick = {
@@ -344,30 +360,37 @@ fun PaletteScreen(
                                     modifier = Modifier.align(Alignment.CenterStart)
                                 )
 
-                                Column(
+                                AnimatedContent(
+                                    targetState = swatch.name.lowercase(Locale.US) to normalizedHex,
+                                    transitionSpec = { fadeIn(tween(260)) togetherWith fadeOut(tween(180)) },
                                     modifier = Modifier
                                         .align(Alignment.CenterEnd)
                                         .fillMaxHeight()
                                         .padding(start = 78.dp),
-                                    horizontalAlignment = Alignment.End,
-                                    verticalArrangement = Arrangement.SpaceBetween
-                                ) {
-                                    Text(
-                                        text = swatch.name.lowercase(Locale.US),
-                                        fontFamily = BricolageFamily,
-                                        fontWeight = FontWeight.Bold,
-                                        fontSize = 16.5.sp,
-                                        color = rowInk,
-                                        maxLines = 1,
-                                        overflow = TextOverflow.Ellipsis
-                                    )
-                                    Text(
-                                        text = normalizedHex,
-                                        fontFamily = JetBrainsMonoFamily,
-                                        fontWeight = FontWeight.SemiBold,
-                                        fontSize = 13.5.sp,
-                                        color = rowInk.copy(alpha = 0.92f)
-                                    )
+                                    label = "pal_txt_$i"
+                                ) { (swName, swHex) ->
+                                    Column(
+                                        modifier = Modifier.fillMaxHeight(),
+                                        horizontalAlignment = Alignment.End,
+                                        verticalArrangement = Arrangement.SpaceBetween
+                                    ) {
+                                        Text(
+                                            text = swName,
+                                            fontFamily = BricolageFamily,
+                                            fontWeight = FontWeight.Bold,
+                                            fontSize = 16.5.sp,
+                                            color = rowInk,
+                                            maxLines = 1,
+                                            overflow = TextOverflow.Ellipsis
+                                        )
+                                        Text(
+                                            text = swHex,
+                                            fontFamily = JetBrainsMonoFamily,
+                                            fontWeight = FontWeight.SemiBold,
+                                            fontSize = 13.5.sp,
+                                            color = rowInk.copy(alpha = 0.92f)
+                                        )
+                                    }
                                 }
                             }
                         }

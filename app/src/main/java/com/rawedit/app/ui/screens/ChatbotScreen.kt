@@ -377,13 +377,25 @@ fun RawChatbotScreen(
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 CircleActionButton(icon = RawIconType.BACK, onClick = onBack, size = 44.dp)
-                Text(
-                    text = "AI Assistant",
-                    fontFamily = BricolageFamily,
-                    fontWeight = FontWeight.Bold,
-                    fontSize = 19.sp,
-                    color = RawColors.TextPrimary
-                )
+                Column(
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    modifier = Modifier.clickable { showAttachChooser = true }
+                ) {
+                    Text(
+                        text = "AI Assistant",
+                        fontFamily = BricolageFamily,
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 18.sp,
+                        color = RawColors.TextPrimary
+                    )
+                    Text(
+                        text = activeMode.label,
+                        fontFamily = JetBrainsMonoFamily,
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 10.5.sp,
+                        color = RawColors.Tan
+                    )
+                }
                 Row(
                     horizontalArrangement = Arrangement.spacedBy(8.dp),
                     verticalAlignment = Alignment.CenterVertically
@@ -407,73 +419,6 @@ fun RawChatbotScreen(
                         backgroundColor = RawColors.AccentSoft,
                         iconTint = RawColors.Tan,
                         onClick = { startNewChat() }
-                    )
-                }
-            }
-
-            // Mode Tabs: RAW Design | RAW Script | RAW Assistant + Settings Toggle
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 16.dp, vertical = 4.dp),
-                horizontalArrangement = Arrangement.spacedBy(6.dp),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Row(
-                    modifier = Modifier
-                        .weight(1f)
-                        .clip(CircleShape)
-                        .background(RawColors.CardSurface)
-                        .padding(4.dp),
-                    horizontalArrangement = Arrangement.spacedBy(4.dp)
-                ) {
-                    ChatbotMode.entries.forEach { m ->
-                        val sel = activeMode == m
-                        Box(
-                            modifier = Modifier
-                                .weight(1f)
-                                .clip(CircleShape)
-                                .background(if (sel) RawColors.Tan else Color.Transparent)
-                                .clickable {
-                                    if (activeMode != m) {
-                                        activeMode = m
-                                        if (!sending) {
-                                            currentSessionId = "chat_${System.currentTimeMillis()}"
-                                            messages = emptyList()
-                                            pendingAttachment = null
-                                            inputText = ""
-                                        }
-                                    }
-                                }
-                                .padding(vertical = 8.dp),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Text(
-                                text = m.label,
-                                fontFamily = BricolageFamily,
-                                fontWeight = FontWeight.Bold,
-                                fontSize = 11.5.sp,
-                                color = if (sel) RawColors.Ink else RawColors.TextMuted,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis
-                            )
-                        }
-                    }
-                }
-                Box(
-                    modifier = Modifier
-                        .clip(CircleShape)
-                        .background(if (showModeSettings) RawColors.AccentSoft else RawColors.CardSurface)
-                        .border(1.dp, if (showModeSettings) RawColors.Tan else RawColors.Divider, CircleShape)
-                        .clickable { showModeSettings = !showModeSettings }
-                        .padding(horizontal = 11.dp, vertical = 8.dp)
-                ) {
-                    Text(
-                        text = if (showModeSettings) "Hide" else "Tools",
-                        fontFamily = JetBrainsMonoFamily,
-                        fontWeight = FontWeight.Bold,
-                        fontSize = 10.5.sp,
-                        color = if (showModeSettings) RawColors.Tan else RawColors.TextMuted
                     )
                 }
             }
@@ -1107,11 +1052,56 @@ fun RawChatbotScreen(
                 verticalArrangement = Arrangement.spacedBy(10.dp)
             ) {
                 Text(
-                    text = "Attach to Chat",
+                    text = "Mode & Attachments",
                     fontFamily = BricolageFamily,
                     fontWeight = FontWeight.Bold,
                     fontSize = 18.sp,
                     color = RawColors.TextPrimary
+                )
+                Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    ChatbotMode.entries.forEach { m ->
+                        val isSel = activeMode == m
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clip(RoundedCornerShape(14.dp))
+                                .background(if (isSel) RawColors.Tan else RawColors.RaisedCard)
+                                .clickable {
+                                    if (activeMode != m) {
+                                        activeMode = m
+                                        if (!sending) {
+                                            currentSessionId = "chat_${System.currentTimeMillis()}"
+                                            messages = emptyList()
+                                            pendingAttachment = null
+                                            inputText = ""
+                                        }
+                                    }
+                                    showAttachChooser = false
+                                }
+                                .padding(horizontal = 14.dp, vertical = 11.dp),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text(
+                                text = m.label,
+                                fontFamily = BricolageFamily,
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 14.sp,
+                                color = if (isSel) RawColors.Ink else RawColors.TextPrimary
+                            )
+                            if (isSel) {
+                                RawIcon(RawIconType.CHECK, size = 15.dp, tint = RawColors.Ink)
+                            }
+                        }
+                    }
+                }
+                Text(
+                    text = "UPLOAD",
+                    fontFamily = JetBrainsMonoFamily,
+                    fontWeight = FontWeight.Bold,
+                    fontSize = 10.5.sp,
+                    color = RawColors.TextMuted,
+                    modifier = Modifier.padding(top = 4.dp)
                 )
                 Row(
                     modifier = Modifier

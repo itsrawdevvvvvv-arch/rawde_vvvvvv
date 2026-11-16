@@ -184,7 +184,7 @@ fun HomeScreen(
                     .navigationBarsPadding()
                     .padding(
                         top = if (isCompact) 14.dp else 28.dp,
-                        bottom = 132.dp
+                        bottom = 176.dp
                     ),
                 horizontalAlignment = Alignment.Start
             ) {
@@ -216,7 +216,7 @@ fun HomeScreen(
                         ) {
                             RawIcon(RawIconType.SPARK, size = 14.dp, tint = RawColors.Tan)
                             Text(
-                                text = "AI Assistant",
+                                text = "AI Chat",
                                 fontFamily = JetBrainsMonoFamily,
                                 fontWeight = FontWeight.Bold,
                                 fontSize = 11.5.sp,
@@ -385,7 +385,7 @@ fun HomeScreen(
         FeatheredScrollEdges(
             scrollState = scrollState,
             topHeight = 36.dp,
-            bottomHeight = 128.dp,
+            bottomHeight = 164.dp,
             alwaysShowBottom = true
         )
     }

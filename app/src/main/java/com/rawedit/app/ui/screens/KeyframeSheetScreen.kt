@@ -873,31 +873,41 @@ private fun MinimalCarouselFrameSlide(
                 Box(
                     modifier = Modifier
                         .clip(CircleShape)
-                        .background(if (!sample.isFlagged) Color(0xFF2E9E5B) else Color.Transparent)
+                        .then(
+                            if (!sample.isFlagged) Modifier
+                                .background(RawColors.SuccessButtonBrush)
+                                .border(1.dp, RawColors.TopInnerHighlight, CircleShape)
+                            else Modifier.background(Color.Transparent)
+                        )
                         .clickable { onToggleFlagged(false) }
-                        .padding(horizontal = 11.dp, vertical = 5.dp)
+                        .padding(horizontal = 12.dp, vertical = 6.dp)
                 ) {
                     Text(
                         text = "\u2713 OK",
                         fontFamily = JetBrainsMonoFamily,
                         fontWeight = FontWeight.Bold,
                         fontSize = 11.sp,
-                        color = if (!sample.isFlagged) Color.White else RawColors.TextMuted
+                        color = if (!sample.isFlagged) RawColors.Cream else RawColors.TextMuted
                     )
                 }
                 Box(
                     modifier = Modifier
                         .clip(CircleShape)
-                        .background(if (sample.isFlagged) RawColors.ErrorCoral else Color.Transparent)
+                        .then(
+                            if (sample.isFlagged) Modifier
+                                .background(RawColors.DangerButtonBrush)
+                                .border(1.dp, RawColors.TopInnerHighlight, CircleShape)
+                            else Modifier.background(Color.Transparent)
+                        )
                         .clickable { onToggleFlagged(true) }
-                        .padding(horizontal = 11.dp, vertical = 5.dp)
+                        .padding(horizontal = 12.dp, vertical = 6.dp)
                 ) {
                     Text(
                         text = "\u2691 FLAGGED",
                         fontFamily = JetBrainsMonoFamily,
                         fontWeight = FontWeight.Bold,
                         fontSize = 11.sp,
-                        color = if (sample.isFlagged) Color.Black else RawColors.TextMuted
+                        color = if (sample.isFlagged) RawColors.Cream else RawColors.TextMuted
                     )
                 }
             }

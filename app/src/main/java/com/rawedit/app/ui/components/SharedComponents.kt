@@ -195,9 +195,10 @@ fun RawBottomNavBar(
     ) {
         Box(
             modifier = Modifier
-                .shadow(14.dp, CircleShape, ambientColor = Color.Black, spotColor = Color.Black)
+                .shadow(18.dp, CircleShape, ambientColor = Color.Black, spotColor = Color.Black)
                 .clip(CircleShape)
                 .background(RawColors.DockBg)
+                .border(1.5.dp, RawColors.DividerStrong, CircleShape)
                 .padding(dockPadDp)
         ) {
             // Sliding Cream capsule strictly moved in GPU transform phase
@@ -223,7 +224,8 @@ fun RawBottomNavBar(
                                 modifier = Modifier
                                     .size(plusSizeDp)
                                     .clip(CircleShape)
-                                    .background(RawColors.Tan),
+                                    .background(RawColors.TanButtonBrush)
+                                    .border(1.dp, RawColors.TopInnerHighlight, CircleShape),
                                 contentAlignment = Alignment.Center
                             ) {
                                 RawIcon(
@@ -400,7 +402,17 @@ fun BigPrimaryButton(
                 .height(height)
                 .graphicsLayer { alpha = if (enabled) 1f else 0.32f }
                 .clip(CircleShape)
-                .background(containerColor)
+                .then(
+                    when (containerColor) {
+                        RawColors.Tan -> Modifier
+                            .background(RawColors.TanButtonBrush)
+                            .border(1.dp, RawColors.TopInnerHighlight, CircleShape)
+                        RawColors.Cream -> Modifier
+                            .background(RawColors.LightButtonBrush)
+                            .border(1.dp, RawColors.TopInnerHighlight, CircleShape)
+                        else -> Modifier.background(containerColor)
+                    }
+                )
                 .padding(horizontal = if (height <= 48.dp) 14.dp else 22.dp),
             horizontalArrangement = Arrangement.Center,
             verticalAlignment = Alignment.CenterVertically
