@@ -13,6 +13,7 @@ import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
@@ -43,7 +44,10 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableDoubleStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.rememberUpdatedState
+import androidx.compose.runtime.snapshotFlow
+import kotlinx.coroutines.launch
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -248,6 +252,28 @@ fun TimelineEditorScreen(
     val pxPerSec = 52.dp
     val pxPerSecFloat = with(density) { pxPerSec.toPx() }
     val timelineScroll = rememberScrollState()
+    val scope = rememberCoroutineScope()
+    var programmaticScroll by remember { mutableStateOf(false) }
+
+    LaunchedEffect(timelineScroll, pxPerSecFloat, totalDurationSec) {
+        snapshotFlow { timelineScroll.value }
+            .collect { scrollPx ->
+                if (!programmaticScroll && !isPlaying) {
+                    val t = (scrollPx / pxPerSecFloat).toDouble().coerceIn(0.0, totalDurationSec)
+                    if (abs(t - currentTimeSec) > 0.005) {
+                        currentTimeSec = t
+                    }
+                }
+            }
+    }
+
+    LaunchedEffect(currentTimeSec, isPlaying) {
+        if (isPlaying) {
+            programmaticScroll = true
+            timelineScroll.scrollTo((currentTimeSec * pxPerSecFloat).roundToInt())
+            programmaticScroll = false
+        }
+    }
 
     Column(
         modifier = Modifier
@@ -402,7 +428,13 @@ fun TimelineEditorScreen(
                 range = 0f..totalDurationSec.toFloat(),
                 onChange = {
                     isPlaying = false
-                    currentTimeSec = it.toDouble()
+                    val nextT = it.toDouble()
+                    currentTimeSec = nextT
+                    scope.launch {
+                        programmaticScroll = true
+                        timelineScroll.scrollTo((nextT * pxPerSecFloat).roundToInt())
+                        programmaticScroll = false
+                    }
                 },
                 modifier = Modifier.weight(1f)
             )
@@ -462,113 +494,129 @@ fun TimelineEditorScreen(
                     }
                 }
 
-                // Scrollable Time Ruler + Tracks
-                Box(
+                // Scrollable Time Ruler + Tracks with Center-Fixed Playhead
+                BoxWithConstraints(
                     modifier = Modifier
                         .weight(1f)
                         .fillMaxHeight()
-                        .horizontalScroll(timelineScroll)
                 ) {
-                    Column(modifier = Modifier.width(timelineWidthDp).fillMaxHeight()) {
-                        Box(
+                    val halfViewportDp = maxWidth / 2f
+                    Box(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .horizontalScroll(timelineScroll)
+                    ) {
+                        Column(
                             modifier = Modifier
-                                .fillMaxWidth()
-                                .height(24.dp)
-                                .background(Color(0xFF141418))
-                                .pointerInput(totalDurationSec, pxPerSecFloat) {
-                                    detectTapGestures { offset ->
-                                        isPlaying = false
-                                        currentTimeSec = (offset.x / pxPerSecFloat).toDouble().coerceIn(0.0, totalDurationSec)
+                                .padding(horizontal = halfViewportDp)
+                                .width(timelineWidthDp)
+                                .fillMaxHeight()
+                        ) {
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .height(24.dp)
+                                    .background(Color(0xFF141418))
+                                    .pointerInput(totalDurationSec, pxPerSecFloat) {
+                                        detectTapGestures { offset ->
+                                            isPlaying = false
+                                            val nextT = (offset.x / pxPerSecFloat).toDouble().coerceIn(0.0, totalDurationSec)
+                                            currentTimeSec = nextT
+                                            scope.launch {
+                                                programmaticScroll = true
+                                                timelineScroll.animateScrollTo((nextT * pxPerSecFloat).roundToInt())
+                                                programmaticScroll = false
+                                            }
+                                        }
                                     }
+                            ) {
+                                val secCount = totalDurationSec.toInt() + 1
+                                for (s in 0..secCount) {
+                                    Text(
+                                        text = "${s}s",
+                                        fontFamily = JetBrainsMonoFamily,
+                                        fontSize = 10.sp,
+                                        color = RawColors.TextMuted,
+                                        modifier = Modifier.offset(x = (s * pxPerSec.value).dp + 3.dp, y = 4.dp)
+                                    )
                                 }
-                        ) {
-                            val secCount = totalDurationSec.toInt() + 1
-                            for (s in 0..secCount) {
-                                Text(
-                                    text = "${s}s",
-                                    fontFamily = JetBrainsMonoFamily,
-                                    fontSize = 10.sp,
-                                    color = RawColors.TextMuted,
-                                    modifier = Modifier.offset(x = (s * pxPerSec.value).dp + 3.dp, y = 4.dp)
-                                )
                             }
-                        }
 
-                        LazyColumn(
-                            modifier = Modifier.fillMaxSize(),
-                            contentPadding = PaddingValues(vertical = 2.dp)
-                        ) {
-                            itemsIndexed(layers, key = { _, l -> l.id }) { _, layer ->
-                                val isSel = layer.id == selectedLayerId
-                                val startDp = (layer.startSec * pxPerSec.value).toFloat().dp
-                                val barWidthDp = ((layer.endSec - layer.startSec) * pxPerSec.value).toFloat().coerceAtLeast(44f).dp
-                                val barColor = when (layer.type) {
-                                    TimelineLayerType.VIDEO -> Color(0xFF2B6CB0)
-                                    TimelineLayerType.IMAGE -> Color(0xFF2F855A)
-                                    TimelineLayerType.TEXT -> Color(0xFF3182CE)
-                                    TimelineLayerType.SOLID -> Color(0xFF805AD5)
-                                    TimelineLayerType.SHAPE -> Color(0xFFC89F72)
-                                }
-                                Box(
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .height(36.dp)
-                                        .padding(vertical = 2.dp)
-                                ) {
+                            LazyColumn(
+                                modifier = Modifier.fillMaxSize(),
+                                contentPadding = PaddingValues(vertical = 2.dp)
+                            ) {
+                                itemsIndexed(layers, key = { _, l -> l.id }) { _, layer ->
+                                    val isSel = layer.id == selectedLayerId
+                                    val startDp = (layer.startSec * pxPerSec.value).toFloat().dp
+                                    val barWidthDp = ((layer.endSec - layer.startSec) * pxPerSec.value).toFloat().coerceAtLeast(44f).dp
+                                    val barColor = when (layer.type) {
+                                        TimelineLayerType.VIDEO -> Color(0xFF2B6CB0)
+                                        TimelineLayerType.IMAGE -> Color(0xFF2F855A)
+                                        TimelineLayerType.TEXT -> Color(0xFF3182CE)
+                                        TimelineLayerType.SOLID -> Color(0xFF805AD5)
+                                        TimelineLayerType.SHAPE -> Color(0xFFC89F72)
+                                    }
                                     Box(
                                         modifier = Modifier
-                                            .offset(x = startDp)
-                                            .width(barWidthDp)
-                                            .fillMaxHeight()
-                                            .clip(RoundedCornerShape(7.dp))
-                                            .background(barColor.copy(alpha = if (layer.visible) 0.88f else 0.35f))
-                                            .border(
-                                                width = if (isSel) 2.dp else 0.dp,
-                                                color = if (isSel) RawColors.Cream else Color.Transparent,
-                                                shape = RoundedCornerShape(7.dp)
-                                            )
-                                            .pointerInput(layer.id) {
-                                                detectTapGestures {
-                                                    selectedLayerId = if (selectedLayerId == layer.id) null else layer.id
-                                                    currentTimeSec = layer.startSec.coerceIn(0.0, totalDurationSec)
-                                                }
-                                            }
-                                            .pointerInput(layer.id, pxPerSecFloat) {
-                                                detectHorizontalDragGestures(
-                                                    onDragStart = { selectedLayerId = layer.id },
-                                                    onHorizontalDrag = { change, dragAmount ->
-                                                        change.consume()
-                                                        val dt = (dragAmount / pxPerSecFloat).toDouble()
-                                                        updateLayer(layer.id) { cur ->
-                                                            val dur = cur.endSec - cur.startSec
-                                                            val ns = (cur.startSec + dt).coerceIn(0.0, (totalDurationSec - dur).coerceAtLeast(0.0))
-                                                            cur.copy(startSec = ns, endSec = ns + dur)
-                                                        }
-                                                    }
-                                                )
-                                            }
-                                            .padding(horizontal = 9.dp),
-                                        contentAlignment = Alignment.CenterStart
+                                            .fillMaxWidth()
+                                            .height(36.dp)
+                                            .padding(vertical = 2.dp)
                                     ) {
-                                        Text(
-                                            text = layer.name,
-                                            fontFamily = BricolageFamily,
-                                            fontWeight = FontWeight.Bold,
-                                            fontSize = 11.sp,
-                                            color = Color.White,
-                                            maxLines = 1,
-                                            overflow = TextOverflow.Ellipsis
-                                        )
+                                        Box(
+                                            modifier = Modifier
+                                                .offset(x = startDp)
+                                                .width(barWidthDp)
+                                                .fillMaxHeight()
+                                                .clip(RoundedCornerShape(7.dp))
+                                                .background(barColor.copy(alpha = if (layer.visible) 0.88f else 0.35f))
+                                                .border(
+                                                    width = if (isSel) 2.dp else 0.dp,
+                                                    color = if (isSel) RawColors.Cream else Color.Transparent,
+                                                    shape = RoundedCornerShape(7.dp)
+                                                )
+                                                .pointerInput(layer.id) {
+                                                    detectTapGestures {
+                                                        selectedLayerId = if (selectedLayerId == layer.id) null else layer.id
+                                                    }
+                                                }
+                                                .pointerInput(layer.id, pxPerSecFloat) {
+                                                    detectHorizontalDragGestures(
+                                                        onDragStart = { selectedLayerId = layer.id },
+                                                        onHorizontalDrag = { change, dragAmount ->
+                                                            change.consume()
+                                                            val dt = (dragAmount / pxPerSecFloat).toDouble()
+                                                            updateLayer(layer.id) { cur ->
+                                                                val dur = cur.endSec - cur.startSec
+                                                                val ns = (cur.startSec + dt).coerceIn(0.0, (totalDurationSec - dur).coerceAtLeast(0.0))
+                                                                cur.copy(startSec = ns, endSec = ns + dur)
+                                                            }
+                                                        }
+                                                    )
+                                                }
+                                                .padding(horizontal = 9.dp),
+                                            contentAlignment = Alignment.CenterStart
+                                        ) {
+                                            Text(
+                                                text = layer.name,
+                                                fontFamily = BricolageFamily,
+                                                fontWeight = FontWeight.Bold,
+                                                fontSize = 11.sp,
+                                                color = Color.White,
+                                                maxLines = 1,
+                                                overflow = TextOverflow.Ellipsis
+                                            )
+                                        }
                                     }
                                 }
                             }
                         }
                     }
 
-                    // Playhead Needle
+                    // Fixed Center Playhead Needle
                     Box(
                         modifier = Modifier
-                            .offset(x = (currentTimeSec * pxPerSec.value).toFloat().dp)
+                            .align(Alignment.Center)
                             .width(2.dp)
                             .fillMaxHeight()
                             .background(RawColors.Tan)
@@ -1033,7 +1081,7 @@ private fun MinimalTransformSlider(
             fontWeight = FontWeight.SemiBold,
             fontSize = 11.5.sp,
             color = RawColors.TextPrimary,
-            modifier = Modifier.width(50.dp)
+            modifier = Modifier.width(56.dp)
         )
         SleekScrubBar(
             value = value.coerceIn(range.start, range.endInclusive),

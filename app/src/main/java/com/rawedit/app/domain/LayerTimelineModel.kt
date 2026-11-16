@@ -283,7 +283,7 @@ object LayerTimelineCompiler {
         durationSec: Double
     ): String {
         val layers = LayerTimelineCodec.decode(layersJson)
-        if (layers.isEmpty() && baseHtml.isNotBlank()) return baseHtml
+        // Always inject runtime hook so live timeline edits work even before first save
 
         val safeDur = String.format(Locale.US, "%.3f", durationSec.coerceAtLeast(1.0))
         val safeJson = JSONArray(LayerTimelineCodec.encode(layers)).toString()
@@ -449,7 +449,11 @@ object LayerTimelineCompiler {
                 domEl.style.scale = String(sc);
                 if (op < 0.999) domEl.style.opacity = String(op);
                 if (l.textEdited && l.type === 'text') domEl.textContent = l.text || '';
-                if (l.colorEdited && l.colorHex) domEl.style.color = l.colorHex;
+                if (l.colorEdited && l.colorHex) {
+                  domEl.style.color = l.colorHex;
+                  var kids = domEl.querySelectorAll('*');
+                  for (var ci = 0; ci < kids.length; ci++) kids[ci].style.color = l.colorHex;
+                }
                 if (l.bgColorEdited && l.bgColorHex) domEl.style.backgroundColor = l.bgColorHex;
                 if (l.fontSizeEdited && l.fontSize) domEl.style.fontSize = l.fontSize + 'px';
                 return;
