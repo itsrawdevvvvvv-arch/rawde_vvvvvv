@@ -221,27 +221,19 @@ fun PaletteScreen(
             modifier = Modifier
                 .fillMaxSize()
                 .verticalScroll(scrollState)
-                .padding(start = 18.dp, end = 18.dp, top = 8.dp, bottom = 176.dp),
-            verticalArrangement = Arrangement.spacedBy(14.dp)
+                .padding(start = 18.dp, end = 18.dp, top = 8.dp, bottom = 220.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp)
         ) {
-            // Clean header without Gemini Free API Key button
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(54.dp),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Text(
-                    text = "Palette",
-                    fontFamily = JetBrainsMonoFamily,
-                    fontWeight = FontWeight.Bold,
-                    fontSize = 12.sp,
-                    letterSpacing = 0.8.sp,
-                    color = RawColors.TextMuted
-                )
-                RawPixelMascot(kind = PixelMascotKind.PEEKING_CAT, size = 34.dp)
-            }
+            Text(
+                text = "Palette",
+                fontFamily = BricolageFamily,
+                fontWeight = FontWeight.Bold,
+                fontSize = 44.sp,
+                lineHeight = 44.sp,
+                letterSpacing = (-1.8).sp,
+                color = RawColors.Cream,
+                modifier = Modifier.padding(top = 6.dp)
+            )
 
             errorMsg?.let { err ->
                 Column(
@@ -267,7 +259,7 @@ fun PaletteScreen(
                 modifier = Modifier
                     .fillMaxWidth()
                     .clip(RoundedCornerShape(30.dp))
-                    .background(Color(0xFF0D0D0D))
+                    .background(RawColors.CardSurface)
                     .border(1.dp, Color(0x18F7ECE6), RoundedCornerShape(30.dp))
                     .padding(20.dp)
             ) {
@@ -343,7 +335,7 @@ fun PaletteScreen(
                             Box(
                                 modifier = Modifier
                                     .fillMaxWidth()
-                                    .height(96.dp)
+                                    .height(66.dp)
                                     .clip(RoundedCornerShape(18.dp))
                                     .background(rowBg)
                                     .padding(horizontal = 16.dp, vertical = 12.dp)
@@ -352,8 +344,8 @@ fun PaletteScreen(
                                     text = String.format(Locale.US, "%02d", i + 1),
                                     fontFamily = BricolageFamily,
                                     fontWeight = FontWeight.Bold,
-                                    fontSize = 54.sp,
-                                    lineHeight = 54.sp,
+                                    fontSize = 26.sp,
+                                    lineHeight = 28.sp,
                                     letterSpacing = (-2.0).sp,
                                     style = TextStyle(fontFeatureSettings = "tnum"),
                                     color = rowInk,
@@ -423,133 +415,50 @@ fun PaletteScreen(
                 }
             }
 
-            // Mood & Cloud AI Pairing Card
-            Column(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .clip(RoundedCornerShape(28.dp))
-                    .background(RawColors.CardSurface)
-                    .padding(18.dp),
-                verticalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Text(
-                        text = currentPalette.mood,
-                        fontFamily = BricolageFamily,
-                        fontWeight = FontWeight.Bold,
-                        fontSize = 20.sp,
-                        color = RawColors.TextPrimary,
-                        modifier = Modifier.weight(1f)
-                    )
-                    Spacer(modifier = Modifier.width(8.dp))
-                    Box(
-                        modifier = Modifier
-                            .clip(CircleShape)
-                            .background(RawColors.AccentSoft)
-                            .padding(horizontal = 12.dp, vertical = 5.dp)
-                    ) {
-                        Text(
-                            text = "Ready for Claude",
-                            fontFamily = JetBrainsMonoFamily,
-                            fontWeight = FontWeight.Bold,
-                            fontSize = 11.5.sp,
-                            color = RawColors.Tan
-                        )
-                    }
-                }
-                Text(
-                    text = currentPalette.pairing,
-                    style = RawTypography.bodyMedium.copy(fontSize = 14.5.sp, lineHeight = 20.5.sp),
-                    color = RawColors.TextMuted
-                )
+            BigPrimaryButton(
+                text = "Next Palette (<50ms)",
+                height = 50.dp,
+                enabled = !generating,
+                containerColor = RawColors.Tan,
+                contentColor = RawColors.Ink,
+                onClick = { regeneratePalette() }
+            )
 
-                Spacer(modifier = Modifier.height(4.dp))
-
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.End
-                ) {
-                    RawSecondaryButton(
-                        text = "Copy palette prompt",
-                        height = 38.dp,
-                        leadingIcon = RawIconType.COPY,
-                        fillWidth = false,
-                        onClick = {
-                            val colorsSummary = currentPalette.colors.mapIndexed { idx, s ->
-                                "0${idx + 1} (${s.name}): ${s.hex}"
-                            }.joinToString(", ")
-                            val promptSnippet = "COLOR PALETTE (#${currentPalette.numFormatted} - ${currentPalette.mood}):\n${currentPalette.pairing}\nColors: $colorsSummary"
-                            val cb = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
-                            cb.setPrimaryClip(ClipData.newPlainText("palette prompt", promptSnippet))
-                            haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-                            toastMsg = "Copied palette prompt"
-                        }
-                    )
-                }
-            }
-
-            // Action row: Regenerate + Download PNG
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.spacedBy(10.dp)
             ) {
-                RawPressButton(
-                    onClick = { regeneratePalette() },
-                    enabled = !generating,
-                    modifier = Modifier.weight(1f)
-                ) {
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .height(56.dp)
-                            .clip(CircleShape)
-                            .background(RawColors.RaisedCard)
-                            .padding(horizontal = 14.dp),
-                        horizontalArrangement = Arrangement.Center,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        if (generating) {
-                            CircularProgressIndicator(
-                                color = RawColors.Tan,
-                                strokeWidth = 2.dp,
-                                modifier = Modifier.size(16.dp)
-                            )
-                        } else {
-                            RawIcon(RawIconType.REFRESH, size = 17.dp, tint = RawColors.TextPrimary)
-                        }
-                        Spacer(modifier = Modifier.width(8.dp))
-                        Text(
-                            text = if (generating) "Generating..." else "Regenerate",
-                            fontFamily = BricolageFamily,
-                            fontWeight = FontWeight.Bold,
-                            fontSize = 15.sp,
-                            color = RawColors.TextPrimary,
-                            maxLines = 1,
-                            softWrap = false
-                        )
-                    }
-                }
-
-                BigPrimaryButton(
-                    text = if (exporting) "Exporting..." else "Download PNG",
-                    height = 56.dp,
+                RawSecondaryButton(
+                    text = if (exporting) "Exporting..." else "Export PNG",
+                    height = 46.dp,
                     enabled = !exporting,
                     leadingIcon = RawIconType.DOWNLOAD,
                     onClick = { exportPng(share = false) },
                     modifier = Modifier.weight(1f)
                 )
+                RawSecondaryButton(
+                    text = "Share",
+                    height = 46.dp,
+                    enabled = !exporting,
+                    onClick = { exportPng(share = true) },
+                    modifier = Modifier.weight(1f)
+                )
             }
 
             RawSecondaryButton(
-                text = "Share PNG to Claude",
-                height = 52.dp,
-                leadingIcon = RawIconType.SHARE,
-                enabled = !exporting,
-                onClick = { exportPng(share = true) }
+                text = "Copy palette prompt",
+                height = 42.dp,
+                leadingIcon = RawIconType.COPY,
+                onClick = {
+                    val colorsSummary = currentPalette.colors.mapIndexed { idx, s ->
+                        "0${idx + 1} (${s.name}): ${s.hex}"
+                    }.joinToString(", ")
+                    val promptSnippet = "COLOR PALETTE (#${currentPalette.numFormatted} - ${currentPalette.mood}):\n${currentPalette.pairing}\nColors: $colorsSummary"
+                    val cb = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+                    cb.setPrimaryClip(ClipData.newPlainText("palette prompt", promptSnippet))
+                    haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                    toastMsg = "Copied palette prompt"
+                }
             )
         }
 

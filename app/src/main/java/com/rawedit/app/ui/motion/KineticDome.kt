@@ -15,7 +15,6 @@ import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
@@ -26,7 +25,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.offset
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -47,12 +46,14 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.PathEffect
 import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.TransformOrigin
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
@@ -76,7 +77,8 @@ private val DomeSpeechLines = listOf(
 )
 
 /**
- * Cute Interactive Dome Character rising from the bottom center with:
+ * Cute Interactive Dome Character matching prototype CSS:
+ * - Exact single-arch oval geometry (fill + Cream top rim share the exact same top curve!)
  * - 60fps idle breathing loop on GPU graphicsLayer
  * - Jelly squash-and-stretch spring on tap
  * - Catchlight blinking eyes, rosy cheeks, specular shine, orbiting pixel sparkles
@@ -180,36 +182,35 @@ fun CuteDomeCharacter(
     Box(
         modifier = modifier
             .fillMaxWidth()
-            .height(214.dp)
+            .height(225.dp)
             .graphicsLayer {
-                translationY = slideProgress * 260.dp.toPx()
+                translationY = slideProgress * 280.dp.toPx()
                 alpha = 1f - slideProgress
             },
         contentAlignment = Alignment.BottomCenter
     ) {
-        // Grounded soft dark ambient shadow beneath Dome (no hard box edges)
+        // Grounded soft dark ambient shadow beneath Dome (zero hard box edges)
         Box(
             modifier = Modifier
                 .fillMaxWidth()
-                .height(145.dp)
+                .height(160.dp)
                 .align(Alignment.BottomCenter)
                 .background(
                     Brush.verticalGradient(
                         0f to Color.Transparent,
-                        0.55f to RawColors.BgPrimary.copy(alpha = 0.72f),
+                        0.45f to RawColors.BgPrimary.copy(alpha = 0.78f),
                         1f to RawColors.BgPrimary
                     )
                 )
         )
 
-        // Interactive Dome Body
+        // Interactive Dome Body (flush to bottom)
         Box(
             modifier = Modifier
-                .width(360.dp)
-                .height(176.dp)
-                .offset(y = 28.dp)
+                .width(376.dp)
+                .height(186.dp)
                 .graphicsLayer {
-                    transformOrigin = androidx.compose.ui.graphics.TransformOrigin(0.5f, 1f)
+                    transformOrigin = TransformOrigin(0.5f, 1f)
                     scaleX = idleSx * jellyScaleX.value
                     scaleY = idleSy * jellyScaleY.value
                     translationY = idleY + jellyOffsetY.value
@@ -224,14 +225,25 @@ fun CuteDomeCharacter(
             Canvas(modifier = Modifier.fillMaxSize()) {
                 val w = size.width
                 val h = size.height
+                val strokePx = 3.dp.toPx()
+                val topInset = strokePx * 0.5f
+                val archRect = Rect(
+                    left = strokePx,
+                    top = topInset,
+                    right = w - strokePx,
+                    bottom = h * 1.92f
+                )
 
-                // Dome Arch Path
+                // Single exact arch path for fill
                 val domePath = Path().apply {
-                    moveTo(0f, h)
-                    lineTo(0f, h * 0.55f)
-                    cubicTo(0f, 0f, w * 0.22f, 0f, w * 0.5f, 0f)
-                    cubicTo(w * 0.78f, 0f, w, 0f, w, h * 0.55f)
-                    lineTo(w, h)
+                    moveTo(archRect.left, h)
+                    arcTo(
+                        rect = archRect,
+                        startAngleDegrees = 180f,
+                        sweepAngleDegrees = 180f,
+                        forceMoveTo = false
+                    )
+                    lineTo(archRect.right, h)
                     close()
                 }
                 drawPath(
@@ -239,25 +251,25 @@ fun CuteDomeCharacter(
                     brush = Brush.radialGradient(
                         colors = listOf(Color(0xFFDAB68B), RawColors.Tan, Color(0xFFA98055)),
                         center = Offset(w * 0.35f, h * 0.22f),
-                        radius = w * 0.78f
+                        radius = w * 0.80f
                     )
                 )
 
-                // Top Cream Rim
+                // Exact matching Cream top rim along the same archRect
                 drawArc(
                     color = RawColors.Cream,
-                    startAngle = 180f,
-                    sweepAngle = 180f,
+                    startAngle = 182f,
+                    sweepAngle = 176f,
                     useCenter = false,
-                    topLeft = Offset(2f, 1.5f),
-                    size = Size(w - 4f, h * 1.1f),
-                    style = Stroke(width = 3.dp.toPx(), cap = StrokeCap.Round)
+                    topLeft = Offset(archRect.left, archRect.top),
+                    size = Size(archRect.width, archRect.height),
+                    style = Stroke(width = strokePx, cap = StrokeCap.Round)
                 )
 
                 // Specular shine pill
                 drawRoundRect(
                     color = RawColors.Cream.copy(alpha = 0.55f),
-                    topLeft = Offset(w - 92.dp.toPx(), 16.dp.toPx()),
+                    topLeft = Offset(w - 94.dp.toPx(), 18.dp.toPx()),
                     size = Size(26.dp.toPx(), 8.dp.toPx()),
                     cornerRadius = CornerRadius(99f, 99f)
                 )
@@ -266,13 +278,13 @@ fun CuteDomeCharacter(
                 val spOffset = -9.dp.toPx() * sparkFloat
                 drawRoundRect(
                     color = RawColors.Cream.copy(alpha = 0.45f + 0.55f * sparkFloat),
-                    topLeft = Offset(44.dp.toPx(), 18.dp.toPx() + spOffset),
+                    topLeft = Offset(46.dp.toPx(), 18.dp.toPx() + spOffset),
                     size = Size(6.dp.toPx(), 6.dp.toPx()),
                     cornerRadius = CornerRadius(2.dp.toPx(), 2.dp.toPx())
                 )
                 drawRoundRect(
                     color = RawColors.Cream.copy(alpha = 0.45f + 0.55f * (1f - sparkFloat)),
-                    topLeft = Offset(w - 48.dp.toPx(), 24.dp.toPx() - spOffset * 0.8f),
+                    topLeft = Offset(w - 50.dp.toPx(), 24.dp.toPx() - spOffset * 0.8f),
                     size = Size(5.dp.toPx(), 5.dp.toPx()),
                     cornerRadius = CornerRadius(1.5.dp.toPx(), 1.5.dp.toPx())
                 )
@@ -280,7 +292,7 @@ fun CuteDomeCharacter(
 
             // Face: Blinking Catchlight Eyes + Rosy Cheeks + Mouth
             Column(
-                modifier = Modifier.padding(top = 26.dp),
+                modifier = Modifier.padding(top = 28.dp),
                 horizontalAlignment = Alignment.CenterHorizontally
             ) {
                 val eyeScale = if (tappedHappy) 1.14f else 1f
@@ -357,7 +369,7 @@ fun CuteDomeCharacter(
         Box(
             modifier = Modifier
                 .align(Alignment.TopCenter)
-                .padding(top = 42.dp)
+                .padding(top = 22.dp)
                 .graphicsLayer {
                     translationY = idleY + jellyOffsetY.value * 0.6f
                 }
@@ -380,7 +392,6 @@ fun CuteDomeCharacter(
 
 /**
  * Kinetic Intro Splash: RAW EDIT reveal + Warm Tan pill + progress sweep + rising Dome.
- * Tap anywhere to skip immediately, or auto-dismisses smoothly after ~1.8s.
  */
 @Composable
 fun KineticIntroSplash(
@@ -476,7 +487,7 @@ fun KineticIntroSplash(
                 speechText = "Tap anywhere to start",
                 visible = true,
                 isHappyState = true,
-                modifier = Modifier.align(Alignment.BottomCenter)
+                modifier = Modifier.align(Alignment.BottomCenter).navigationBarsPadding()
             )
         }
     }

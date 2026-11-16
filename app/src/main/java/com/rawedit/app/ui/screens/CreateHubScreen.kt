@@ -239,7 +239,7 @@ fun CreateHubScreen(
         LazyColumn(
             state = listState,
             modifier = Modifier.fillMaxSize(),
-            contentPadding = PaddingValues(start = 18.dp, end = 18.dp, top = 8.dp, bottom = 132.dp),
+            contentPadding = PaddingValues(start = 18.dp, end = 18.dp, top = 8.dp, bottom = 220.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
             item {
@@ -303,25 +303,6 @@ fun CreateHubScreen(
                         modifier = Modifier.weight(1f)
                     )
 
-                }
-            }
-
-            // Borderless stat pills (.stats / .stat 28dp)
-            item {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(10.dp)
-                ) {
-                    HubStatPill(
-                        icon = RawIconType.MIC,
-                        text = if (hasAudio) FormatHelpers.formatDuration(project.audioDurationSec) else "No audio yet",
-                        modifier = Modifier.weight(1f)
-                    )
-                    HubStatPill(
-                        icon = RawIconType.FILE,
-                        text = "${activeAspect.label} (${activeAspect.width}x${activeAspect.height})",
-                        modifier = Modifier.weight(1f)
-                    )
                 }
             }
 
@@ -410,56 +391,6 @@ fun CreateHubScreen(
                                     softWrap = false
                                 )
                             }
-                        }
-                    }
-                }
-            }
-
-            // Reel Steps heading + pill readiness badge
-            item {
-                val badgeBg by animateColorAsState(
-                    targetValue = if (canCreate) RawColors.AccentSoft else RawColors.RaisedCard,
-                    animationSpec = tween(if (animEnabled) 260 else 0, easing = RawEasings.Morph),
-                    label = "hub_sp_bg"
-                )
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(top = 6.dp, start = 2.dp, end = 2.dp),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Text(
-                        text = "Reel Steps",
-                        fontFamily = BricolageFamily,
-                        fontWeight = FontWeight.Bold,
-                        fontSize = 23.sp,
-                        letterSpacing = (-0.5).sp,
-                        color = RawColors.TextPrimary
-                    )
-                    Box(
-                        modifier = Modifier
-                            .clip(CircleShape)
-                            .background(badgeBg)
-                            .padding(horizontal = 13.dp, vertical = 7.dp)
-                    ) {
-                        AnimatedContent(
-                            targetState = canCreate,
-                            transitionSpec = {
-                                if (!animEnabled) fadeIn(tween(0)) togetherWith fadeOut(tween(0))
-                                else (fadeIn(tween(180)) + scaleIn(initialScale = 0.94f, animationSpec = tween(180)))
-                                    .togetherWith(fadeOut(tween(130)) + scaleOut(targetScale = 0.94f, animationSpec = tween(130)))
-                            },
-                            label = "hub_ready_pill"
-                        ) { ready ->
-                            Text(
-                                text = if (ready) "Ready to create" else "Steps 1 & 4 needed",
-                                fontFamily = JetBrainsMonoFamily,
-                                fontWeight = FontWeight.SemiBold,
-                                fontSize = 11.5.sp,
-                                style = TextStyle(fontFeatureSettings = "tnum"),
-                                color = if (ready) RawColors.Tan else RawColors.TextMuted
-                            )
                         }
                     }
                 }

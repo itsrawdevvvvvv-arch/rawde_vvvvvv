@@ -450,11 +450,7 @@ private fun MainAuthenticatedHost(
                         }
 
 
-                        RawBottomNavBar(
-                            currentTab = currentTab,
-                            onSelectTab = ::switchTab,
-                            modifier = Modifier.align(Alignment.BottomCenter)
-                        )
+
                     }
                 }
 
@@ -874,6 +870,14 @@ private fun MainAuthenticatedHost(
             isHappyState = (currentRoute == AppRoute.Tabs && currentTab == MainTab.HOME) || currentRoute is AppRoute.Result,
             modifier = Modifier.align(Alignment.BottomCenter)
         )
+
+        if (currentRoute == AppRoute.Tabs) {
+            RawBottomNavBar(
+                currentTab = currentTab,
+                onSelectTab = ::switchTab,
+                modifier = Modifier.align(Alignment.BottomCenter)
+            )
+        }
 
         RawToastBanner(
             message = hostToastMsg,

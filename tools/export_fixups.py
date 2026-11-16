@@ -529,6 +529,28 @@ def fix_leftover_ghskills():
         print("  leftover ghSkills condition removed")
 
 
+def fix_format_helpers_alias():
+    """Screens call FormatHelpers.formatBytes, which the class does not define."""
+    comp = root / "app/src/main/java/com/rawedit/app/ui/components/SharedComponents.kt"
+    s = read(comp)
+    if s is None:
+        return
+    used = False
+    for p in (root / "app/src/main/java").rglob("*.kt"):
+        if p == comp:
+            continue
+        if "FormatHelpers.formatBytes" in p.read_text():
+            used = True
+            break
+    if not used or "fun formatBytes" in s:
+        return
+    anchor = "    fun formatDate(millis: Long): String {"
+    if anchor in s:
+        s = s.replace(anchor, "    fun formatBytes(bytes: Long): String = formatFileSize(bytes)\n\n" + anchor, 1)
+        comp.write_text(s)
+        print("  FormatHelpers.formatBytes alias added")
+
+
 STEPS = [
     fix_version,
     fix_navigation,
@@ -549,6 +571,7 @@ STEPS = [
     fix_chatbot_state_order,
     fix_enum_body_brace,
     fix_leftover_ghskills,
+    fix_format_helpers_alias,
 ]
 
 for step in STEPS:
