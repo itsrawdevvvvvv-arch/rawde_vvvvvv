@@ -107,6 +107,8 @@ COMMON_IMPORTS = [
     (r'\bDialog\(', 'androidx.compose.ui.window.Dialog'),
     (r'\brememberCoroutineScope\(', 'androidx.compose.runtime.rememberCoroutineScope'),
     (r'(?<![.\w])launch\(', 'kotlinx.coroutines.launch'),
+    (r'\blaunch\s*\{', 'kotlinx.coroutines.launch'),
+    (r'\bAnnotatedString\b', 'androidx.compose.ui.text.AnnotatedString'),
     (r'\baspectRatio\(', 'androidx.compose.foundation.layout.aspectRatio'),
     (r'\bImage\(', 'androidx.compose.foundation.Image'),
     (r'\.asImageBitmap\(\)', 'androidx.compose.ui.graphics.asImageBitmap'),
