@@ -182,7 +182,7 @@ fun CuteDomeCharacter(
     Box(
         modifier = modifier
             .fillMaxWidth()
-            .height(225.dp)
+            .height(250.dp)
             .graphicsLayer {
                 translationY = slideProgress * 280.dp.toPx()
                 alpha = 1f - slideProgress
@@ -207,8 +207,8 @@ fun CuteDomeCharacter(
         // Interactive Dome Body (flush to bottom)
         Box(
             modifier = Modifier
-                .width(376.dp)
-                .height(186.dp)
+                .fillMaxWidth(0.95f)
+                .height(208.dp)
                 .graphicsLayer {
                     transformOrigin = TransformOrigin(0.5f, 1f)
                     scaleX = idleSx * jellyScaleX.value
@@ -292,19 +292,19 @@ fun CuteDomeCharacter(
 
             // Face: Blinking Catchlight Eyes + Rosy Cheeks + Mouth
             Column(
-                modifier = Modifier.padding(top = 28.dp),
+                modifier = Modifier.padding(top = 30.dp),
                 horizontalAlignment = Alignment.CenterHorizontally
             ) {
                 val eyeScale = if (tappedHappy) 1.14f else 1f
                 val eyeYScale = if (tappedHappy) 0.90f else blinkScaleY
                 Row(
-                    horizontalArrangement = Arrangement.spacedBy(34.dp),
+                    horizontalArrangement = Arrangement.spacedBy(40.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     repeat(2) {
                         Box(
                             modifier = Modifier
-                                .size(width = 14.dp, height = 15.dp)
+                                .size(width = 17.dp, height = 18.dp)
                                 .graphicsLayer {
                                     scaleX = eyeScale
                                     scaleY = eyeYScale
@@ -332,12 +332,12 @@ fun CuteDomeCharacter(
                 }
                 Row(
                     modifier = Modifier.padding(top = 1.dp),
-                    horizontalArrangement = Arrangement.spacedBy(60.dp)
+                    horizontalArrangement = Arrangement.spacedBy(70.dp)
                 ) {
                     repeat(2) {
                         Box(
                             modifier = Modifier
-                                .size(width = 12.dp, height = 6.dp)
+                                .size(width = 14.dp, height = 7.dp)
                                 .clip(CircleShape)
                                 .background(RawColors.Blush.copy(alpha = 0.65f))
                         )
@@ -369,20 +369,20 @@ fun CuteDomeCharacter(
         Box(
             modifier = Modifier
                 .align(Alignment.TopCenter)
-                .padding(top = 22.dp)
+                .padding(top = 18.dp)
                 .graphicsLayer {
                     translationY = idleY + jellyOffsetY.value * 0.6f
                 }
                 .shadow(10.dp, CircleShape, ambientColor = Color.Black, spotColor = Color.Black)
                 .clip(CircleShape)
                 .background(RawColors.Cream)
-                .padding(horizontal = 13.dp, vertical = 4.dp)
+                .padding(horizontal = 14.dp, vertical = 5.dp)
         ) {
             Text(
                 text = customSpeech,
                 fontFamily = JetBrainsMonoFamily,
                 fontWeight = FontWeight.Bold,
-                fontSize = 10.5.sp,
+                fontSize = 11.5.sp,
                 color = RawColors.Ink,
                 maxLines = 1
             )
@@ -499,7 +499,7 @@ fun KineticIntroSplash(
 @Composable
 fun AnimatedDottedStepArrow(
     modifier: Modifier = Modifier,
-    height: Dp = 20.dp
+    height: Dp = 24.dp
 ) {
     val inf = rememberInfiniteTransition(label = "dotted_flow")
     val phase by inf.animateFloat(
@@ -527,7 +527,7 @@ fun AnimatedDottedStepArrow(
                 path = path,
                 color = RawColors.Tan,
                 style = Stroke(
-                    width = 2.2.dp.toPx(),
+                    width = 2.6.dp.toPx(),
                     cap = StrokeCap.Round,
                     pathEffect = PathEffect.dashPathEffect(floatArrayOf(8f, 10f), phase)
                 )

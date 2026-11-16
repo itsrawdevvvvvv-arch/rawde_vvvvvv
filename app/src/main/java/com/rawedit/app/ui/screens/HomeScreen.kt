@@ -68,8 +68,8 @@ fun HomeScreen(
     val headlineStyle = TextStyle(
         fontFamily = BricolageFamily,
         fontWeight = FontWeight.Bold,
-        fontSize = 54.sp,
-        lineHeight = 50.sp,
+        fontSize = 60.sp,
+        lineHeight = 56.sp,
         letterSpacing = (-2.4).sp,
         color = RawColors.TextPrimary
     )
@@ -87,7 +87,7 @@ fun HomeScreen(
                 .fillMaxSize()
                 .verticalScroll(scrollState)
                 .navigationBarsPadding()
-                .padding(start = 20.dp, end = 20.dp, top = 16.dp, bottom = 195.dp),
+                .padding(start = 20.dp, end = 20.dp, top = 16.dp, bottom = 225.dp),
             horizontalAlignment = Alignment.Start
         ) {
             // Top Row: Oversized "Make a reel" + Premium "AI Chat" pill
@@ -206,8 +206,8 @@ fun HomeScreen(
                 text = "Voice in, reel out. Nothing leaves the phone.",
                 fontFamily = BricolageFamily,
                 fontWeight = FontWeight.Medium,
-                fontSize = 13.5.sp,
-                lineHeight = 19.sp,
+                fontSize = 15.sp,
+                lineHeight = 21.sp,
                 color = RawColors.TextMuted
             )
 
@@ -217,7 +217,7 @@ fun HomeScreen(
             BigPrimaryButton(
                 text = "+ Start New Reel \u2192",
                 onClick = { onStartNewReel(Offset.Zero) },
-                height = 54.dp,
+                height = 58.dp,
                 containerColor = RawColors.Tan,
                 contentColor = RawColors.Ink
             )
@@ -252,7 +252,7 @@ fun HomeScreen(
                         text = draftLabel,
                         fontFamily = BricolageFamily,
                         fontWeight = FontWeight.Bold,
-                        fontSize = 13.5.sp,
+                        fontSize = 15.sp,
                         color = RawColors.Cream
                     )
                 }

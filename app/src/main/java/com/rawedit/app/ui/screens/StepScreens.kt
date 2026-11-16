@@ -280,7 +280,7 @@ fun AddVoiceScreen(
             modifier = Modifier
                 .fillMaxSize()
                 .verticalScroll(scrollState)
-                .padding(start = 18.dp, end = 18.dp, bottom = 128.dp),
+                .padding(start = 18.dp, end = 18.dp, bottom = 235.dp),
             verticalArrangement = Arrangement.spacedBy(14.dp)
         ) {
             Row(
@@ -1048,7 +1048,7 @@ fun CopyPromptScreen(
             modifier = Modifier
                 .fillMaxSize()
                 .verticalScroll(scrollState)
-                .padding(start = 18.dp, end = 18.dp, bottom = 128.dp),
+                .padding(start = 18.dp, end = 18.dp, bottom = 235.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
             Row(
@@ -1754,7 +1754,7 @@ fun CodePasteScreen(
     }
 
     val valid = validationResult?.takeIf { it.isValid }
-    val bottomClearance = if (valid != null) 172.dp else 118.dp
+    val bottomClearance = if (valid != null) 250.dp else 235.dp
 
     Box(
         modifier = Modifier

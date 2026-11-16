@@ -335,7 +335,7 @@ fun PaletteScreen(
                             Box(
                                 modifier = Modifier
                                     .fillMaxWidth()
-                                    .height(66.dp)
+                                    .height(76.dp)
                                     .clip(RoundedCornerShape(18.dp))
                                     .background(rowBg)
                                     .padding(horizontal = 16.dp, vertical = 12.dp)
@@ -344,7 +344,7 @@ fun PaletteScreen(
                                     text = String.format(Locale.US, "%02d", i + 1),
                                     fontFamily = BricolageFamily,
                                     fontWeight = FontWeight.Bold,
-                                    fontSize = 26.sp,
+                                    fontSize = 30.sp,
                                     lineHeight = 28.sp,
                                     letterSpacing = (-2.0).sp,
                                     style = TextStyle(fontFeatureSettings = "tnum"),
@@ -364,13 +364,13 @@ fun PaletteScreen(
                                     Column(
                                         modifier = Modifier.fillMaxHeight(),
                                         horizontalAlignment = Alignment.End,
-                                        verticalArrangement = Arrangement.SpaceBetween
+                                        verticalArrangement = Arrangement.Center
                                     ) {
                                         Text(
                                             text = swName,
                                             fontFamily = BricolageFamily,
                                             fontWeight = FontWeight.Bold,
-                                            fontSize = 16.5.sp,
+                                            fontSize = 15.5.sp,
                                             color = rowInk,
                                             maxLines = 1,
                                             overflow = TextOverflow.Ellipsis
@@ -379,7 +379,7 @@ fun PaletteScreen(
                                             text = swHex,
                                             fontFamily = JetBrainsMonoFamily,
                                             fontWeight = FontWeight.SemiBold,
-                                            fontSize = 13.5.sp,
+                                            fontSize = 13.sp,
                                             color = rowInk.copy(alpha = 0.92f)
                                         )
                                     }

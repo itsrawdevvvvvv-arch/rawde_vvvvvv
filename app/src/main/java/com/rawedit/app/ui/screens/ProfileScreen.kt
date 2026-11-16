@@ -250,83 +250,30 @@ fun ProfileScreen(
         LazyColumn(
             state = listState,
             modifier = Modifier.fillMaxSize(),
-            contentPadding = PaddingValues(bottom = 128.dp)
+            contentPadding = PaddingValues(bottom = 240.dp)
         ) {
             // Hero (.ph) + Overlapping Straight ID Card (.idc)
             item {
-                Column(modifier = Modifier.fillMaxWidth()) {
-                    Box(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .defaultMinSize(minHeight = 174.dp)
-                            .clipToBounds()
-                            .background(RawColors.HeroSurface)
-                    ) {
-                        Box(modifier = Modifier.matchParentSize()) {
-                            Text(
-                                text = "ID",
-                                fontFamily = BricolageFamily,
-                                fontWeight = FontWeight.Bold,
-                                fontSize = 196.sp,
-                                lineHeight = 196.sp,
-                                letterSpacing = (-6).sp,
-                                color = RawColors.TextPrimary.copy(alpha = 0.045f),
-                                modifier = Modifier
-                                    .align(Alignment.TopEnd)
-                                    .offset(x = (-4).dp, y = (-14).dp)
-                            )
-                        }
-
-                        Box(
-                            modifier = Modifier
-                                .align(Alignment.BottomCenter)
-                                .fillMaxWidth()
-                                .height(1.dp)
-                                .background(RawColors.Divider)
-                        )
-
-                        Column(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .statusBarsPadding()
-                                .padding(start = 18.dp, end = 18.dp, top = 6.dp, bottom = 38.dp)
-                        ) {
-                            Row(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .height(54.dp),
-                                horizontalArrangement = Arrangement.SpaceBetween,
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                PixelRawEditLogo(width = 42.dp, height = 33.dp)
-                                RawPixelMascot(
-                                    kind = PixelMascotKind.PEEKING_CAT,
-                                    size = 54.dp,
-                                    noBlink = true
-                                )
-                            }
-                            Spacer(modifier = Modifier.height(10.dp))
-                            Text(
-                                text = "Profile",
-                                fontFamily = BricolageFamily,
-                                fontWeight = FontWeight.Bold,
-                                fontSize = 42.sp,
-                                lineHeight = 44.sp,
-                                letterSpacing = (-1.4).sp,
-                                color = RawColors.TextPrimary
-                            )
-                        }
-                    }
-
+                Column(modifier = Modifier.fillMaxWidth().statusBarsPadding().padding(top = 14.dp)) {
+                    Text(
+                        text = "Profile",
+                        fontFamily = BricolageFamily,
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 44.sp,
+                        lineHeight = 46.sp,
+                        letterSpacing = (-1.6).sp,
+                        color = RawColors.Cream,
+                        modifier = Modifier.padding(horizontal = 20.dp, vertical = 8.dp)
+                    )
                     // Straight Overlapping ID Card (.idc 28dp borderless + .spine)
                     Box(
                         modifier = Modifier
                             .zIndex(2f)
-                            .offset(y = (-24).dp)
-                            .padding(horizontal = 18.dp)
+                                                        .padding(horizontal = 18.dp)
                             .fillMaxWidth()
-                            .clip(RoundedCornerShape(28.dp))
+                            .clip(RoundedCornerShape(26.dp))
                             .background(RawColors.CardSurface)
+                            .border(1.5.dp, RawColors.AccentBorder, RoundedCornerShape(26.dp))
                     ) {
                         Row(
                             modifier = Modifier
@@ -344,14 +291,28 @@ fun ProfileScreen(
                                     verticalAlignment = Alignment.CenterVertically
                                 ) {
                                     Text(
-                                        text = "Profile  \u2022  reel maker",
+                                        text = "CREATOR ID · #001",
                                         fontFamily = JetBrainsMonoFamily,
                                         fontWeight = FontWeight.Medium,
                                         fontSize = 13.sp,
                                         letterSpacing = 0.2.sp,
                                         color = RawColors.Tan
                                     )
-                                    RawPixelMascot(kind = PixelMascotKind.PHANTOM_BUDDY, size = 30.dp)
+                                    Box(
+        modifier = Modifier
+            .clip(CircleShape)
+            .background(RawColors.TanButtonBrush)
+            .clickable { editingName = !editingName }
+            .padding(horizontal = 11.dp, vertical = 4.dp)
+    ) {
+        Text(
+            text = if (editingName) "Close" else "Edit ID",
+            fontFamily = JetBrainsMonoFamily,
+            fontWeight = FontWeight.Bold,
+            fontSize = 10.sp,
+            color = RawColors.Ink
+        )
+    }
                                 }
 
                                 Spacer(modifier = Modifier.height(14.dp))

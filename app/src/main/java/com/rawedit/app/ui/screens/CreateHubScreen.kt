@@ -239,8 +239,8 @@ fun CreateHubScreen(
         LazyColumn(
             state = listState,
             modifier = Modifier.fillMaxSize(),
-            contentPadding = PaddingValues(start = 18.dp, end = 18.dp, top = 8.dp, bottom = 220.dp),
-            verticalArrangement = Arrangement.spacedBy(12.dp)
+            contentPadding = PaddingValues(start = 18.dp, end = 18.dp, top = 8.dp, bottom = 240.dp),
+            verticalArrangement = Arrangement.spacedBy(6.dp)
         ) {
             item {
                 Row(

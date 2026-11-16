@@ -188,7 +188,7 @@ fun AssetLockerScreen(
                 LazyColumn(
                     state = listState,
                     modifier = Modifier.fillMaxSize(),
-                    contentPadding = PaddingValues(start = 18.dp, end = 18.dp, top = 4.dp, bottom = 128.dp),
+                    contentPadding = PaddingValues(start = 18.dp, end = 18.dp, top = 4.dp, bottom = 235.dp),
                     verticalArrangement = Arrangement.spacedBy(12.dp)
                 ) {
                     item {
