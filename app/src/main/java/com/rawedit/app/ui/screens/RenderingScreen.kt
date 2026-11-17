@@ -68,6 +68,7 @@ import com.rawedit.app.ui.icons.RawIconType
 import com.rawedit.app.ui.icons.RawPixelMascot
 import com.rawedit.app.ui.motion.FeatheredScrollEdges
 import com.rawedit.app.ui.theme.BricolageCondensedFamily
+import com.rawedit.app.ui.components.DomeHeadline
 import com.rawedit.app.ui.theme.BricolageFamily
 import com.rawedit.app.ui.theme.JetBrainsMonoFamily
 import com.rawedit.app.ui.theme.RawColors
@@ -182,14 +183,13 @@ fun RenderingScreen(
                     verticalArrangement = Arrangement.spacedBy(10.dp)
                 ) {
                     RawPixelMascot(kind = PixelMascotKind.CODE_BOT, size = 86.dp)
-                    Text(
-                        text = if (state.stage == RenderStage.CANCELLED) "Render cancelled" else "Render failed",
-                        fontFamily = BricolageFamily,
-                        fontWeight = FontWeight.Bold,
-                        fontSize = 34.sp,
-                        lineHeight = 36.sp,
-                        letterSpacing = (-1.0).sp,
-                        color = RawColors.TextPrimary
+                    DomeHeadline(
+                        parts = listOf(
+                            com.rawedit.app.ui.components.DomeHeadPart.Plain(
+                                if (state.stage == RenderStage.CANCELLED) "Render\ncancelled" else "Render\nfailed"
+                            )
+                        ),
+                        size = 34.dp
                     )
                     Text(
                         text = state.errorMessage ?: "Your files are safe on your phone.",
