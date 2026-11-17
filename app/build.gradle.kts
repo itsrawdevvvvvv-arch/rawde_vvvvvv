@@ -14,8 +14,8 @@ android {
         applicationId = "com.rawedit.app"
         minSdk = 28
         targetSdk = 36
-        versionCode = 68
-        versionName = "1.67.0"
+        versionCode = 69
+        versionName = "1.68.0"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }

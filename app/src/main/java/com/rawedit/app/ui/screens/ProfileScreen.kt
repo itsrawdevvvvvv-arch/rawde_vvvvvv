@@ -126,7 +126,7 @@ fun ProfileScreen(
             .statusBarsPadding()
             .verticalScroll(rememberScrollState())
             .padding(horizontal = 20.dp)
-            .padding(top = 16.dp, bottom = 28.dp)
+            .padding(top = 16.dp, bottom = 150.dp)
     ) {
         StaggerIn(0) {
             DomeHeadline(

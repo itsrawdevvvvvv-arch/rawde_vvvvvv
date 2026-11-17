@@ -799,18 +799,8 @@ private fun StepActionCard(
     val isDarkCard = ((index % 3) + 3) % 3 == 2
     val effectiveAlpha = if (step.enabled) 1f else 0.52f
 
-    val pillBg = when {
-        isDarkCard && step.statusDone -> RawColors.AccentSoft
-        isDarkCard -> RawColors.RaisedCard
-        step.statusDone -> RawColors.Ink
-        else -> palette.badgeBg
-    }
-    val pillText = when {
-        isDarkCard && step.statusDone -> RawColors.Tan
-        isDarkCard -> RawColors.TextMuted
-        step.statusDone -> RawColors.Cream
-        else -> palette.badgeText
-    }
+    val pillBg = if (step.statusDone) RawColors.AccentSoft else RawColors.RaisedCard
+    val pillText = if (step.statusDone) RawColors.Tan else RawColors.TextMuted
 
     RawPressButton(
         onClick = step.onClick,
@@ -836,7 +826,7 @@ private fun StepActionCard(
                 RawIcon(
                     type = step.icon,
                     size = 21.dp,
-                    tint = palette.iconTint.copy(alpha = effectiveAlpha)
+                    tint = if (step.statusDone) RawColors.Tan else RawColors.TextMuted
                 )
             }
 
@@ -846,7 +836,7 @@ private fun StepActionCard(
                     fontFamily = BricolageFamily,
                     fontWeight = FontWeight.Bold,
                     fontSize = 19.sp,
-                    color = palette.titleColor.copy(alpha = effectiveAlpha),
+                    color = RawColors.Cream.copy(alpha = effectiveAlpha),
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis
                 )
@@ -857,7 +847,7 @@ private fun StepActionCard(
                     fontWeight = FontWeight.Medium,
                     fontSize = 13.5.sp,
                     lineHeight = 18.sp,
-                    color = palette.subtitleColor.copy(alpha = effectiveAlpha),
+                    color = RawColors.TextMuted.copy(alpha = effectiveAlpha),
                     maxLines = 2,
                     overflow = TextOverflow.Ellipsis
                 )

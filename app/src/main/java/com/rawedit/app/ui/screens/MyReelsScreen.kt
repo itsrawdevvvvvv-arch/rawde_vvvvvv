@@ -144,7 +144,7 @@ fun MyReelsScreen(
             .fillMaxSize()
             .statusBarsPadding()
             .verticalScroll(rememberScrollState())
-            .padding(bottom = 24.dp)
+            .padding(bottom = 130.dp)
     ) {
         StaggerIn(0) {
             Column(modifier = Modifier.padding(horizontal = 20.dp)) {
@@ -214,29 +214,27 @@ fun MyReelsScreen(
             }
 
             StaggerIn(3) {
-                Row(
+                Column(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(top = 12.dp),
-                    horizontalArrangement = Arrangement.Center,
-                    verticalAlignment = Alignment.CenterVertically
+                        .padding(top = 14.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally
                 ) {
-                    entries.indices.forEach { index ->
-                        val active = index == pagerState.currentPage
-                        Box(
-                            modifier = Modifier
-                                .padding(horizontal = 3.dp)
-                                .size(if (active) 8.dp else 6.dp)
-                                .clip(CircleShape)
-                                .background(if (active) RawColors.Tan else RawColors.DividerStrong)
-                        )
+                    Row(
+                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        entries.indices.forEach { index ->
+                            val active = index == pagerState.currentPage
+                            Box(
+                                modifier = Modifier
+                                    .size(width = if (active) 18.dp else 6.dp, height = 6.dp)
+                                    .clip(CircleShape)
+                                    .background(if (active) RawColors.Tan else RawColors.DividerStrong)
+                            )
+                        }
                     }
-                }
-                Spacer(Modifier.height(8.dp))
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.Center
-                ) {
+                    Spacer(Modifier.height(10.dp))
                     DomeMono(
                         text = "${pagerState.currentPage + 1} / ${entries.size} · swipe to browse",
                         size = 10
