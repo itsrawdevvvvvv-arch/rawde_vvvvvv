@@ -384,8 +384,10 @@ fun RawChatbotScreen(
                     Text(
                         text = "AI Assistant",
                         fontFamily = BricolageFamily,
-                        fontWeight = FontWeight.Bold,
-                        fontSize = 18.sp,
+                        fontWeight = FontWeight.ExtraBold,
+                        fontSize = 20.sp,
+                        lineHeight = 22.sp,
+                        letterSpacing = (-0.6).sp,
                         color = RawColors.TextPrimary
                     )
                     Text(
@@ -439,15 +441,13 @@ fun RawChatbotScreen(
                     ) {
                         RawPixelMascot(kind = PixelMascotKind.CODE_BOT, size = 58.dp)
                         Spacer(modifier = Modifier.height(16.dp))
-                        Text(
-                            text = "HOW CAN I\nHELP TODAY?",
-                            fontFamily = BricolageFamily,
-                            fontWeight = FontWeight.Bold,
-                            fontSize = 30.sp,
-                            lineHeight = 33.sp,
-                            letterSpacing = (-0.8).sp,
-                            textAlign = TextAlign.Center,
-                            color = RawColors.TextPrimary
+                        com.rawedit.app.ui.components.DomeHeadline(
+                            parts = listOf(
+                                com.rawedit.app.ui.components.DomeHeadPart.Plain("How can I\nhelp "),
+                                com.rawedit.app.ui.components.DomeHeadPart.Tag("today?")
+                            ),
+                            size = 34.dp,
+                            align = TextAlign.Center
                         )
                         Spacer(modifier = Modifier.height(26.dp))
                         Column(
