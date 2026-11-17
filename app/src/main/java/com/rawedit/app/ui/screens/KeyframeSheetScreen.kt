@@ -400,13 +400,16 @@ fun KeyframeSheetScreen(
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 CircleActionButton(icon = RawIconType.BACK, onClick = onBack, size = 44.dp)
-                Text(
-                    text = "Contact Sheet",
-                    fontFamily = BricolageFamily,
-                    fontWeight = FontWeight.Bold,
-                    fontSize = 20.sp,
-                    color = RawColors.TextPrimary
-                )
+                Column(modifier = Modifier.weight(1f)) {
+                    com.rawedit.app.ui.components.DomeEyebrow("12 · Pre-render check")
+                    com.rawedit.app.ui.components.DomeHeadline(
+                        parts = listOf(
+                            com.rawedit.app.ui.components.DomeHeadPart.Plain("Contact "),
+                            com.rawedit.app.ui.components.DomeHeadPart.Tag("sheet")
+                        ),
+                        size = 30.dp
+                    )
+                }
                 RawPixelMascot(kind = PixelMascotKind.LENS_BOT, size = 36.dp)
             }
 
