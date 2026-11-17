@@ -155,15 +155,17 @@ fun DomeHeadline(
             }
         }
     }
+    // Every display heading is rendered 25% larger than its base token.
+    val scaled = size.value * 1.25f
     Text(
         text = annotated,
         fontFamily = BricolageFamily,
-        fontSize = size.value.sp,
+        fontSize = scaled.sp,
         // Compose clips glyphs when lineHeight < fontSize, so keep the line box
         // at least 1.04x the type size and tighten the look with letter spacing.
-        lineHeight = (size.value * lineHeightFactor.coerceAtLeast(1.04f)).sp,
+        lineHeight = (scaled * lineHeightFactor.coerceAtLeast(1.04f)).sp,
         fontWeight = FontWeight.ExtraBold,
-        letterSpacing = (-0.035f * size.value).sp,
+        letterSpacing = (-0.035f * scaled).sp,
         color = color,
         textAlign = align,
         style = TextStyle(

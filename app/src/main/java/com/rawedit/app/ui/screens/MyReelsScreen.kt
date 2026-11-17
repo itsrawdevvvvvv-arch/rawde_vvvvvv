@@ -6,6 +6,7 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.aspectRatio
@@ -14,7 +15,10 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.pager.HorizontalPager
+import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -31,11 +35,13 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
+import coil.compose.AsyncImage
 import com.rawedit.app.data.local.ProjectEntity
 import com.rawedit.app.data.local.VideoEntity
 import com.rawedit.app.ui.components.DomeButtonKind
@@ -52,10 +58,25 @@ import com.rawedit.app.ui.icons.RawIcon
 import com.rawedit.app.ui.icons.RawIconType
 import com.rawedit.app.ui.theme.BricolageFamily
 import com.rawedit.app.ui.theme.RawColors
+import java.io.File
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 import kotlin.math.roundToInt
+
+/** One entry in the reel carousel — a draft project or a rendered video. */
+private data class ReelEntry(
+    val id: Long,
+    val isDraft: Boolean,
+    val badge: String,
+    val duration: String,
+    val headline: String,
+    val title: String,
+    val meta: String,
+    val thumbnail: String?,
+    val project: ProjectEntity? = null,
+    val video: VideoEntity? = null
+)
 
 @Composable
 fun MyReelsScreen(
@@ -73,78 +94,152 @@ fun MyReelsScreen(
     var deleteVideoTarget by remember { mutableStateOf<VideoEntity?>(null) }
     var deleteProjectTarget by remember { mutableStateOf<ProjectEntity?>(null) }
 
-    val drafts = projects
-    val finished = videos
-    val showDrafts = filter != "Finished"
-    val showFinished = filter != "Drafts"
-
-    Column(
-        modifier = Modifier
-            .fillMaxSize()
-            .verticalScroll(rememberScrollState())
-            .padding(horizontal = 20.dp)
-            .padding(top = 16.dp, bottom = 24.dp)
-    ) {
-        StaggerIn(0) {
-            DomeHeadline(
-                parts = listOf(DomeHeadPart.Plain("My "), DomeHeadPart.Tag("reels")),
-                size = 44.dp,
-                lineHeightFactor = 0.95f
-            )
-        }
-
-        StaggerIn(1) {
-            DomeChipRow {
-                listOf("All", "Drafts", "Finished").forEach { f ->
-                    DomeChip(text = f, active = filter == f) { filter = f }
+    val entries = remember(projects, videos, filter) {
+        buildList {
+            if (filter != "Finished") {
+                projects.forEach { p ->
+                    add(
+                        ReelEntry(
+                            id = p.id,
+                            isDraft = true,
+                            badge = "Draft",
+                            duration = formatClock(p.audioDurationSec),
+                            headline = artLabel(p.title),
+                            title = p.title.ifBlank { "Untitled reel" },
+                            meta = buildString {
+                                append(if (p.code.isNotBlank()) "Code ready" else "Waiting for code")
+                                append(" · ")
+                                append(shortDate(p.updatedAt))
+                            },
+                            thumbnail = null,
+                            project = p
+                        )
+                    )
                 }
             }
-        }
-
-        if (showDrafts && drafts.isEmpty() && showFinished && finished.isEmpty()) {
-            StaggerIn(2) {
-                EmptyReels()
-            }
-        }
-
-        if (showDrafts) {
-            drafts.forEachIndexed { index, project ->
-                StaggerIn(2 + index) {
-                    ReelCard(
-                        badge = "Draft",
-                        duration = formatClock(project.audioDurationSec),
-                        headline = artLabel(project.title),
-                        title = project.title.ifBlank { "Untitled reel" },
-                        meta = buildString {
-                            append(if (project.code.isNotBlank()) "Code ready" else "Waiting for code")
-                            append(" · ")
-                            append(relativeDate(project.updatedAt))
-                        },
-                        dark = true,
-                        onOpen = { onOpenProject(project.id, Offset.Zero) },
-                        onRename = null,
-                        onDelete = { deleteProjectTarget = project }
+            if (filter != "Drafts") {
+                videos.forEach { v ->
+                    add(
+                        ReelEntry(
+                            id = v.id,
+                            isDraft = false,
+                            badge = "1080p",
+                            duration = formatClock(v.durationSec),
+                            headline = artLabel(v.title),
+                            title = v.title.ifBlank { "Untitled reel" },
+                            meta = "${formatSize(v.sizeBytes)} · ${shortDate(v.createdAt)}",
+                            thumbnail = v.thumbnailPath.takeIf { it.isNotBlank() && File(it).exists() },
+                            video = v
+                        )
                     )
                 }
             }
         }
+    }
 
-        if (showFinished) {
-            finished.forEachIndexed { index, video ->
-                StaggerIn(2 + drafts.size + index) {
-                    ReelCard(
-                        badge = "1080p",
-                        duration = formatClock(video.durationSec),
-                        headline = artLabel(video.title),
-                        title = video.title.ifBlank { "Untitled reel" },
-                        meta = "${formatSize(video.sizeBytes)} · ${relativeDate(video.createdAt)}",
-                        dark = false,
-                        onOpen = { onPlayVideo(video.id, Offset.Zero) },
-                        onRename = {
-                            renameTarget = video
-                            renameDraft = video.title
+    val pagerState = rememberPagerState(pageCount = { entries.size.coerceAtLeast(1) })
+
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .statusBarsPadding()
+            .verticalScroll(rememberScrollState())
+            .padding(bottom = 24.dp)
+    ) {
+        StaggerIn(0) {
+            Column(modifier = Modifier.padding(horizontal = 20.dp)) {
+                DomeHeadline(
+                    parts = listOf(DomeHeadPart.Plain("My "), DomeHeadPart.Tag("reels")),
+                    size = 44.dp,
+                    lineHeightFactor = 0.95f
+                )
+            }
+        }
+
+        StaggerIn(1) {
+            Column(modifier = Modifier.padding(horizontal = 20.dp)) {
+                DomeChipRow {
+                    listOf("All", "Drafts", "Finished").forEach { f ->
+                        DomeChip(text = f, active = filter == f) { filter = f }
+                    }
+                }
+            }
+        }
+
+        if (entries.isEmpty()) {
+            Column(modifier = Modifier.padding(horizontal = 20.dp)) {
+                Spacer(Modifier.height(18.dp))
+                DomeMuted("Nothing here yet — tap + to make your first reel.")
+                Spacer(Modifier.height(14.dp))
+                DomePillButton(
+                    text = "Start creating",
+                    kind = DomeButtonKind.Primary,
+                    trailingArrow = true,
+                    onClick = {}
+                )
+            }
+        } else {
+            StaggerIn(2) {
+                HorizontalPager(
+                    state = pagerState,
+                    contentPadding = PaddingValues(horizontal = 20.dp),
+                    pageSpacing = 12.dp,
+                    modifier = Modifier.fillMaxWidth()
+                ) { page ->
+                    val entry = entries.getOrNull(page) ?: return@HorizontalPager
+                    ReelCarouselCard(
+                        entry = entry,
+                        onOpen = {
+                            if (entry.isDraft) {
+                                entry.project?.let { onOpenProject(it.id, Offset.Zero) }
+                            } else {
+                                entry.video?.let { onPlayVideo(it.id, Offset.Zero) }
+                            }
                         },
-                        onDelete = { deleteVideoTarget = video }
+                        onRename = {
+                            entry.video?.let {
+                                renameTarget = it
+                                renameDraft = it.title
+                            }
+                        },
+                        onDelete = {
+                            if (entry.isDraft) {
+                                entry.project?.let { deleteProjectTarget = it }
+                            } else {
+                                entry.video?.let { deleteVideoTarget = it }
+                            }
+                        }
+                    )
+                }
+            }
+
+            StaggerIn(3) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(top = 12.dp),
+                    horizontalArrangement = Arrangement.Center,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    entries.indices.forEach { index ->
+                        val active = index == pagerState.currentPage
+                        Box(
+                            modifier = Modifier
+                                .padding(horizontal = 3.dp)
+                                .size(if (active) 8.dp else 6.dp)
+                                .clip(CircleShape)
+                                .background(if (active) RawColors.Tan else RawColors.DividerStrong)
+                        )
+                    }
+                }
+                Spacer(Modifier.height(8.dp))
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.Center
+                ) {
+                    DomeMono(
+                        text = "${pagerState.currentPage + 1} / ${entries.size} · swipe to browse",
+                        size = 10
                     )
                 }
             }
@@ -188,65 +283,126 @@ fun MyReelsScreen(
 }
 
 @Composable
-private fun ReelCard(
-    badge: String,
-    duration: String,
-    headline: String,
-    title: String,
-    meta: String,
-    dark: Boolean,
+private fun ReelCarouselCard(
+    entry: ReelEntry,
     onOpen: () -> Unit,
-    onRename: (() -> Unit)?,
+    onRename: () -> Unit,
     onDelete: () -> Unit
 ) {
     Column(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(bottom = 12.dp)
-            .clip(RoundedCornerShape(24.dp))
+            .clip(RoundedCornerShape(26.dp))
             .background(RawColors.CardSurface)
-            .border(1.dp, RawColors.Divider, RoundedCornerShape(24.dp))
+            .border(1.dp, RawColors.Divider, RoundedCornerShape(26.dp))
     ) {
+        // ---- thumbnail stage: the actual reel frame sits behind the labels
         Box(
             modifier = Modifier
                 .fillMaxWidth()
-                .aspectRatio(16f / 9f)
-                .clip(RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp))
+                .aspectRatio(4f / 5f)
+                .clip(RoundedCornerShape(topStart = 26.dp, topEnd = 26.dp))
                 .background(
-                    if (dark) {
+                    if (entry.isDraft) {
                         Brush.linearGradient(listOf(Color(0xFF101013), Color(0xFF1C1C20)))
                     } else {
-                        Brush.linearGradient(listOf(Color(0x33C89F72), Color(0xFF171718)))
+                        Brush.linearGradient(listOf(Color(0xFF23231F), Color(0xFF141416)))
                     }
                 )
                 .clickable { onOpen() }
-                .padding(14.dp)
         ) {
+            val thumb = entry.thumbnail
+            if (thumb != null) {
+                AsyncImage(
+                    model = File(thumb),
+                    contentDescription = entry.title,
+                    contentScale = ContentScale.Crop,
+                    modifier = Modifier.fillMaxSize()
+                )
+                // scrim so the labels stay readable over real footage
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .background(
+                            Brush.verticalGradient(
+                                listOf(
+                                    Color(0x66000000),
+                                    Color(0x00000000),
+                                    Color(0xB3000000)
+                                )
+                            )
+                        )
+                )
+            } else {
+                // no rendered frame yet (draft): show the art label on a soft grid
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .background(
+                            Brush.radialGradient(
+                                listOf(Color(0x33C89F72), Color(0x00000000))
+                            )
+                        )
+                )
+            }
+
             Row(
-                modifier = Modifier.fillMaxWidth(),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(14.dp),
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.Top
             ) {
-                DomeChip(text = badge, active = true)
-                DomeMono(text = duration, size = 10, color = RawColors.Cream)
+                DomeChip(text = entry.badge, active = true)
+                Box(
+                    modifier = Modifier
+                        .clip(CircleShape)
+                        .background(Color(0x99000000))
+                        .padding(horizontal = 9.dp, vertical = 4.dp)
+                ) {
+                    Text(
+                        text = entry.duration,
+                        fontFamily = com.rawedit.app.ui.theme.JetBrainsMonoFamily,
+                        fontSize = 10.5.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = RawColors.Cream
+                    )
+                }
             }
+
             Text(
-                text = headline,
+                text = entry.headline,
                 fontFamily = BricolageFamily,
-                fontSize = 19.sp,
-                lineHeight = 20.sp,
+                fontSize = 22.sp,
+                lineHeight = 23.sp,
                 fontWeight = FontWeight.ExtraBold,
                 color = RawColors.Cream,
-                maxLines = 2,
+                maxLines = 3,
                 overflow = TextOverflow.Ellipsis,
                 modifier = Modifier
                     .align(Alignment.BottomStart)
-                    .fillMaxWidth(0.85f)
+                    .padding(14.dp)
+                    .fillMaxWidth(0.9f)
             )
+
+            // play affordance for finished reels
+            if (!entry.isDraft) {
+                Box(
+                    modifier = Modifier
+                        .align(Alignment.Center)
+                        .size(52.dp)
+                        .clip(CircleShape)
+                        .background(Color(0x59F3EFE6)),
+                    contentAlignment = Alignment.Center
+                ) {
+                    RawIcon(type = RawIconType.PLAY, size = 22.dp, tint = RawColors.Cream)
+                }
+            }
         }
+
         Column(modifier = Modifier.padding(horizontal = 14.dp, vertical = 12.dp)) {
             Text(
-                text = title,
+                text = entry.title,
                 fontFamily = BricolageFamily,
                 fontSize = 14.sp,
                 fontWeight = FontWeight.Bold,
@@ -261,9 +417,9 @@ private fun ReelCard(
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                DomeMono(text = meta, size = 10.5f.toInt())
+                DomeMono(text = entry.meta, size = 10)
                 Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                    if (onRename != null) {
+                    if (!entry.isDraft) {
                         MiniAction(icon = RawIconType.EDIT, tint = RawColors.TextMuted, onClick = onRename)
                     }
                     MiniAction(icon = RawIconType.TRASH, tint = RawColors.Danger, onClick = onDelete)
@@ -288,51 +444,33 @@ private fun MiniAction(icon: RawIconType, tint: Color, onClick: () -> Unit) {
     }
 }
 
+/** Shared action row used by the profile and reels bottom sheets. */
 @Composable
-private fun EmptyReels() {
-    Column(
+fun SheetActionRow(
+    icon: RawIconType,
+    label: String,
+    tint: Color = RawColors.TextPrimary,
+    onClick: () -> Unit
+) {
+    Row(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(vertical = 26.dp),
-        horizontalAlignment = Alignment.CenterHorizontally
+            .clip(RoundedCornerShape(16.dp))
+            .clickable { onClick() }
+            .padding(horizontal = 14.dp, vertical = 14.dp),
+        verticalAlignment = Alignment.CenterVertically
     ) {
-        DomeMuted("Nothing here yet — tap + to make your first reel.")
-        Spacer(Modifier.height(14.dp))
-        DomePillButton(
-            text = "Start creating",
-            kind = DomeButtonKind.Primary,
-            trailingArrow = true,
-            onClick = {}
+        RawIcon(type = icon, size = 17.dp, tint = tint, strokeWidth = 1.9.dp)
+        Spacer(Modifier.width(12.dp))
+        Text(
+            text = label,
+            fontFamily = BricolageFamily,
+            fontSize = 14.sp,
+            fontWeight = FontWeight.Bold,
+            color = tint
         )
     }
 }
-
-private fun artLabel(title: String): String {
-    val words = title
-        .replace(Regex("[_\\-.]+"), " ")
-        .replace(Regex("\\.(mp4|wav|m4a|mp3|aac|mov)$", RegexOption.IGNORE_CASE), "")
-        .trim()
-        .split(" ")
-        .filter { it.isNotBlank() }
-        .take(3)
-    if (words.isEmpty()) return "RAW EDIT"
-    return words.joinToString(" ") { it.uppercase() }
-}
-
-private fun formatClock(seconds: Double): String {
-    val total = seconds.roundToInt().coerceAtLeast(0)
-    return "%d:%02d".format(total / 60, total % 60)
-}
-
-private fun formatSize(bytes: Long): String {
-    if (bytes <= 0L) return "0 KB"
-    val kb = bytes / 1024.0
-    val mb = kb / 1024.0
-    return if (mb >= 1.0) "%.1f MB".format(mb) else "%.0f KB".format(kb)
-}
-
-private fun relativeDate(millis: Long): String =
-    SimpleDateFormat("MMM d", Locale.US).format(Date(millis))
 
 @Composable
 private fun RenameReelDialog(
@@ -388,30 +526,29 @@ private fun RenameReelDialog(
     }
 }
 
-/** Shared action row used by the profile and reels bottom sheets. */
-@Composable
-fun SheetActionRow(
-    icon: RawIconType,
-    label: String,
-    tint: Color = RawColors.TextPrimary,
-    onClick: () -> Unit
-) {
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .clip(RoundedCornerShape(16.dp))
-            .clickable { onClick() }
-            .padding(horizontal = 14.dp, vertical = 14.dp),
-        verticalAlignment = Alignment.CenterVertically
-    ) {
-        RawIcon(type = icon, size = 17.dp, tint = tint, strokeWidth = 1.9.dp)
-        Spacer(Modifier.width(12.dp))
-        Text(
-            text = label,
-            fontFamily = BricolageFamily,
-            fontSize = 14.sp,
-            fontWeight = FontWeight.Bold,
-            color = tint
-        )
-    }
+private fun artLabel(title: String): String {
+    val words = title
+        .replace(Regex("[_\\-.]+"), " ")
+        .replace(Regex("\\.(mp4|wav|m4a|mp3|aac|mov)$", RegexOption.IGNORE_CASE), "")
+        .trim()
+        .split(" ")
+        .filter { it.isNotBlank() }
+        .take(3)
+    if (words.isEmpty()) return "RAW EDIT"
+    return words.joinToString(" ") { it.uppercase() }
 }
+
+private fun formatClock(seconds: Double): String {
+    val total = seconds.roundToInt().coerceAtLeast(0)
+    return "%d:%02d".format(total / 60, total % 60)
+}
+
+private fun formatSize(bytes: Long): String {
+    if (bytes <= 0L) return "0 KB"
+    val kb = bytes / 1024.0
+    val mb = kb / 1024.0
+    return if (mb >= 1.0) "%.1f MB".format(mb) else "%.0f KB".format(kb)
+}
+
+private fun shortDate(millis: Long): String =
+    SimpleDateFormat("MMM d", Locale.US).format(Date(millis))
