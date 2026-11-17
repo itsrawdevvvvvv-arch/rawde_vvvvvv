@@ -300,7 +300,7 @@ private fun ReelCarouselCard(
         Box(
             modifier = Modifier
                 .fillMaxWidth()
-                .aspectRatio(4f / 5f)
+                .aspectRatio(16f / 9f)
                 .clip(RoundedCornerShape(topStart = 26.dp, topEnd = 26.dp))
                 .background(
                     if (entry.isDraft) {

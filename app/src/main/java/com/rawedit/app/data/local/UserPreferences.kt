@@ -43,7 +43,8 @@ data class UserProfile(
     val geminiApiKey: String = "",
     val aiProviderRoute: String = AiProvider.GEMINI_FREE.id,
     val geminiTaskRoute: String = GeminiTaskRoute.BALANCED_AUTO.id,
-    val customPromptNotes: String = ""
+    val customPromptNotes: String = "",
+    val domeHomeOnly: Boolean = false
 ) {
     val hasGroqKey: Boolean
         get() = groqApiKey.isNotBlank()
@@ -147,6 +148,7 @@ class UserPreferences(private val context: Context) {
         val USER_NAME = stringPreferencesKey("user_name")
         val PHOTO_PATH = stringPreferencesKey("profile_photo_path")
         val ONBOARDING_DONE = booleanPreferencesKey("onboarding_done")
+        val DOME_HOME_ONLY = booleanPreferencesKey("dome_home_only")
         val JOIN_DATE = longPreferencesKey("join_date_millis")
         val GROQ_API_KEY = stringPreferencesKey("groq_api_key")
         val GROQ_MODEL_PREF = stringPreferencesKey("groq_model_pref")
@@ -193,7 +195,8 @@ class UserPreferences(private val context: Context) {
             geminiApiKey = prefs[Keys.GEMINI_API_KEY] ?: "",
             aiProviderRoute = prefs[Keys.AI_PROVIDER_ROUTE] ?: AiProvider.GEMINI_FREE.id,
             geminiTaskRoute = prefs[Keys.GEMINI_TASK_ROUTE] ?: GeminiTaskRoute.BALANCED_AUTO.id,
-            customPromptNotes = prefs[Keys.CUSTOM_PROMPT_NOTES] ?: ""
+            customPromptNotes = prefs[Keys.CUSTOM_PROMPT_NOTES] ?: "",
+            domeHomeOnly = prefs[Keys.DOME_HOME_ONLY] ?: false
         )
     }
 
@@ -339,6 +342,10 @@ class UserPreferences(private val context: Context) {
     }
 
 
+
+    suspend fun saveDomeHomeOnly(enabled: Boolean) {
+        context.dataStore.edit { it[Keys.DOME_HOME_ONLY] = enabled }
+    }
 
     suspend fun saveCustomPromptNotes(notes: String) {
         context.dataStore.edit { prefs ->

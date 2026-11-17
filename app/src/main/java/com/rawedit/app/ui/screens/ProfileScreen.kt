@@ -83,7 +83,8 @@ fun ProfileScreen(
     onOpenGroqKey: () -> Unit,
     onSwitchGroqKey: () -> Unit,
     onRefreshGroqQuota: () -> Unit,
-    onOpenChatbot: () -> Unit = {}
+    onOpenChatbot: () -> Unit = {},
+    onToggleDomeHomeOnly: (Boolean) -> Unit = {}
 ) {
     val scope = rememberCoroutineScope()
     var editingId by remember { mutableStateOf(false) }
@@ -294,6 +295,16 @@ fun ProfileScreen(
             )
         }
         StaggerIn(5) {
+            DomePillCard(
+                title = "Show character only on Home",
+                subtitle = if (userProfile.domeHomeOnly) "Hidden on other screens" else "Character follows you everywhere",
+                leading = { SettingsIcon(RawIconType.SPARK) },
+                trailing = if (userProfile.domeHomeOnly) "On" else "Off",
+                onClick = { onToggleDomeHomeOnly(!userProfile.domeHomeOnly) }
+            )
+        }
+
+        StaggerIn(6) {
             DomePillCard(
                 title = "About raw_edit",
                 subtitle = "Version 1.58.0 · offline renderer",

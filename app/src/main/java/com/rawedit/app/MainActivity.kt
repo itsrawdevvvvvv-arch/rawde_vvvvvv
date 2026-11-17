@@ -444,6 +444,9 @@ private fun MainAuthenticatedHost(
                                     onRefreshGroqQuota = { refreshGroqQuota(silent = false) },
                                     onOpenChatbot = {
                                         pushRoute(AppRoute.Chatbot(projects.firstOrNull()?.id))
+                                    },
+                                    onToggleDomeHomeOnly = { enabled ->
+                                        scope.launch { container.userPreferences.saveDomeHomeOnly(enabled) }
                                     }
                                 )
                             }
@@ -844,7 +847,10 @@ private fun MainAuthenticatedHost(
             }
         }
 
-        val showDome = currentRoute !is AppRoute.Chatbot && currentRoute !is AppRoute.TimelineEditor
+        val onHomeTab = currentRoute == AppRoute.Tabs && currentTab == MainTab.HOME
+        val showDome = currentRoute !is AppRoute.Chatbot &&
+            currentRoute !is AppRoute.TimelineEditor &&
+            (!userProfile.domeHomeOnly || onHomeTab)
         val domeSpeech = when (currentRoute) {
             AppRoute.Tabs -> when (currentTab) {
                 MainTab.HOME -> "Voice in, reel out"

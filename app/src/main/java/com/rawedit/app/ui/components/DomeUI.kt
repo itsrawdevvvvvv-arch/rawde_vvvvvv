@@ -155,8 +155,8 @@ fun DomeHeadline(
             }
         }
     }
-    // Every display heading is rendered 25% larger than its base token.
-    val scaled = size.value * 1.25f
+    // Display headings render 55% larger than their base token.
+    val scaled = size.value * 1.55f
     Text(
         text = annotated,
         fontFamily = BricolageFamily,

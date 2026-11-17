@@ -487,7 +487,14 @@ fun KineticIntroSplash(
                 speechText = "Tap anywhere to start",
                 visible = true,
                 isHappyState = true,
-                modifier = Modifier.align(Alignment.BottomCenter).navigationBarsPadding()
+                modifier = Modifier
+                    .align(Alignment.BottomCenter)
+                    .navigationBarsPadding()
+                    .graphicsLayer(
+                        scaleX = 1.3f,
+                        scaleY = 1.3f,
+                        transformOrigin = androidx.compose.ui.graphics.TransformOrigin(0.5f, 1f)
+                    )
             )
         }
     }
