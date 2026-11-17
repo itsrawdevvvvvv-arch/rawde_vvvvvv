@@ -105,6 +105,7 @@ import com.rawedit.app.ui.icons.RawIconType
 import com.rawedit.app.ui.icons.RawPixelMascot
 import com.rawedit.app.ui.motion.FeatheredScrollEdges
 import com.rawedit.app.ui.motion.KineticHeading
+import com.rawedit.app.ui.components.DomeHeadline
 import com.rawedit.app.ui.motion.RawEasings
 import com.rawedit.app.ui.motion.RawPressButton
 import com.rawedit.app.ui.motion.SplitFlapText
@@ -294,10 +295,13 @@ fun AddVoiceScreen(
                 RawPixelMascot(kind = PixelMascotKind.MIC_BOT, size = 40.dp)
             }
 
-            KineticHeading(
-                words = listOf("Add", "your", "voice"),
-                style = RawTypography.headlineLarge,
-                highlightLastWord = true
+            DomeHeadline(
+                parts = listOf(
+                    com.rawedit.app.ui.components.DomeHeadPart.Plain("Add your "),
+                    com.rawedit.app.ui.components.DomeHeadPart.Tag("voice")
+                ),
+                size = 44.dp,
+                lineHeightFactor = 0.95f
             )
 
             // Dashed Tan Dropzone (.dz, 24dp)
@@ -1087,10 +1091,13 @@ fun CopyPromptScreen(
                 }
             }
 
-            KineticHeading(
-                words = listOf("Copy", "prompt"),
-                style = RawTypography.headlineLarge,
-                highlightLastWord = true
+            DomeHeadline(
+                parts = listOf(
+                    com.rawedit.app.ui.components.DomeHeadPart.Plain("Prompt & "),
+                    com.rawedit.app.ui.components.DomeHeadPart.Tag("zip")
+                ),
+                size = 44.dp,
+                lineHeightFactor = 0.95f
             )
 
             Text(
@@ -1790,10 +1797,13 @@ fun CodePasteScreen(
                 }
             }
 
-            KineticHeading(
-                words = listOf("Have", "a", "code?"),
-                style = RawTypography.headlineLarge,
-                highlightLastWord = true
+            DomeHeadline(
+                parts = listOf(
+                    com.rawedit.app.ui.components.DomeHeadPart.Plain("Paste "),
+                    com.rawedit.app.ui.components.DomeHeadPart.Tag("code")
+                ),
+                size = 44.dp,
+                lineHeightFactor = 0.95f
             )
 
             Row(
