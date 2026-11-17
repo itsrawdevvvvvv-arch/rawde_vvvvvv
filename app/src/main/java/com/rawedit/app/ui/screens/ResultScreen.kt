@@ -206,9 +206,7 @@ fun ResultScreen(
                         com.rawedit.app.ui.components.DomeHeadPart.Tag("ready")
                     ),
                     size = 44.dp,
-                    lineHeightFactor = 0.95f
-                ),
-                    highlightLastWord = true,
+                    lineHeightFactor = 0.95f,
                     modifier = Modifier.weight(1f)
                 )
                 RawPixelMascot(
