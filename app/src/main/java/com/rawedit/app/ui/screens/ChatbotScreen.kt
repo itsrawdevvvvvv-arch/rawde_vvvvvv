@@ -121,6 +121,9 @@ import com.rawedit.app.ui.components.CircleActionButton
 import com.rawedit.app.ui.components.FormatHelpers
 import com.rawedit.app.ui.components.RawToastBanner
 import com.rawedit.app.ui.icons.PixelMascotKind
+import com.rawedit.app.ui.components.DomePillButton
+import com.rawedit.app.ui.components.DomeButtonKind
+import com.rawedit.app.ui.components.DomeHeadline
 import com.rawedit.app.ui.icons.RawIcon
 import com.rawedit.app.ui.icons.RawIconType
 import com.rawedit.app.ui.icons.RawPixelMascot
@@ -168,6 +171,8 @@ fun RawChatbotScreen(
     onOpenApiKeySettings: () -> Unit,
     onOpenDesignStudio: () -> Unit = {},
     onCreateProjectFromHtml: (htmlPath: String, title: String, aspectId: String) -> Unit = { _, _, _ -> },
+    initialPrompt: String? = null,
+    onApplyHtml: ((String) -> Unit)? = null,
     onBack: () -> Unit
 ) {
     val context = LocalContext.current
@@ -200,6 +205,12 @@ fun RawChatbotScreen(
     var pendingBrowserTitle by remember { mutableStateOf<String?>(null) }
 
     var inputText by remember { mutableStateOf("") }
+
+    androidx.compose.runtime.LaunchedEffect(initialPrompt) {
+        if (!initialPrompt.isNullOrBlank() && inputText.isBlank()) {
+            inputText = initialPrompt
+        }
+    }
     var pendingAttachment by remember { mutableStateOf<ChatUploadedFile?>(null) }
     var uploadingFile by remember { mutableStateOf(false) }
     val activeBgSessions by ChatbotBackgroundManager.activeSessions.collectAsState()
@@ -506,6 +517,7 @@ fun RawChatbotScreen(
                         items(messages, key = { it.id }) { msg ->
                             ChatBubbleRow(
                                 msg = msg,
+                                onApplyHtml = onApplyHtml,
                                 onCopyFull = { copyFullText(msg.text) },
                                 onSelectText = { keyboard?.hide(); selectingText = msg.text },
                                 onViewFile = { path ->
@@ -1341,7 +1353,8 @@ private fun ChatBubbleRow(
     onViewFile: (String) -> Unit,
     onSaveFile: (String, String) -> Unit,
     onOpenAsMotionProject: (String, String) -> Unit = { _, _ -> },
-    onPreviewWebsite: (String) -> Unit
+    onPreviewWebsite: (String) -> Unit,
+    onApplyHtml: ((String) -> Unit)? = null
 ) {
     val latestCopy by rememberUpdatedState(onCopyFull)
     val latestSelect by rememberUpdatedState(onSelectText)
@@ -1405,6 +1418,17 @@ private fun ChatBubbleRow(
                 )
             } else {
                 RichFormattedMessage(text = msg.text)
+                if (onApplyHtml != null) {
+                    val htmlBlock = remember(msg.text) { extractHtmlBlock(msg.text) }
+                    if (htmlBlock != null) {
+                        DomePillButton(
+                            text = "Do the changes",
+                            kind = DomeButtonKind.Primary,
+                            trailingArrow = true,
+                            onClick = { onApplyHtml.invoke(htmlBlock) }
+                        )
+                    }
+                }
             }
 
             if (msg.appliedActions.isNotEmpty()) {
@@ -2315,4 +2339,15 @@ private fun InAppAiBrowserDialog(
             )
         }
     }
+}
+
+/** Pulls the first ```html fenced block (or a bare <!DOCTYPE …> document) out of a reply. */
+private fun extractHtmlBlock(text: String): String? {
+    val fenced = Regex("```(?:html)?\\s*([\\s\\S]*?)```").find(text)?.groupValues?.getOrNull(1)
+    if (!fenced.isNullOrBlank() && fenced.contains("<")) return fenced.trim()
+    val start = text.indexOf("<!DOCTYPE", ignoreCase = true)
+    if (start >= 0) return text.substring(start).trim()
+    val htmlTag = text.indexOf("<html", ignoreCase = true)
+    if (htmlTag >= 0) return text.substring(htmlTag).trim()
+    return null
 }

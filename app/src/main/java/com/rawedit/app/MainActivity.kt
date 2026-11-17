@@ -194,6 +194,8 @@ private fun MainAuthenticatedHost(
     val geminiRouter = remember { GeminiWaterfallRouter(context) }
     var backStack by remember { mutableStateOf<List<AppRoute>>(listOf(AppRoute.Tabs)) }
     var currentTab by remember { mutableStateOf(MainTab.HOME) }
+    var createHubProjectId by remember { mutableStateOf<Long?>(null) }
+    var pendingChatPrompt by remember { mutableStateOf<String?>(null) }
     var isForward by remember { mutableStateOf(true) }
     var navigatingNewDraft by remember { mutableStateOf(false) }
     var showGroqKeyDialog by remember { mutableStateOf(false) }
@@ -323,7 +325,13 @@ private fun MainAuthenticatedHost(
                 try {
                     val activeDraft = projects.firstOrNull { it.state == ProjectEntity.STATE_IN_PROGRESS }
                     val projectId = activeDraft?.id ?: container.repository.createEmptyProject()
-                    pushRoute(AppRoute.CreateHub(projectId))
+                    // stay inside the tab host so the + tab animates like every other tab
+                    createHubProjectId = projectId
+                    isForward = true
+                    if (currentRoute != AppRoute.Tabs) {
+                        backStack = listOf(AppRoute.Tabs)
+                    }
+                    currentTab = MainTab.CREATE
                 } finally {
                     navigatingNewDraft = false
                 }
@@ -405,7 +413,43 @@ private fun MainAuthenticatedHost(
                                     onRefreshGroqQuota = { refreshGroqQuota(silent = true) }
                                 )
 
-                                MainTab.CREATE -> Unit
+                                MainTab.CREATE -> {
+                                    val hubId = createHubProjectId
+                                    if (hubId != null) {
+                                        val hubProject by container.repository.observeProject(hubId)
+                                            .collectAsState(initial = null)
+                                        hubProject?.let { proj ->
+                                            val hubAttached = remember(proj.attachedAssetIds, allAssets) {
+                                                val ids = RawEditRepository.parseAttachedAssetIds(proj.attachedAssetIds).toSet()
+                                                allAssets.count { it.id in ids }
+                                            }
+                                            CreateHubScreen(
+                                                project = proj,
+                                                attachedAssetCount = hubAttached,
+                                                cacheManager = container.cacheManager,
+                                                userProfile = userProfile,
+                                                userPreferences = container.userPreferences,
+                                                geminiRouter = geminiRouter,
+                                                onBack = { switchTab(MainTab.HOME) },
+                                                onDeleteProject = {
+                                                    scope.launch {
+                                                        container.repository.deleteProject(proj)
+                                                        createHubProjectId = null
+                                                        switchTab(MainTab.HOME)
+                                                    }
+                                                },
+                                                onOpenAddVoice = { pushRoute(AppRoute.AddVoice(proj.id)) },
+                                                onOpenAssetLocker = { pushRoute(AppRoute.AssetLocker(proj.id)) },
+                                                onOpenCopyPrompt = { pushRoute(AppRoute.CopyPrompt(proj.id)) },
+                                                onOpenCodePaste = { pushRoute(AppRoute.CodePaste(proj.id)) },
+                                                onOpenKeyframeSheet = { pushRoute(AppRoute.KeyframeSheet(proj.id)) },
+                                                onOpenTimelineEditor = { pushRoute(AppRoute.TimelineEditor(proj.id)) },
+                                                onOpenChatbot = { pushRoute(AppRoute.Chatbot(proj.id)) },
+                                                onSwipeCreate = { _ -> pushRoute(AppRoute.Rendering(proj.id)) }
+                                            )
+                                        }
+                                    }
+                                }
 
                                 MainTab.REELS -> MyReelsScreen(
                                     projects = projects,
@@ -662,6 +706,10 @@ private fun MainAuthenticatedHost(
                             quotaExhausted = userProfile.groqQuotaExhausted,
                             quotaBadgeText = userProfile.quotaSummaryText(),
                             onBack = ::popRoute,
+                            onSendToAi = { prompt ->
+                                pendingChatPrompt = prompt
+                                pushRoute(AppRoute.Chatbot(proj.id))
+                            },
                             onEditCode = {
                                 if (backStack.getOrNull(backStack.lastIndex - 1) is AppRoute.CodePaste) {
                                     popRoute()
@@ -763,6 +811,18 @@ private fun MainAuthenticatedHost(
                         geminiRouter = geminiRouter,
                         onOpenApiKeySettings = { openGroqDialog(switchMode = false) },
                         onOpenDesignStudio = { pushRoute(AppRoute.OpenDesign) },
+                        initialPrompt = pendingChatPrompt,
+                        onApplyHtml = { html ->
+                            scope.launch {
+                                val stored = container.cacheManager.persistHtmlCode(route.projectId ?: 0L, html)
+                                val target = projects.firstOrNull { it.id == route.projectId }
+                                if (target != null) {
+                                    container.repository.saveProject(target.copy(code = stored))
+                                }
+                                pendingChatPrompt = null
+                                popRoute()
+                            }
+                        },
                         onCreateProjectFromHtml = { htmlPath, title, aspectId ->
                             scope.launch {
                                 val html = runCatching { File(htmlPath).readText(Charsets.UTF_8) }.getOrDefault("")

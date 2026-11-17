@@ -139,7 +139,6 @@ fun OpenDesignScreen(
                 Row(verticalAlignment = Alignment.Top, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                     CircleActionButton(icon = RawIconType.BACK, size = 40.dp, onClick = onBack)
                     Column(modifier = Modifier.weight(1f)) {
-                        com.rawedit.app.ui.components.DomeEyebrow("14 · Open Design")
                         com.rawedit.app.ui.components.DomeHeadline(
                             parts = listOf(
                                 com.rawedit.app.ui.components.DomeHeadPart.Plain("Design\n"),

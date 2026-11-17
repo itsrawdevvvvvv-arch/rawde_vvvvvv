@@ -91,7 +91,6 @@ fun ProfileSetupScreen(
             .padding(horizontal = 20.dp)
             .padding(top = 18.dp, bottom = 28.dp)
     ) {
-        StaggerIn(0) { DomeEyebrow("02 · Profile Setup") }
 
         StaggerIn(1) {
             DomeHeadline(

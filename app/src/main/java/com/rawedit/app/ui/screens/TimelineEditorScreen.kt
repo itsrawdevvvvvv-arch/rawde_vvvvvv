@@ -325,7 +325,6 @@ fun TimelineEditorScreen(
             ) {
                 CircleActionButton(icon = RawIconType.BACK, size = 36.dp, onClick = onBack)
                 Column(verticalArrangement = Arrangement.spacedBy(1.dp)) {
-                    com.rawedit.app.ui.components.DomeEyebrow("13 · Layer timeline")
                     Text(
                         text = project.title.ifBlank { "Timeline" },
                         fontFamily = BricolageFamily,
