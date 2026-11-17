@@ -1,27 +1,33 @@
 package com.rawedit.app.ui.screens
 
 import android.content.ClipData
+import android.content.ClipboardManager
+import android.content.Context
 import android.content.Intent
 import android.os.Build
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -35,36 +41,40 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
-import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalHapticFeedback
-import androidx.compose.ui.text.AnnotatedString
+import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.content.FileProvider
 import com.rawedit.app.data.CacheManager
 import com.rawedit.app.data.local.UserProfile
 import com.rawedit.app.domain.GeminiWaterfallRouter
-import com.rawedit.app.domain.InstantPaletteEngine
 import com.rawedit.app.domain.PaletteColorMath
+import com.rawedit.app.domain.InstantPaletteEngine
 import com.rawedit.app.domain.PaletteExporter
 import com.rawedit.app.domain.PaletteJsonCodec
 import com.rawedit.app.domain.PaletteState
-import com.rawedit.app.ui.components.DomeButtonKind
-import com.rawedit.app.ui.components.DomeChip
-import com.rawedit.app.ui.components.DomeHeadPart
-import com.rawedit.app.ui.components.DomeHeadline
-import com.rawedit.app.ui.components.DomeMono
-import com.rawedit.app.ui.components.DomeMuted
-import com.rawedit.app.ui.components.DomePillButton
-import com.rawedit.app.ui.components.StaggerIn
+import com.rawedit.app.ui.components.BigPrimaryButton
+import com.rawedit.app.ui.components.RawSecondaryButton
+import com.rawedit.app.ui.components.RawToastBanner
+import com.rawedit.app.ui.icons.PixelMascotKind
+import com.rawedit.app.ui.icons.RawIcon
+import com.rawedit.app.ui.icons.RawIconType
+import com.rawedit.app.ui.icons.RawPixelMascot
+import com.rawedit.app.ui.motion.FeatheredScrollEdges
+import com.rawedit.app.ui.motion.RawPressButton
 import com.rawedit.app.ui.theme.BricolageFamily
 import com.rawedit.app.ui.theme.JetBrainsMonoFamily
 import com.rawedit.app.ui.theme.RawColors
+import com.rawedit.app.ui.theme.RawTypography
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import java.io.File
+import java.util.Locale
 
 @Composable
 fun PaletteScreen(
@@ -79,7 +89,6 @@ fun PaletteScreen(
 ) {
     val context = LocalContext.current
     val haptic = LocalHapticFeedback.current
-    val clipboard = LocalClipboardManager.current
     val scope = rememberCoroutineScope()
     val scrollState = rememberScrollState()
 
@@ -92,6 +101,7 @@ fun PaletteScreen(
     var exporting by remember { mutableStateOf(false) }
     var errorMsg by remember { mutableStateOf<String?>(null) }
     var toastMsg by remember { mutableStateOf<String?>(null) }
+    var autoFetchedOnce by remember { mutableStateOf(false) }
     var pendingPngFile by remember { mutableStateOf<File?>(null) }
 
     LaunchedEffect(toastMsg) {
@@ -121,9 +131,9 @@ fun PaletteScreen(
         }
     }
 
+    val hasGeminiKey = userProfile.hasGeminiKey
+
     fun regeneratePalette() {
-        if (generating) return
-        generating = true
         errorMsg = null
         val targetNumber = if (userProfile.paletteJson.isBlank()) {
             userProfile.paletteCounter.coerceAtLeast(1)
@@ -137,7 +147,13 @@ fun PaletteScreen(
         onSavePaletteState(targetNumber + 1, PaletteJsonCodec.encode(palette))
         haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
         toastMsg = "Palette #${palette.numFormatted} ready"
-        generating = false
+    }
+
+    LaunchedEffect(userProfile.geminiApiKey, userProfile.paletteJson) {
+        if (userProfile.hasGeminiKey && userProfile.paletteJson.isBlank() && !autoFetchedOnce) {
+            autoFetchedOnce = true
+            regeneratePalette()
+        }
     }
 
     fun exportPng(share: Boolean) {
@@ -180,191 +196,353 @@ fun PaletteScreen(
                 }
             }.onFailure { err ->
                 exporting = false
-                errorMsg = err.message ?: "Could not render PNG"
+                toastMsg = err.message ?: "Could not render PNG"
             }
         }
     }
 
     val swatches = currentPalette.colors
-    val roles = listOf("primary", "accent", "surface")
+    val c0Hex = swatches.firstOrNull()?.hex ?: "#DCC9A9"
+    val c0Color = Color(PaletteColorMath.parseColorInt(c0Hex))
 
-    Column(
+    Box(
         modifier = Modifier
             .fillMaxSize()
             .background(RawColors.BgPrimary)
             .statusBarsPadding()
-            .verticalScroll(scrollState)
-            .padding(horizontal = 20.dp)
-            .padding(top = 16.dp, bottom = 28.dp)
     ) {
-        StaggerIn(0) {
-            DomeHeadline(
-                parts = listOf(DomeHeadPart.Plain("Palette")),
-                size = 44.dp,
-                lineHeightFactor = 0.95f
-            )
-        }
-
-        StaggerIn(1) {
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .verticalScroll(scrollState)
+                .padding(start = 18.dp, end = 18.dp, top = 8.dp, bottom = 128.dp),
+            verticalArrangement = Arrangement.spacedBy(14.dp)
+        ) {
+            // Clean header without Gemini Free API Key button
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(bottom = 12.dp),
+                    .height(54.dp),
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Text(
-                    text = "#${currentPalette.numFormatted} · ${currentPalette.mood}",
-                    fontFamily = BricolageFamily,
-                    fontSize = 17.sp,
-                    fontWeight = FontWeight.ExtraBold,
-                    color = RawColors.Cream
+                    text = "STUDIO PALETTES",
+                    fontFamily = JetBrainsMonoFamily,
+                    fontWeight = FontWeight.Bold,
+                    fontSize = 12.sp,
+                    letterSpacing = 0.8.sp,
+                    color = RawColors.TextMuted
                 )
-                DomeChip(text = "Copy", active = true) {
-                    clipboard.setText(AnnotatedString(currentPalette.pairing))
-                    toastMsg = "Prompt copied"
-                }
+                RawPixelMascot(kind = PixelMascotKind.PEEKING_CAT, size = 34.dp)
             }
-        }
 
-        swatches.take(3).forEachIndexed { index, swatch ->
-            StaggerIn(2 + index) {
-                val bg = Color(PaletteColorMath.parseColorInt(swatch.hex))
-                val ink = Color(PaletteColorMath.contrastInkArgb(swatch.hex))
-                Box(
+            errorMsg?.let { err ->
+                Column(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(bottom = 10.dp)
-                        .clip(RoundedCornerShape(26.dp))
-                        .background(bg)
-                        .border(1.dp, RawColors.Divider, RoundedCornerShape(26.dp))
-                        .clickable {
-                            clipboard.setText(AnnotatedString(swatch.hex))
-                            toastMsg = "Copied ${swatch.hex}"
-                        }
-                        .padding(horizontal = 18.dp, vertical = 18.dp)
+                        .clip(RoundedCornerShape(20.dp))
+                        .background(RawColors.ErrorSoft)
+                        .padding(14.dp),
+                    verticalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    Text(
+                        text = err,
+                        fontFamily = BricolageFamily,
+                        fontWeight = FontWeight.SemiBold,
+                        fontSize = 14.sp,
+                        color = RawColors.ErrorCoral
+                    )
+                }
+            }
+
+            // #0D0D0D Poster Card
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(30.dp))
+                    .background(Color(0xFF0D0D0D))
+                    .border(1.dp, Color(0x18F7ECE6), RoundedCornerShape(30.dp))
+                    .padding(20.dp)
+            ) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.Top
                 ) {
                     Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(10.dp)
                     ) {
                         Text(
-                            text = "0${index + 1}",
+                            text = currentPalette.numFormatted,
                             fontFamily = BricolageFamily,
-                            fontSize = 22.sp,
-                            fontWeight = FontWeight.ExtraBold,
-                            color = ink
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 44.sp,
+                            lineHeight = 44.sp,
+                            letterSpacing = (-1.6).sp,
+                            style = TextStyle(fontFeatureSettings = "tnum"),
+                            color = c0Color
                         )
-                        Column(horizontalAlignment = Alignment.End) {
-                            Text(
-                                text = roles.getOrElse(index) { swatch.name },
-                                fontFamily = BricolageFamily,
-                                fontSize = 12.sp,
-                                fontWeight = FontWeight.Bold,
-                                color = ink
-                            )
-                            Text(
-                                text = swatch.hex.uppercase(),
-                                fontFamily = JetBrainsMonoFamily,
-                                fontSize = 11.sp,
-                                color = ink.copy(alpha = 0.75f)
-                            )
+                        Text(
+                            text = "COLOR\nINSPIRATION",
+                            fontFamily = JetBrainsMonoFamily,
+                            fontWeight = FontWeight.SemiBold,
+                            fontSize = 11.sp,
+                            lineHeight = 14.sp,
+                            letterSpacing = 0.5.sp,
+                            color = Color(0xFFE6E0D8)
+                        )
+                    }
+
+                    Text(
+                        text = "COLOR\nPALETTE",
+                        fontFamily = JetBrainsMonoFamily,
+                        fontWeight = FontWeight.SemiBold,
+                        fontSize = 11.sp,
+                        lineHeight = 14.sp,
+                        letterSpacing = 0.5.sp,
+                        textAlign = TextAlign.End,
+                        color = Color(0xFFE6E0D8)
+                    )
+                }
+
+                Spacer(modifier = Modifier.height(16.dp))
+
+                Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                    for (i in 0 until 3) {
+                        val swatch = swatches.getOrElse(i) { PaletteState.DEFAULT_SWATCHES[i] }
+                        val normalizedHex = PaletteColorMath.normalizeHex(swatch.hex)
+                        val rowBg = Color(PaletteColorMath.parseColorInt(normalizedHex))
+                        val rowInk = Color(PaletteColorMath.contrastInkArgb(normalizedHex))
+
+                        RawPressButton(
+                            onClick = {
+                                val cb = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+                                cb.setPrimaryClip(ClipData.newPlainText("hex color", normalizedHex))
+                                haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                                toastMsg = "Copied $normalizedHex"
+                            }
+                        ) {
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .height(96.dp)
+                                    .clip(RoundedCornerShape(18.dp))
+                                    .background(rowBg)
+                                    .padding(horizontal = 16.dp, vertical = 12.dp)
+                            ) {
+                                Text(
+                                    text = String.format(Locale.US, "%02d", i + 1),
+                                    fontFamily = BricolageFamily,
+                                    fontWeight = FontWeight.Bold,
+                                    fontSize = 54.sp,
+                                    lineHeight = 54.sp,
+                                    letterSpacing = (-2.0).sp,
+                                    style = TextStyle(fontFeatureSettings = "tnum"),
+                                    color = rowInk,
+                                    modifier = Modifier.align(Alignment.CenterStart)
+                                )
+
+                                Column(
+                                    modifier = Modifier
+                                        .align(Alignment.CenterEnd)
+                                        .fillMaxHeight()
+                                        .padding(start = 78.dp),
+                                    horizontalAlignment = Alignment.End,
+                                    verticalArrangement = Arrangement.SpaceBetween
+                                ) {
+                                    Text(
+                                        text = swatch.name.lowercase(Locale.US),
+                                        fontFamily = BricolageFamily,
+                                        fontWeight = FontWeight.Bold,
+                                        fontSize = 16.5.sp,
+                                        color = rowInk,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis
+                                    )
+                                    Text(
+                                        text = normalizedHex,
+                                        fontFamily = JetBrainsMonoFamily,
+                                        fontWeight = FontWeight.SemiBold,
+                                        fontSize = 13.5.sp,
+                                        color = rowInk.copy(alpha = 0.92f)
+                                    )
+                                }
+                            }
                         }
                     }
                 }
-            }
-        }
 
-        StaggerIn(5) {
+                Spacer(modifier = Modifier.height(18.dp))
+
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        text = "DESIGN \u2014 RAW_EDIT",
+                        fontFamily = JetBrainsMonoFamily,
+                        fontWeight = FontWeight.SemiBold,
+                        fontSize = 11.sp,
+                        letterSpacing = 0.6.sp,
+                        color = Color(0xFFC9C2BA)
+                    )
+                    Text(
+                        text = "@raw_edit",
+                        fontFamily = JetBrainsMonoFamily,
+                        fontWeight = FontWeight.SemiBold,
+                        fontSize = 11.sp,
+                        letterSpacing = 0.5.sp,
+                        color = Color(0xFFC9C2BA)
+                    )
+                }
+            }
+
+            // Mood & Cloud AI Pairing Card
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(28.dp))
+                    .background(RawColors.CardSurface)
+                    .padding(18.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        text = currentPalette.mood,
+                        fontFamily = BricolageFamily,
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 20.sp,
+                        color = RawColors.TextPrimary,
+                        modifier = Modifier.weight(1f)
+                    )
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Box(
+                        modifier = Modifier
+                            .clip(CircleShape)
+                            .background(RawColors.AccentSoft)
+                            .padding(horizontal = 12.dp, vertical = 5.dp)
+                    ) {
+                        Text(
+                            text = "Ready for Claude",
+                            fontFamily = JetBrainsMonoFamily,
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 11.5.sp,
+                            color = RawColors.Tan
+                        )
+                    }
+                }
+                Text(
+                    text = currentPalette.pairing,
+                    style = RawTypography.bodyMedium.copy(fontSize = 14.5.sp, lineHeight = 20.5.sp),
+                    color = RawColors.TextMuted
+                )
+
+                Spacer(modifier = Modifier.height(4.dp))
+
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.End
+                ) {
+                    RawSecondaryButton(
+                        text = "Copy palette prompt",
+                        height = 38.dp,
+                        leadingIcon = RawIconType.COPY,
+                        fillWidth = false,
+                        onClick = {
+                            val colorsSummary = currentPalette.colors.mapIndexed { idx, s ->
+                                "0${idx + 1} (${s.name}): ${s.hex}"
+                            }.joinToString(", ")
+                            val promptSnippet = "COLOR PALETTE (#${currentPalette.numFormatted} - ${currentPalette.mood}):\n${currentPalette.pairing}\nColors: $colorsSummary"
+                            val cb = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+                            cb.setPrimaryClip(ClipData.newPlainText("palette prompt", promptSnippet))
+                            haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                            toastMsg = "Copied palette prompt"
+                        }
+                    )
+                }
+            }
+
+            // Action row: Regenerate + Download PNG
             Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(bottom = 10.dp),
-                horizontalArrangement = Arrangement.SpaceBetween
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(10.dp)
             ) {
-                DomeMono(text = "DESIGN — RAW_EDIT", size = 10)
-                DomeMono(text = "@raw_edit", size = 10)
-            }
-        }
+                RawPressButton(
+                    onClick = { regeneratePalette() },
+                    enabled = !generating,
+                    modifier = Modifier.weight(1f)
+                ) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(56.dp)
+                            .clip(CircleShape)
+                            .background(RawColors.RaisedCard)
+                            .padding(horizontal = 14.dp),
+                        horizontalArrangement = Arrangement.Center,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        if (generating) {
+                            CircularProgressIndicator(
+                                color = RawColors.Tan,
+                                strokeWidth = 2.dp,
+                                modifier = Modifier.size(16.dp)
+                            )
+                        } else {
+                            RawIcon(RawIconType.REFRESH, size = 17.dp, tint = RawColors.TextPrimary)
+                        }
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text(
+                            text = if (generating) "Generating..." else "Regenerate",
+                            fontFamily = BricolageFamily,
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 15.sp,
+                            color = RawColors.TextPrimary,
+                            maxLines = 1,
+                            softWrap = false
+                        )
+                    }
+                }
 
-        StaggerIn(6) {
-            DomePillButton(
-                text = if (generating) "Generating…" else "Next Palette",
-                kind = DomeButtonKind.Primary,
-                enabled = !generating,
-                onClick = { regeneratePalette() }
+                BigPrimaryButton(
+                    text = if (exporting) "Exporting..." else "Download PNG",
+                    height = 56.dp,
+                    enabled = !exporting,
+                    leadingIcon = RawIconType.DOWNLOAD,
+                    onClick = { exportPng(share = false) },
+                    modifier = Modifier.weight(1f)
+                )
+            }
+
+            RawSecondaryButton(
+                text = "Share PNG to Claude",
+                height = 52.dp,
+                leadingIcon = RawIconType.SHARE,
+                enabled = !exporting,
+                onClick = { exportPng(share = true) }
             )
-            Spacer(Modifier.height(8.dp))
         }
 
-        StaggerIn(7) {
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                Box(modifier = Modifier.weight(1f)) {
-                    DomePillButton(
-                        text = if (exporting) "Exporting…" else "Export PNG",
-                        kind = DomeButtonKind.Ghost,
-                        enabled = !exporting,
-                        onClick = { exportPng(share = false) }
-                    )
-                }
-                Box(modifier = Modifier.weight(1f)) {
-                    DomePillButton(
-                        text = "Share",
-                        kind = DomeButtonKind.Ghost,
-                        enabled = !exporting,
-                        onClick = { exportPng(share = true) }
-                    )
-                }
-            }
-        }
+        FeatheredScrollEdges(
+            scrollState = scrollState,
+            topHeight = 46.dp,
+            bottomHeight = 120.dp,
+            alwaysShowBottom = true
+        )
 
-        StaggerIn(8) {
-            Spacer(Modifier.height(10.dp))
-            DomeMuted(currentPalette.pairing)
-        }
-
-        errorMsg?.let { err ->
-            Spacer(Modifier.height(10.dp))
-            Box(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .clip(RoundedCornerShape(18.dp))
-                    .background(RawColors.ErrorSoft)
-                    .padding(14.dp)
-            ) {
-                Text(
-                    text = err,
-                    fontFamily = BricolageFamily,
-                    fontSize = 12.5.sp,
-                    fontWeight = FontWeight.SemiBold,
-                    color = RawColors.ErrorCoral
-                )
-            }
-        }
-    }
-
-    toastMsg?.let { message ->
-        Box(
+        RawToastBanner(
+            message = toastMsg,
             modifier = Modifier
-                .fillMaxSize()
-                .padding(bottom = 120.dp),
-            contentAlignment = Alignment.BottomCenter
-        ) {
-            Box(
-                modifier = Modifier
-                    .clip(RoundedCornerShape(999.dp))
-                    .background(RawColors.Cream)
-                    .padding(horizontal = 16.dp, vertical = 9.dp)
-            ) {
-                Text(
-                    text = message,
-                    fontFamily = JetBrainsMonoFamily,
-                    fontSize = 11.sp,
-                    fontWeight = FontWeight.Bold,
-                    color = RawColors.Ink
-                )
-            }
-        }
+                .align(Alignment.BottomCenter)
+                .navigationBarsPadding()
+                .padding(bottom = 104.dp)
+        )
     }
 }

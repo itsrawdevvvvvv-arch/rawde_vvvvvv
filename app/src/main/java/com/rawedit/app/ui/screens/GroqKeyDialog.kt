@@ -129,12 +129,12 @@ fun AiQuotaDialog(
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                com.rawedit.app.ui.components.DomeHeadline(
-                    parts = listOf(
-                        com.rawedit.app.ui.components.DomeHeadPart.Plain("AI & "),
-                        com.rawedit.app.ui.components.DomeHeadPart.Tag("quota")
-                    ),
-                    size = 26.dp
+                Text(
+                    text = "Gemini API Key",
+                    fontFamily = BricolageFamily,
+                    fontWeight = FontWeight.Bold,
+                    fontSize = 22.sp,
+                    color = RawColors.TextPrimary
                 )
                 CircleActionButton(
                     icon = RawIconType.CLOSE,

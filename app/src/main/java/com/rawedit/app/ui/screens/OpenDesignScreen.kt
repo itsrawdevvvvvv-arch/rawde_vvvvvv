@@ -136,16 +136,10 @@ fun OpenDesignScreen(
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                Row(verticalAlignment = Alignment.Top, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                     CircleActionButton(icon = RawIconType.BACK, size = 40.dp, onClick = onBack)
-                    Column(modifier = Modifier.weight(1f)) {
-                        com.rawedit.app.ui.components.DomeHeadline(
-                            parts = listOf(
-                                com.rawedit.app.ui.components.DomeHeadPart.Plain("Design\n"),
-                                com.rawedit.app.ui.components.DomeHeadPart.Tag("studio")
-                            ),
-                            size = 34.dp
-                        )
+                    Column {
+                        Text("Open Design Studio", fontFamily = BricolageFamily, fontWeight = FontWeight.Bold, fontSize = 18.sp, color = RawColors.TextPrimary)
                         Text("Local-first DESIGN.md + Motion.md", fontFamily = JetBrainsMonoFamily, fontSize = 11.sp, color = RawColors.Tan)
                     }
                 }

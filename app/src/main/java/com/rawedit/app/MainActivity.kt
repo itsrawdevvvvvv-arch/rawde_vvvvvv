@@ -40,8 +40,6 @@ import com.rawedit.app.domain.PaletteState
 import com.rawedit.app.ui.components.MainTab
 import com.rawedit.app.ui.components.RawBottomNavBar
 import com.rawedit.app.ui.components.RawToastBanner
-import com.rawedit.app.ui.motion.CuteDomeCharacter
-import com.rawedit.app.ui.motion.KineticIntroSplash
 import com.rawedit.app.ui.motion.RawScreenTransition
 import com.rawedit.app.ui.motion.RawTabMorphTransition
 import com.rawedit.app.ui.screens.AddVoiceScreen
@@ -140,9 +138,6 @@ private fun RawEditAppRoot(container: AppContainer) {
         else -> RootStage.PROFILE_SETUP
     }
 
-    var showIntroSplash by remember { mutableStateOf(true) }
-
-    Box(modifier = Modifier.fillMaxSize()) {
     RawScreenTransition(
         targetState = rootStage,
         isForward = true
@@ -167,12 +162,6 @@ private fun RawEditAppRoot(container: AppContainer) {
             )
         }
     }
-
-    KineticIntroSplash(
-        visible = showIntroSplash,
-        onDismiss = { showIntroSplash = false }
-    )
-    }
 }
 
 @Composable
@@ -194,8 +183,6 @@ private fun MainAuthenticatedHost(
     val geminiRouter = remember { GeminiWaterfallRouter(context) }
     var backStack by remember { mutableStateOf<List<AppRoute>>(listOf(AppRoute.Tabs)) }
     var currentTab by remember { mutableStateOf(MainTab.HOME) }
-    var createHubProjectId by remember { mutableStateOf<Long?>(null) }
-    var pendingChatPrompt by remember { mutableStateOf<String?>(null) }
     var isForward by remember { mutableStateOf(true) }
     var navigatingNewDraft by remember { mutableStateOf(false) }
     var showGroqKeyDialog by remember { mutableStateOf(false) }
@@ -325,13 +312,7 @@ private fun MainAuthenticatedHost(
                 try {
                     val activeDraft = projects.firstOrNull { it.state == ProjectEntity.STATE_IN_PROGRESS }
                     val projectId = activeDraft?.id ?: container.repository.createEmptyProject()
-                    // stay inside the tab host so the + tab animates like every other tab
-                    createHubProjectId = projectId
-                    isForward = true
-                    if (currentRoute != AppRoute.Tabs) {
-                        backStack = listOf(AppRoute.Tabs)
-                    }
-                    currentTab = MainTab.CREATE
+                    pushRoute(AppRoute.CreateHub(projectId))
                 } finally {
                     navigatingNewDraft = false
                 }
@@ -373,7 +354,6 @@ private fun MainAuthenticatedHost(
                         ) { tab ->
                             when (tab) {
                                 MainTab.HOME -> {
-                                    val recentDraft = projects.firstOrNull { it.state == ProjectEntity.STATE_IN_PROGRESS }
                                     HomeScreen(
                                         userProfile = userProfile,
                                         reelsCount = videos.size,
@@ -392,11 +372,7 @@ private fun MainAuthenticatedHost(
                                         },
                                         onOpenChatbot = {
                                             pushRoute(AppRoute.Chatbot(projects.firstOrNull()?.id))
-                                        },
-                                        onOpenPalette = { switchTab(MainTab.PALETTE) },
-                                        onOpenOpenDesign = { pushRoute(AppRoute.OpenDesign) },
-                                        onOpenReels = { switchTab(MainTab.REELS) },
-                                        recentDraftDurationSec = recentDraft?.audioDurationSec ?: 0.0
+                                        }
                                     )
                                 }
 
@@ -413,43 +389,7 @@ private fun MainAuthenticatedHost(
                                     onRefreshGroqQuota = { refreshGroqQuota(silent = true) }
                                 )
 
-                                MainTab.CREATE -> {
-                                    val hubId = createHubProjectId
-                                    if (hubId != null) {
-                                        val hubProject by container.repository.observeProject(hubId)
-                                            .collectAsState(initial = null)
-                                        hubProject?.let { proj ->
-                                            val hubAttached = remember(proj.attachedAssetIds, allAssets) {
-                                                val ids = RawEditRepository.parseAttachedAssetIds(proj.attachedAssetIds).toSet()
-                                                allAssets.count { it.id in ids }
-                                            }
-                                            CreateHubScreen(
-                                                project = proj,
-                                                attachedAssetCount = hubAttached,
-                                                cacheManager = container.cacheManager,
-                                                userProfile = userProfile,
-                                                userPreferences = container.userPreferences,
-                                                geminiRouter = geminiRouter,
-                                                onBack = { switchTab(MainTab.HOME) },
-                                                onDeleteProject = {
-                                                    scope.launch {
-                                                        container.repository.deleteProject(proj)
-                                                        createHubProjectId = null
-                                                        switchTab(MainTab.HOME)
-                                                    }
-                                                },
-                                                onOpenAddVoice = { pushRoute(AppRoute.AddVoice(proj.id)) },
-                                                onOpenAssetLocker = { pushRoute(AppRoute.AssetLocker(proj.id)) },
-                                                onOpenCopyPrompt = { pushRoute(AppRoute.CopyPrompt(proj.id)) },
-                                                onOpenCodePaste = { pushRoute(AppRoute.CodePaste(proj.id)) },
-                                                onOpenKeyframeSheet = { pushRoute(AppRoute.KeyframeSheet(proj.id)) },
-                                                onOpenTimelineEditor = { pushRoute(AppRoute.TimelineEditor(proj.id)) },
-                                                onOpenChatbot = { pushRoute(AppRoute.Chatbot(proj.id)) },
-                                                onSwipeCreate = { _ -> pushRoute(AppRoute.Rendering(proj.id)) }
-                                            )
-                                        }
-                                    }
-                                }
+                                MainTab.CREATE -> Unit
 
                                 MainTab.REELS -> MyReelsScreen(
                                     projects = projects,
@@ -488,16 +428,16 @@ private fun MainAuthenticatedHost(
                                     onRefreshGroqQuota = { refreshGroqQuota(silent = false) },
                                     onOpenChatbot = {
                                         pushRoute(AppRoute.Chatbot(projects.firstOrNull()?.id))
-                                    },
-                                    onToggleDomeHomeOnly = { enabled ->
-                                        scope.launch { container.userPreferences.saveDomeHomeOnly(enabled) }
                                     }
                                 )
                             }
                         }
 
-
-
+                        RawBottomNavBar(
+                            currentTab = currentTab,
+                            onSelectTab = ::switchTab,
+                            modifier = Modifier.align(Alignment.BottomCenter)
+                        )
                     }
                 }
 
@@ -706,10 +646,6 @@ private fun MainAuthenticatedHost(
                             quotaExhausted = userProfile.groqQuotaExhausted,
                             quotaBadgeText = userProfile.quotaSummaryText(),
                             onBack = ::popRoute,
-                            onSendToAi = { prompt ->
-                                pendingChatPrompt = prompt
-                                pushRoute(AppRoute.Chatbot(proj.id))
-                            },
                             onEditCode = {
                                 if (backStack.getOrNull(backStack.lastIndex - 1) is AppRoute.CodePaste) {
                                     popRoute()
@@ -811,18 +747,6 @@ private fun MainAuthenticatedHost(
                         geminiRouter = geminiRouter,
                         onOpenApiKeySettings = { openGroqDialog(switchMode = false) },
                         onOpenDesignStudio = { pushRoute(AppRoute.OpenDesign) },
-                        initialPrompt = pendingChatPrompt,
-                        onApplyHtml = { html ->
-                            scope.launch {
-                                val stored = container.cacheManager.persistHtmlCode(route.projectId ?: 0L, html)
-                                val target = projects.firstOrNull { it.id == route.projectId }
-                                if (target != null) {
-                                    container.repository.saveProject(target.copy(code = stored))
-                                }
-                                pendingChatPrompt = null
-                                popRoute()
-                            }
-                        },
                         onCreateProjectFromHtml = { htmlPath, title, aspectId ->
                             scope.launch {
                                 val html = runCatching { File(htmlPath).readText(Charsets.UTF_8) }.getOrDefault("")
@@ -905,44 +829,6 @@ private fun MainAuthenticatedHost(
                     }
                 }
             }
-        }
-
-        val onHomeTab = currentRoute == AppRoute.Tabs && currentTab == MainTab.HOME
-        val showDome = currentRoute !is AppRoute.Chatbot &&
-            currentRoute !is AppRoute.TimelineEditor &&
-            (!userProfile.domeHomeOnly || onHomeTab)
-        val domeSpeech = when (currentRoute) {
-            AppRoute.Tabs -> when (currentTab) {
-                MainTab.HOME -> "Voice in, reel out"
-                MainTab.PALETTE -> "Tap Next for fresh vibes"
-                MainTab.CREATE -> "Pick a reel level"
-                MainTab.REELS -> "Swipe through your reels"
-                MainTab.PROFILE -> "Creator ID & settings"
-            }
-            is AppRoute.CreateHub -> "Pick any aspect ratio!"
-            is AppRoute.AddVoice -> "1-word SRT generator"
-            is AppRoute.AssetLocker -> "Custom .ttf/.otf & clips"
-            is AppRoute.CopyPrompt -> "Style Pack bundled"
-            is AppRoute.CodePaste -> "HTML syntax validated"
-            is AppRoute.KeyframeSheet -> "Inspect frames before render"
-            AppRoute.OpenDesign -> "Poster · Motion · Deck · UI"
-            is AppRoute.Rendering -> "1080p hardware capture"
-            is AppRoute.Result -> "Reel ready to share!"
-            is AppRoute.Chatbot, is AppRoute.TimelineEditor -> ""
-        }
-        CuteDomeCharacter(
-            speechText = domeSpeech,
-            visible = showDome,
-            isHappyState = (currentRoute == AppRoute.Tabs && currentTab == MainTab.HOME) || currentRoute is AppRoute.Result,
-            modifier = Modifier.align(Alignment.BottomCenter)
-        )
-
-        if (currentRoute == AppRoute.Tabs) {
-            RawBottomNavBar(
-                currentTab = currentTab,
-                onSelectTab = ::switchTab,
-                modifier = Modifier.align(Alignment.BottomCenter)
-            )
         }
 
         RawToastBanner(

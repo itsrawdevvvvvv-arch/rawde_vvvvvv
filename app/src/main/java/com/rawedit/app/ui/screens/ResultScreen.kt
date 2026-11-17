@@ -72,7 +72,6 @@ import com.rawedit.app.ui.icons.RawIconType
 import com.rawedit.app.ui.icons.RawPixelMascot
 import com.rawedit.app.ui.motion.FeatheredScrollEdges
 import com.rawedit.app.ui.motion.KineticHeading
-import com.rawedit.app.ui.components.DomeHeadline
 import com.rawedit.app.ui.motion.RawEasings
 import com.rawedit.app.ui.motion.RawPressButton
 import com.rawedit.app.ui.motion.ResultCelebrationOverlay
@@ -200,13 +199,10 @@ fun ResultScreen(
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                DomeHeadline(
-                    parts = listOf(
-                        com.rawedit.app.ui.components.DomeHeadPart.Plain("Your reel is\n"),
-                        com.rawedit.app.ui.components.DomeHeadPart.Tag("ready")
-                    ),
-                    size = 44.dp,
-                    lineHeightFactor = 0.95f,
+                KineticHeading(
+                    words = listOf("Your", "reel", "is", "ready"),
+                    style = RawTypography.headlineLarge.copy(fontSize = 44.sp, lineHeight = 46.sp),
+                    highlightLastWord = true,
                     modifier = Modifier.weight(1f)
                 )
                 RawPixelMascot(

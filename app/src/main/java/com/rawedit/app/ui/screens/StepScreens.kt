@@ -105,7 +105,6 @@ import com.rawedit.app.ui.icons.RawIconType
 import com.rawedit.app.ui.icons.RawPixelMascot
 import com.rawedit.app.ui.motion.FeatheredScrollEdges
 import com.rawedit.app.ui.motion.KineticHeading
-import com.rawedit.app.ui.components.DomeHeadline
 import com.rawedit.app.ui.motion.RawEasings
 import com.rawedit.app.ui.motion.RawPressButton
 import com.rawedit.app.ui.motion.SplitFlapText
@@ -281,7 +280,7 @@ fun AddVoiceScreen(
             modifier = Modifier
                 .fillMaxSize()
                 .verticalScroll(scrollState)
-                .padding(start = 18.dp, end = 18.dp, bottom = 235.dp),
+                .padding(start = 18.dp, end = 18.dp, bottom = 128.dp),
             verticalArrangement = Arrangement.spacedBy(14.dp)
         ) {
             Row(
@@ -295,13 +294,10 @@ fun AddVoiceScreen(
                 RawPixelMascot(kind = PixelMascotKind.MIC_BOT, size = 40.dp)
             }
 
-            DomeHeadline(
-                parts = listOf(
-                    com.rawedit.app.ui.components.DomeHeadPart.Plain("Add your "),
-                    com.rawedit.app.ui.components.DomeHeadPart.Tag("voice")
-                ),
-                size = 44.dp,
-                lineHeightFactor = 0.95f
+            KineticHeading(
+                words = listOf("Add", "your", "voice"),
+                style = RawTypography.headlineLarge,
+                highlightLastWord = true
             )
 
             // Dashed Tan Dropzone (.dz, 24dp)
@@ -1052,7 +1048,7 @@ fun CopyPromptScreen(
             modifier = Modifier
                 .fillMaxSize()
                 .verticalScroll(scrollState)
-                .padding(start = 18.dp, end = 18.dp, bottom = 235.dp),
+                .padding(start = 18.dp, end = 18.dp, bottom = 128.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
             Row(
@@ -1091,13 +1087,10 @@ fun CopyPromptScreen(
                 }
             }
 
-            DomeHeadline(
-                parts = listOf(
-                    com.rawedit.app.ui.components.DomeHeadPart.Plain("Prompt & "),
-                    com.rawedit.app.ui.components.DomeHeadPart.Tag("zip")
-                ),
-                size = 44.dp,
-                lineHeightFactor = 0.95f
+            KineticHeading(
+                words = listOf("Copy", "prompt"),
+                style = RawTypography.headlineLarge,
+                highlightLastWord = true
             )
 
             Text(
@@ -1761,7 +1754,7 @@ fun CodePasteScreen(
     }
 
     val valid = validationResult?.takeIf { it.isValid }
-    val bottomClearance = if (valid != null) 250.dp else 235.dp
+    val bottomClearance = if (valid != null) 172.dp else 118.dp
 
     Box(
         modifier = Modifier
@@ -1797,13 +1790,10 @@ fun CodePasteScreen(
                 }
             }
 
-            DomeHeadline(
-                parts = listOf(
-                    com.rawedit.app.ui.components.DomeHeadPart.Plain("Paste "),
-                    com.rawedit.app.ui.components.DomeHeadPart.Tag("code")
-                ),
-                size = 44.dp,
-                lineHeightFactor = 0.95f
+            KineticHeading(
+                words = listOf("Have", "a", "code?"),
+                style = RawTypography.headlineLarge,
+                highlightLastWord = true
             )
 
             Row(

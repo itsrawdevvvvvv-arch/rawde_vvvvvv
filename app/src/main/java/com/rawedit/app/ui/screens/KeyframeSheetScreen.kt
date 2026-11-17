@@ -123,7 +123,6 @@ fun KeyframeSheetScreen(
     quotaBadgeText: String,
     userProfile: UserProfile? = null,
     onBack: () -> Unit,
-    onSendToAi: (String) -> Unit = {},
     onEditCode: () -> Unit,
     onApplyFixedHtml: (String, Double) -> Unit,
     onOpenGroqKey: () -> Unit,
@@ -401,15 +400,13 @@ fun KeyframeSheetScreen(
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 CircleActionButton(icon = RawIconType.BACK, onClick = onBack, size = 44.dp)
-                Column(modifier = Modifier.weight(1f)) {
-                    com.rawedit.app.ui.components.DomeHeadline(
-                        parts = listOf(
-                            com.rawedit.app.ui.components.DomeHeadPart.Plain("Contact "),
-                            com.rawedit.app.ui.components.DomeHeadPart.Tag("sheet")
-                        ),
-                        size = 30.dp
-                    )
-                }
+                Text(
+                    text = "Contact Sheet",
+                    fontFamily = BricolageFamily,
+                    fontWeight = FontWeight.Bold,
+                    fontSize = 20.sp,
+                    color = RawColors.TextPrimary
+                )
                 RawPixelMascot(kind = PixelMascotKind.LENS_BOT, size = 36.dp)
             }
 
@@ -802,25 +799,9 @@ fun KeyframeSheetScreen(
                 horizontalArrangement = Arrangement.spacedBy(10.dp)
             ) {
                 RawSecondaryButton(
-                    text = "Send to AI",
+                    text = "Fix code",
                     height = 56.dp,
-                    onClick = {
-                        val flagged = editableSamples.filter { it.isFlagged }
-                        val lines = flagged.take(12).joinToString("\n") { s2 ->
-                            val issues = (s2.warnings + s2.autoFitNotes).distinct().joinToString("; ")
-                            "#${s2.index + 1} @ ${"%.2f".format(s2.timeSec)}s${if (issues.isBlank()) "" else " — $issues"}"
-                        }
-                        val prompt = buildString {
-                            appendLine("Fix these flagged frames in my raw_edit composition.")
-                            appendLine("Total frames: ${editableSamples.size}, flagged: ${flagged.size}.")
-                            if (lines.isNotBlank()) {
-                                appendLine("Flagged frames:")
-                                appendLine(lines)
-                            }
-                            appendLine("Return the full corrected HTML document in a ```html block.")
-                        }
-                        onSendToAi(prompt)
-                    },
+                    onClick = onEditCode,
                     modifier = Modifier.weight(1f)
                 )
                 val hasAudio = project.audioUri.isNotBlank() && project.audioDurationSec > 0.0
@@ -892,41 +873,31 @@ private fun MinimalCarouselFrameSlide(
                 Box(
                     modifier = Modifier
                         .clip(CircleShape)
-                        .then(
-                            if (!sample.isFlagged) Modifier
-                                .background(RawColors.SuccessButtonBrush)
-                                .border(1.dp, RawColors.TopInnerHighlight, CircleShape)
-                            else Modifier.background(Color.Transparent)
-                        )
+                        .background(if (!sample.isFlagged) Color(0xFF2E9E5B) else Color.Transparent)
                         .clickable { onToggleFlagged(false) }
-                        .padding(horizontal = 12.dp, vertical = 6.dp)
+                        .padding(horizontal = 11.dp, vertical = 5.dp)
                 ) {
                     Text(
                         text = "\u2713 OK",
                         fontFamily = JetBrainsMonoFamily,
                         fontWeight = FontWeight.Bold,
                         fontSize = 11.sp,
-                        color = if (!sample.isFlagged) RawColors.Cream else RawColors.TextMuted
+                        color = if (!sample.isFlagged) Color.White else RawColors.TextMuted
                     )
                 }
                 Box(
                     modifier = Modifier
                         .clip(CircleShape)
-                        .then(
-                            if (sample.isFlagged) Modifier
-                                .background(RawColors.DangerButtonBrush)
-                                .border(1.dp, RawColors.TopInnerHighlight, CircleShape)
-                            else Modifier.background(Color.Transparent)
-                        )
+                        .background(if (sample.isFlagged) RawColors.ErrorCoral else Color.Transparent)
                         .clickable { onToggleFlagged(true) }
-                        .padding(horizontal = 12.dp, vertical = 6.dp)
+                        .padding(horizontal = 11.dp, vertical = 5.dp)
                 ) {
                     Text(
                         text = "\u2691 FLAGGED",
                         fontFamily = JetBrainsMonoFamily,
                         fontWeight = FontWeight.Bold,
                         fontSize = 11.sp,
-                        color = if (sample.isFlagged) RawColors.Cream else RawColors.TextMuted
+                        color = if (sample.isFlagged) Color.Black else RawColors.TextMuted
                     )
                 }
             }

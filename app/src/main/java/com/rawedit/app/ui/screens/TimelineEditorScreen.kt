@@ -328,10 +328,8 @@ fun TimelineEditorScreen(
                     Text(
                         text = project.title.ifBlank { "Timeline" },
                         fontFamily = BricolageFamily,
-                        fontWeight = FontWeight.ExtraBold,
-                        fontSize = 19.sp,
-                        lineHeight = 21.sp,
-                        letterSpacing = (-0.5).sp,
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 14.5.sp,
                         color = RawColors.TextPrimary,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis
